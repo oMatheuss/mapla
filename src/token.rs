@@ -1,0 +1,41 @@
+#[derive(Debug)]
+pub enum Token<'a> {
+    Int,
+    Real,
+    Char,
+    Bool,
+    Identifier(&'a str),
+    If,
+    While,
+    For,
+    To,
+    End,
+    Then,
+    StrLiteral(&'a str),
+    IntLiteral(i32),
+    FloatLiteral(f32),
+    True,
+    False,
+    Symbol(char),
+    Eof,
+}
+
+impl<'a> Token<'a> {
+    pub fn from_str(s: &'a str) -> Self {
+        match s {
+            "int" => Self::Int,
+            "real" => Self::Real,
+            "char" => Self::Char,
+            "bool" => Self::Bool,
+            "if" => Self::If,
+            "while" => Self::While,
+            "for" => Self::For,
+            "to" => Self::To,
+            "then" => Self::Then,
+            "end" => Self::End,
+            "true" => Self::True,
+            "false" => Self::False,
+            s => Self::Identifier(s),
+        }
+    }
+}
