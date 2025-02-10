@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::position::Position;
 use crate::token::Token;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -6,9 +7,7 @@ use std::str::Chars;
 pub struct Lexer<'a> {
     input: &'a str,
     chars: Peekable<Chars<'a>>,
-    pos: usize,
-    col: usize,
-    line: usize,
+    position: Position,
 }
 
 impl<'a> Lexer<'a> {
@@ -17,27 +16,14 @@ impl<'a> Lexer<'a> {
         Self {
             input,
             chars,
-            pos: 0,
-            col: 1,
-            line: 1,
+            position: Position::new()
         }
     }
 
     #[inline]
     fn next(&mut self) -> Option<char> {
         let ch = self.chars.next()?;
-        self.pos += ch.len_utf8();
-
-        if matches!(ch, '\n') {
-            self.line += 1;
-        }
-
-        if matches!(ch, '\n' | '\r') {
-            self.col = 1
-        } else {
-            self.col += 1
-        }
-
+        self.position.next(ch);
         Some(ch)
     }
 
@@ -47,27 +33,27 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_ident(&mut self) -> Result<Token<'a>> {
-        let start = self.pos;
+        let start = self.position.index();
         while let Some(ch) = self.peek() {
             if !ch.is_alphanumeric() {
                 break;
             }
             self.next();
         }
-        let len = self.pos;
+        let len = self.position.index();
         let idt = Token::from_str(&self.input[start..len]);
         Ok(idt)
     }
 
     fn next_number(&mut self) -> Result<Token<'a>> {
-        let start = self.pos;
+        let start = self.position.index();
         while let Some(ch) = self.peek() {
             if !ch.is_numeric() {
                 break;
             }
             self.next();
         }
-        let len = self.pos;
+        let len = self.position.index();
         let num = self.input[start..len].parse()?;
         Ok(Token::IntLiteral(num))
     }

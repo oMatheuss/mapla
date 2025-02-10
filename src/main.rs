@@ -7,6 +7,7 @@ mod error;
 mod lexer;
 mod parser;
 mod token;
+mod position;
 
 const CODE: &str = r#"
 real euler = 0
