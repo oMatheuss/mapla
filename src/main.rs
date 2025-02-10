@@ -20,8 +20,8 @@ end
 "#;
 
 fn main() -> Result<()> {
-    let lex = Lexer::from_source(CODE).into_iter();
-    let tokens = lex.colect_all()?;
+    let lex = Lexer::from_source(CODE);
+    let tokens = lex.collect_all()?;
 
     let parser = Parser::new(&tokens);
     let ast = parser.parse();

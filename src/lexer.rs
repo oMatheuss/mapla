@@ -1,50 +1,75 @@
 use crate::error::{Error, Result};
 use crate::token::Token;
-use std::iter::{Enumerate, Peekable};
+use std::iter::Peekable;
 use std::str::Chars;
 
 pub struct Lexer<'a> {
     input: &'a str,
-    chars: Peekable<Enumerate<Chars<'a>>>,
-    position: usize,
+    chars: Peekable<Chars<'a>>,
+    pos: usize,
+    col: usize,
+    line: usize,
 }
 
 impl<'a> Lexer<'a> {
     pub fn from_source(input: &'a str) -> Self {
-        let chars = input.chars().enumerate().peekable();
+        let chars = input.chars().peekable();
         Self {
             input,
             chars,
-            position: 0,
+            pos: 0,
+            col: 1,
+            line: 1,
         }
+    }
+
+    #[inline]
+    fn next(&mut self) -> Option<char> {
+        let ch = self.chars.next()?;
+        self.pos += ch.len_utf8();
+
+        if matches!(ch, '\n') {
+            self.line += 1;
+        }
+
+        if matches!(ch, '\n' | '\r') {
+            self.col = 1
+        } else {
+            self.col += 1
+        }
+
+        Some(ch)
+    }
+
+    #[inline]
+    fn peek(&mut self) -> Option<&char> {
+        self.chars.peek()
     }
 
     fn next_ident(&mut self) -> Result<Token<'a>> {
-        let mut end = 0;
-        while let Some((i, ch)) = self.chars.peek() {
+        let start = self.pos;
+        while let Some(ch) = self.peek() {
             if !ch.is_alphanumeric() {
                 break;
             }
-            end = *i;
-            self.chars.next();
+            self.next();
         }
-        end += 1;
-        let token = Token::from_str(&self.input[self.position..end]);
-        Ok(token)
+        let len = self.pos;
+        let idt = Token::from_str(&self.input[start..len]);
+        Ok(idt)
     }
 
     fn next_number(&mut self) -> Result<Token<'a>> {
-        let mut end = 0;
-        while let Some((i, ch)) = self.chars.peek() {
+        let start = self.pos;
+        while let Some(ch) = self.peek() {
             if !ch.is_numeric() {
                 break;
             }
-            end = *i;
-            self.chars.next();
+            self.next();
         }
-        end += 1;
-        let s = self.input[self.position..end].parse()?;
-        Ok(Token::IntLiteral(s))
+        let len = self.pos;
+        let num = self.input[start..len].parse()?;
+        Ok(Token::IntLiteral(num))
     }
 
     fn next_string(&mut self) -> Result<Token<'a>> {
@@ -52,46 +77,31 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_symbol(&mut self) -> Result<Token<'a>> {
-        let (_, symb) = self.chars.next().unwrap();
-        Ok(Token::Symbol(symb))
+        let ch = self.next().unwrap();
+        Ok(Token::Symbol(ch))
     }
 
     pub fn next_token(&mut self) -> Result<Token<'a>> {
-        while let Some((i, ch)) = self.chars.peek() {
-            let ch = *ch;
-            self.position = *i;
-
-            if matches!(ch, 'a'..'z' | 'A'..'Z') {
-                return self.next_ident();
-            }
-
-            if matches!(ch, '0'..'9') {
-                return self.next_number();
-            }
-
-            if matches!(
-                ch,
-                '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/'
-            ) {
-                return self.next_symbol();
-            }
-
-            if ch == '"' {
-                return self.next_string();
-            }
-
-            if ch.is_whitespace() {
-                self.chars.next();
-                continue;
-            }
-
-            return Error::lexical();
+        while let Some(ch) = self.peek() {
+            return match ch {
+                'a'..'z' | 'A'..'Z' => self.next_ident(),
+                '0'..'9' => self.next_number(),
+                '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/' => {
+                    self.next_symbol()
+                }
+                '"' => self.next_string(),
+                _ if ch.is_whitespace() => {
+                    self.next();
+                    continue;
+                }
+                _ => Error::lexical()?,
+            };
         }
 
         Ok(Token::Eof)
     }
 
-    pub fn colect_all(self) -> Result<Vec<Token<'a>>> {
+    pub fn collect_all(self) -> Result<Vec<Token<'a>>> {
         self.collect::<Result<Vec<_>>>()
     }
 }
