@@ -32,29 +32,35 @@ impl<'a> Lexer<'a> {
         self.chars.peek()
     }
 
+    #[inline]
+    fn index(&mut self) -> usize {
+        self.position.index()
+    }
+
     fn next_ident(&mut self) -> Result<Token<'a>> {
-        let start = self.position.index();
+        let start = self.index();
         while let Some(ch) = self.peek() {
             if !ch.is_alphanumeric() {
                 break;
             }
             self.next();
         }
-        let len = self.position.index();
-        let idt = Token::from_str(&self.input[start..len]);
+        let end = self.index();
+        let idt = Token::from_str(&self.input[start..end]);
         Ok(idt)
     }
 
     fn next_number(&mut self) -> Result<Token<'a>> {
-        let start = self.position.index();
+        let start = self.index();
         while let Some(ch) = self.peek() {
-            if !ch.is_numeric() {
+            if !matches!(ch, '0'..'9') {
                 break;
             }
             self.next();
+
         }
-        let len = self.position.index();
-        let num = self.input[start..len].parse()?;
+        let end = self.index();
+        let num = self.input[start..end].parse()?;
         Ok(Token::IntLiteral(num))
     }
 
