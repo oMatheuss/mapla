@@ -14,7 +14,7 @@ impl Ast {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VarType {
     Int,
     Real,
@@ -59,12 +59,39 @@ impl From<ValueExpr> for Expression {
 }
 
 #[derive(Debug)]
+pub struct Argument {
+    name: Identifier,
+    arg_type: VarType,
+    default: Option<ValueExpr>,
+}
+
+impl Argument {
+    pub fn new(name: &str, arg_type: VarType) -> Self {
+        Self {
+            name: name.into(),
+            arg_type,
+            default: None,
+        }
+    }
+
+    pub fn with_default(name: &str, arg_type: VarType, default: ValueExpr) -> Self {
+        Self {
+            name: name.into(),
+            arg_type,
+            default: Some(default),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum AstNode {
     Var(VarType, Identifier, Expression),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),
     For(Identifier, ValueExpr, Vec<AstNode>),
     Expr(Expression),
+    Func(Identifier, Vec<Argument>, Option<VarType>, Vec<AstNode>),
+    Ret(Expression),
 }
 
 impl AstNode {

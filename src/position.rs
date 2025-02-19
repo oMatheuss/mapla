@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Position {
     index: usize,
     column: usize,
@@ -8,7 +9,11 @@ pub struct Position {
 
 impl Position {
     pub fn new() -> Self {
-        Self { index: 0, column: 1, line: 1 }
+        Self {
+            index: 0,
+            column: 1,
+            line: 1,
+        }
     }
 
     pub fn next(&mut self, ch: char) {

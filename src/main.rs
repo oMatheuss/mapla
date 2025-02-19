@@ -6,23 +6,28 @@ mod ast;
 mod error;
 mod lexer;
 mod parser;
-mod token;
 mod position;
+mod token;
 
 const CODE: &str = r#"
-real euler = 0
+func euler(limit: int): real do
+    real soma = 0
+    for i to limit then
+        int fatorial = 1
+        int j = 1
+        while (j += 1) < i then fatorial *= j end
+        soma += 1 / fatorial
+    end
 
-for i to 10 then
-    int fatorial = 1
-    int j = 1
-    while (j += 1) < i then fatorial *= j end
-    euler += 1 / fatorial
+    return soma
 end
+
+real result = euler(10)
 "#;
 
 fn main() -> Result<()> {
     let lex = Lexer::from_source(CODE);
-    let tokens = lex.collect_all()?;
+    let tokens = lex.collect()?;
 
     let parser = Parser::new(&tokens);
     let ast = parser.parse();

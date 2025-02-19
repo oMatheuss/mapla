@@ -1,7 +1,10 @@
+use crate::position::Position;
+
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
     message: &'static str,
+    position: Position,
 }
 
 #[derive(Debug)]
@@ -13,10 +16,11 @@ pub enum ErrorKind {
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
-    pub fn lexical<T>() -> Result<T> {
+    pub fn lexical<T>(message: &'static str, position: Position) -> Result<T> {
         Err(Error {
             kind: ErrorKind::LexicalError,
-            message: "",
+            message,
+            position,
         })
     }
 
@@ -24,6 +28,7 @@ impl Error {
         Err(Error {
             kind: ErrorKind::SyntaxError,
             message,
+            position: Position::default(),
         })
     }
 }
@@ -42,6 +47,7 @@ impl From<std::num::ParseIntError> for Error {
         Error {
             kind: ErrorKind::LexicalError,
             message,
+            position: Position::default(),
         }
     }
 }
@@ -57,6 +63,6 @@ impl std::fmt::Display for ErrorKind {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.kind, self.message)
+        write!(f, "{} -> {}: {}", self.position, self.kind, self.message)
     }
 }

@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::slice::Iter;
 
-use crate::ast::{Ast, AstNode, Expression, Operator, ValueExpr, VarType};
+use crate::ast::{Argument, Ast, AstNode, Expression, Operator, ValueExpr, VarType};
 use crate::error::{Error, Result};
 use crate::token::Token;
 
@@ -169,6 +169,77 @@ impl<'a> Parser<'a> {
         AstNode::Var(ty, (*ident).into(), expr).ok()
     }
 
+    fn parse_type(&mut self) -> Result<VarType> {
+        let t = match self.next_or_err()? {
+            Token::Int => VarType::Int,
+            Token::Real => VarType::Real,
+            Token::Char => VarType::Char,
+            Token::Bool => VarType::Bool,
+            _ => Error::syntatic("expected type annotation")?,
+        };
+        Ok(t)
+    }
+
+    fn parse_args(&mut self) -> Result<Vec<Argument>> {
+        let Token::Symbol('(') = self.next_or_err()? else {
+            Error::syntatic("expected open parenthesis `(`")?
+        };
+        let mut state = 1u8;
+        let mut args = Vec::new();
+        loop {
+            match (state, self.next_or_err()?) {
+                (1 | 2, Token::Symbol(')')) => break,
+                (1 | 3, Token::Identifier(name)) => {
+                    state = 2;
+                    let Token::Symbol(':') = self.next_or_err()? else {
+                        Error::syntatic("expected token `:`")?
+                    };
+                    let arg_type = self.parse_type()?;
+                    let arg = Argument::new(name, arg_type);
+                    args.push(arg);
+                }
+                (2, Token::Symbol(',')) => state = 3,
+                (1 | 2, _) => Error::syntatic("expected close parenthesis `)` or argument")?,
+                (3, _) => Error::syntatic("expected another argument after comma")?,
+                _ => unreachable!("The state machine is out of control"),
+            };
+        }
+        Ok(args)
+    }
+
+    fn consume_func(&mut self) -> Result<AstNode> {
+        self.next(); // discard function token
+        let Token::Identifier(name) = self.next_or_err()? else {
+            Error::syntatic("expected name of the function")?
+        };
+        let args = self.parse_args()?;
+        let ret_type = match self.next_or_err()? {
+            Token::Symbol(':') => {
+                let ret_type = self.parse_type()?;
+                let Token::Do = self.next_or_err()? else {
+                    Error::syntatic("expected `do`")?
+                };
+                Some(ret_type)
+            }
+            Token::Do => None,
+            _ => Error::syntatic("expected type annotation or `do`")?,
+        };
+        let inner = self.consume_inner()?;
+        if let Some(..) = ret_type {
+            if !matches!(inner.last(), Some(AstNode::Ret(..))) {
+                Error::syntatic("expected a return statement for a typed funcion")?;
+            }
+        }
+        AstNode::Func((*name).into(), args, ret_type, inner).ok()
+    }
+
+    fn consume_ret(&mut self) -> Result<AstNode> {
+        self.next(); // discard return token
+        let expr = self.parse_expr(1)?;
+        let expr = AstNode::Ret(expr);
+        Ok(expr)
+    }
+
     #[inline]
     fn match_token(&mut self, token: &Token<'_>) -> Result<AstNode> {
         match token {
@@ -180,6 +251,9 @@ impl<'a> Parser<'a> {
             Token::Real => self.consume_var(VarType::Real),
             Token::Char => self.consume_var(VarType::Char),
             Token::Bool => self.consume_var(VarType::Bool),
+
+            Token::Function => self.consume_func(),
+            Token::Return => self.consume_ret(),
 
             Token::Symbol('(')
             | Token::True

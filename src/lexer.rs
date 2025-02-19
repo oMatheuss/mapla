@@ -16,7 +16,7 @@ impl<'a> Lexer<'a> {
         Self {
             input,
             chars,
-            position: Position::new()
+            position: Position::new(),
         }
     }
 
@@ -57,7 +57,6 @@ impl<'a> Lexer<'a> {
                 break;
             }
             self.next();
-
         }
         let end = self.index();
         let num = self.input[start..end].parse()?;
@@ -77,34 +76,32 @@ impl<'a> Lexer<'a> {
         while let Some(ch) = self.peek() {
             return match ch {
                 'a'..'z' | 'A'..'Z' => self.next_ident(),
-                '0'..'9' => self.next_number(),
-                '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/' => {
-                    self.next_symbol()
-                }
+                '0'..='9' => self.next_number(),
+                '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/'
+                | ':' | ',' => self.next_symbol(),
                 '"' => self.next_string(),
                 _ if ch.is_whitespace() => {
                     self.next();
                     continue;
                 }
-                _ => Error::lexical()?,
+                _ => Error::lexical("invalid token", self.position)?,
             };
         }
 
         Ok(Token::Eof)
     }
 
-    pub fn collect_all(self) -> Result<Vec<Token<'a>>> {
-        self.collect::<Result<Vec<_>>>()
-    }
-}
+    pub fn collect(mut self) -> Result<Vec<Token<'a>>> {
+        let mut items = Vec::new();
+        loop {
+            let next = self.next_token()?;
 
-impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<Token<'a>>;
+            if let Token::Eof = next {
+                items.push(next);
+                break Ok(items);
+            }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.next_token() {
-            Ok(Token::Eof) => None,
-            result => Some(result),
+            items.push(next);
         }
     }
 }
