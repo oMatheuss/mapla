@@ -11,7 +11,7 @@ mod token;
 
 const CODE: &str = r#"
 func euler(limit: int): real do
-    real soma = 0
+    real soma = .0
     for i to limit then
         int fatorial = 1
         int j = 1

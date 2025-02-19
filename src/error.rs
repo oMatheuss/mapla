@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::position::Position;
 
 #[derive(Debug)]
@@ -47,6 +49,16 @@ impl From<std::num::ParseIntError> for Error {
         Error {
             kind: ErrorKind::LexicalError,
             message,
+            position: Position::default(),
+        }
+    }
+}
+
+impl From<std::num::ParseFloatError> for Error {
+    fn from(_value: std::num::ParseFloatError) -> Self {
+        Error {
+            kind: ErrorKind::LexicalError,
+            message: "invalid floating pointer",
             position: Position::default(),
         }
     }

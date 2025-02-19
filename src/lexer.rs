@@ -52,15 +52,24 @@ impl<'a> Lexer<'a> {
 
     fn next_number(&mut self) -> Result<Token<'a>> {
         let start = self.index();
+        let mut state = 1;
         while let Some(ch) = self.peek() {
-            if !matches!(ch, '0'..'9') {
-                break;
+            match (state, ch) {
+                (1, '0'..='9') => {},
+                (1, '.') => state = 2,
+                (2, '0'..='9') => {},
+                (_, _) => break,
             }
             self.next();
         }
         let end = self.index();
-        let num = self.input[start..end].parse()?;
-        Ok(Token::IntLiteral(num))
+        if state == 1 {
+            let num = self.input[start..end].parse()?;
+            Ok(Token::IntLiteral(num))
+        } else {
+            let num = self.input[start..end].parse()?;
+            Ok(Token::FloatLiteral(num))
+        }
     }
 
     fn next_string(&mut self) -> Result<Token<'a>> {
@@ -76,7 +85,7 @@ impl<'a> Lexer<'a> {
         while let Some(ch) = self.peek() {
             return match ch {
                 'a'..'z' | 'A'..'Z' => self.next_ident(),
-                '0'..='9' => self.next_number(),
+                '0'..='9' | '.' => self.next_number(),
                 '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/'
                 | ':' | ',' => self.next_symbol(),
                 '"' => self.next_string(),
