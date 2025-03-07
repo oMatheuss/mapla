@@ -57,9 +57,9 @@ impl<'a> Parser<'a> {
             Token::StrLiteral(i) => Expression::Value(ValueExpr::String((*i).into())),
             Token::IntLiteral(i) => Expression::Value(ValueExpr::Int(*i)),
             Token::FloatLiteral(i) => Expression::Value(ValueExpr::Float(*i)),
-            Token::Symbol('(') => {
+            Token::OpenParen => {
                 let inner_expr = self.parse_expr(1)?;
-                let Token::Symbol(')') = self.next_or_err()? else {
+                let Token::CloseParen = self.next_or_err()? else {
                     Error::syntatic("expected close parentheses")?
                 };
                 inner_expr
@@ -70,34 +70,16 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn next_operator(&mut self) -> Option<Operator> {
-        if let Some(Token::Symbol(symb1)) = self.peek() {
-            if Operator::is_valid_primary(symb1) {
-                self.next();
-            } else {
-                return None;
-            }
-
-            if let Some(Token::Symbol(symb2)) = self.peek() {
-                if let Ok(op) = Operator::try_from(&[*symb1, *symb2] as &[char]) {
-                    self.next();
-                    Some(op)
-                } else {
-                    Operator::try_from(&[*symb1] as &[char]).ok()
-                }
-            } else {
-                Operator::try_from(&[*symb1] as &[char]).ok()
-            }
-        } else {
-            None
-        }
+    fn peek_operator(&mut self) -> Option<Operator> {
+        let token = self.peek()?;
+        Operator::try_from(token).ok()
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Result<Expression> {
         let mut lhs = self.parse_atom()?;
 
         loop {
-            let Some(op) = self.next_operator() else {
+            let Some(op) = self.peek_operator() else {
                 break;
             };
 
@@ -106,6 +88,8 @@ impl<'a> Parser<'a> {
                 break;
             }
             let min_prec = if op.is_right() { prec } else { prec + 1 };
+
+            self.next(); // consume operator
 
             let rhs = self.parse_expr(min_prec)?;
 
@@ -162,7 +146,7 @@ impl<'a> Parser<'a> {
         let Token::Identifier(ident) = self.next_or_err()? else {
             Error::syntatic("expected identifier")?
         };
-        let Token::Symbol('=') = self.next_or_err()? else {
+        let Token::Assign = self.next_or_err()? else {
             Error::syntatic("expected assign operator `=`")?
         };
         let expr = self.parse_expr(1)?;
@@ -181,24 +165,24 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_args(&mut self) -> Result<Vec<Argument>> {
-        let Token::Symbol('(') = self.next_or_err()? else {
+        let Token::OpenParen = self.next_or_err()? else {
             Error::syntatic("expected open parenthesis `(`")?
         };
         let mut state = 1u8;
         let mut args = Vec::new();
         loop {
             match (state, self.next_or_err()?) {
-                (1 | 2, Token::Symbol(')')) => break,
+                (1 | 2, Token::CloseParen) => break,
                 (1 | 3, Token::Identifier(name)) => {
                     state = 2;
-                    let Token::Symbol(':') = self.next_or_err()? else {
+                    let Token::Colon = self.next_or_err()? else {
                         Error::syntatic("expected token `:`")?
                     };
                     let arg_type = self.parse_type()?;
                     let arg = Argument::new(name, arg_type);
                     args.push(arg);
                 }
-                (2, Token::Symbol(',')) => state = 3,
+                (2, Token::Comma) => state = 3,
                 (1 | 2, _) => Error::syntatic("expected close parenthesis `)` or argument")?,
                 (3, _) => Error::syntatic("expected another argument after comma")?,
                 _ => unreachable!("The state machine is out of control"),
@@ -214,7 +198,7 @@ impl<'a> Parser<'a> {
         };
         let args = self.parse_args()?;
         let ret_type = match self.next_or_err()? {
-            Token::Symbol(':') => {
+            Token::Colon => {
                 let ret_type = self.parse_type()?;
                 let Token::Do = self.next_or_err()? else {
                     Error::syntatic("expected `do`")?
@@ -255,7 +239,7 @@ impl<'a> Parser<'a> {
             Token::Function => self.consume_func(),
             Token::Return => self.consume_ret(),
 
-            Token::Symbol('(')
+            Token::OpenParen
             | Token::True
             | Token::False
             | Token::IntLiteral(..)

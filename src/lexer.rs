@@ -55,9 +55,9 @@ impl<'a> Lexer<'a> {
         let mut state = 1;
         while let Some(ch) = self.peek() {
             match (state, ch) {
-                (1, '0'..='9') => {},
+                (1, '0'..='9') => {}
                 (1, '.') => state = 2,
-                (2, '0'..='9') => {},
+                (2, '0'..='9') => {}
                 (_, _) => break,
             }
             self.next();
@@ -77,8 +77,66 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_symbol(&mut self) -> Result<Token<'a>> {
-        let ch = self.next().unwrap();
-        Ok(Token::Symbol(ch))
+        let first = self.next().unwrap();
+        let second = self.peek();
+
+        let token = match (first, second) {
+            ('(', _) => Token::OpenParen,
+            (')', _) => Token::CloseParen,
+            ('=', Some('=')) => {
+                self.next();
+                Token::Equal
+            }
+            ('=', _) => Token::Assign,
+            ('!', Some('=')) => {
+                self.next();
+                Token::NotEqual
+            }
+            ('>', Some('=')) => {
+                self.next();
+                Token::GreaterEqual
+            }
+            ('>', _) => Token::Greater,
+            ('<', Some('=')) => {
+                self.next();
+                Token::LessEqual
+            }
+            ('<', _) => Token::Less,
+            ('&', Some('&')) => {
+                self.next();
+                Token::And
+            }
+            ('|', Some('|')) => {
+                self.next();
+                Token::Or
+            }
+            ('%', _) => Token::Mod,
+            ('+', Some('=')) => {
+                self.next();
+                Token::AddAssign
+            }
+            ('+', _) => Token::Add,
+            ('-', Some('=')) => {
+                self.next();
+                Token::SubAssign
+            }
+            ('-', _) => Token::Sub,
+            ('*', Some('=')) => {
+                self.next();
+                Token::MulAssign
+            }
+            ('*', _) => Token::Mul,
+            ('/', Some('=')) => {
+                self.next();
+                Token::DivAssign
+            }
+            ('/', _) => Token::Div,
+            (',', _) => Token::Comma,
+            (':', _) => Token::Colon,
+            _ => Error::lexical("invalid token", self.position)?,
+        };
+
+        Ok(token)
     }
 
     pub fn next_token(&mut self) -> Result<Token<'a>> {

@@ -1,4 +1,6 @@
-use crate::error::Result;
+use std::ops::Deref;
+
+use crate::{error::Result, token::Token};
 
 #[derive(Debug)]
 pub struct Ast(Vec<AstNode>);
@@ -11,6 +13,14 @@ impl Ast {
     #[inline]
     pub fn ok(self) -> Result<Self> {
         Ok(self)
+    }
+}
+
+impl std::ops::Deref for Ast {
+    type Target = [AstNode];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -28,6 +38,14 @@ pub struct Identifier(String);
 impl From<&str> for Identifier {
     fn from(value: &str) -> Self {
         Self(String::from(value))
+    }
+}
+
+impl Deref for Identifier {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -60,9 +78,9 @@ impl From<ValueExpr> for Expression {
 
 #[derive(Debug)]
 pub struct Argument {
-    name: Identifier,
-    arg_type: VarType,
-    default: Option<ValueExpr>,
+    pub name: Identifier,
+    pub arg_type: VarType,
+    pub default: Option<ValueExpr>,
 }
 
 impl Argument {
@@ -123,30 +141,30 @@ pub enum Operator {
     DivAssign,
 }
 
-impl TryFrom<&[char]> for Operator {
+impl<'a> TryFrom<&Token<'a>> for Operator {
     type Error = crate::error::Error;
 
-    fn try_from(value: &[char]) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: &Token) -> std::result::Result<Self, Self::Error> {
         let op = match value {
-            ['=', '='] => Operator::Equal,
-            ['!', '='] => Operator::NotEqual,
-            ['>'] => Operator::Greater,
-            ['>', '='] => Operator::GreaterEqual,
-            ['<'] => Operator::Less,
-            ['<', '='] => Operator::LessEqual,
-            ['&', '&'] => Operator::And,
-            ['|', '|'] => Operator::Or,
-            ['+'] => Operator::Add,
-            ['-'] => Operator::Sub,
-            ['*'] => Operator::Mul,
-            ['/'] => Operator::Div,
-            ['%'] => Operator::Mod,
-            ['='] => Operator::Assign,
-            ['+', '='] => Operator::AddAssign,
-            ['-', '='] => Operator::SubAssign,
-            ['*', '='] => Operator::MulAssign,
-            ['/', '='] => Operator::DivAssign,
-            _ => crate::error::Error::syntatic("invalid symbol")?,
+            Token::Equal => Operator::Equal,
+            Token::NotEqual => Operator::NotEqual,
+            Token::Greater => Operator::Greater,
+            Token::GreaterEqual => Operator::GreaterEqual,
+            Token::Less => Operator::Less,
+            Token::LessEqual => Operator::LessEqual,
+            Token::And => Operator::And,
+            Token::Or => Operator::Or,
+            Token::Add => Operator::Add,
+            Token::Sub => Operator::Sub,
+            Token::Mul => Operator::Mul,
+            Token::Div => Operator::Div,
+            Token::Mod => Operator::Mod,
+            Token::Assign => Operator::Assign,
+            Token::AddAssign => Operator::AddAssign,
+            Token::SubAssign => Operator::SubAssign,
+            Token::MulAssign => Operator::MulAssign,
+            Token::DivAssign => Operator::DivAssign,
+            _ => crate::error::Error::syntatic("invalid token")?,
         };
 
         Ok(op)
@@ -171,10 +189,24 @@ impl Operator {
     }
 
     pub fn is_right(&self) -> bool {
-        *self as u8 >= Operator::Assign as u8
+        matches!(
+            self,
+            Operator::Assign
+                | Operator::AddAssign
+                | Operator::SubAssign
+                | Operator::MulAssign
+                | Operator::DivAssign
+        )
     }
 
-    pub fn is_valid_primary(ch: &char) -> bool {
-        ['=', '!', '>', '<', '&', '|', '%', '+', '-', '*', '/'].contains(ch)
+    pub fn is_assign(&self) -> bool {
+        matches!(
+            self,
+            Operator::Assign
+                | Operator::AddAssign
+                | Operator::SubAssign
+                | Operator::MulAssign
+                | Operator::DivAssign
+        )
     }
 }
