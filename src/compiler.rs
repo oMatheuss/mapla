@@ -166,6 +166,18 @@ impl Compiler {
                 }
             }
             Expression::Cast(var_type, expression) => todo!(),
+            Expression::Func(ident, args, ret_type) => {
+                let _offset = scope.off;
+                for arg in args {
+                    let arg = Self::compile_expr(code, scope, arg);
+                    scope.off -= 4; // TODO: other types
+                    let mem = Mem::offset(Reg::Rbp, scope.off, MemSize::DWord);
+                    code.mov(mem, arg);
+                }
+                code.call(&ident);
+                scope.off = _offset;
+                Operand::Reg(Reg::Eax)
+            }
         }
     }
 

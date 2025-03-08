@@ -21,6 +21,10 @@ func soma(limit: int): int do
 
     return x
 end
+
+func main() do
+    int r = soma(10)
+end
 "#;
 
 fn main() -> Result<()> {

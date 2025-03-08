@@ -38,11 +38,11 @@ impl<'a> Parser<'a> {
     fn parse_value(&mut self) -> Result<ValueExpr> {
         let token = self.next_or_err()?;
 
-        let expr = match token {
-            Token::Identifier(i) => ValueExpr::Identifier((*i).into()),
-            Token::StrLiteral(i) => ValueExpr::String((*i).into()),
-            Token::IntLiteral(i) => ValueExpr::Int(*i),
-            Token::FloatLiteral(i) => ValueExpr::Float(*i),
+        let expr = match *token {
+            Token::Identifier(id) => ValueExpr::Identifier(id.into()),
+            Token::StrLiteral(string) => ValueExpr::String(string.into()),
+            Token::IntLiteral(int) => ValueExpr::Int(int),
+            Token::FloatLiteral(float) => ValueExpr::Float(float),
             _ => Error::syntatic("unexpected token")?,
         };
 
@@ -52,11 +52,15 @@ impl<'a> Parser<'a> {
     fn parse_atom(&mut self) -> Result<Expression> {
         let token: &Token<'_> = self.next_or_err()?;
 
-        let expr = match token {
-            Token::Identifier(i) => Expression::Value(ValueExpr::Identifier((*i).into())),
-            Token::StrLiteral(i) => Expression::Value(ValueExpr::String((*i).into())),
-            Token::IntLiteral(i) => Expression::Value(ValueExpr::Int(*i)),
-            Token::FloatLiteral(i) => Expression::Value(ValueExpr::Float(*i)),
+        let expr = match *token {
+            Token::Identifier(id) if matches!(self.peek(), Some(Token::OpenParen)) => {
+                let args = self.parse_callargs()?;
+                Expression::Func(id.into(), args, VarType::Int)
+            }
+            Token::Identifier(id) => Expression::identifier(id),
+            Token::StrLiteral(string) => Expression::string(string),
+            Token::IntLiteral(int) => Expression::int(int),
+            Token::FloatLiteral(float) => Expression::float(float),
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(1)?;
                 let Token::CloseParen = self.next_or_err()? else {
@@ -185,6 +189,34 @@ impl<'a> Parser<'a> {
                 (2, Token::Comma) => state = 3,
                 (1 | 2, _) => Error::syntatic("expected close parenthesis `)` or argument")?,
                 (3, _) => Error::syntatic("expected another argument after comma")?,
+                _ => unreachable!("The state machine is out of control"),
+            };
+        }
+        Ok(args)
+    }
+
+    fn parse_callargs(&mut self) -> Result<Vec<Expression>> {
+        let Token::OpenParen = self.next_or_err()? else {
+            Error::syntatic("expected open parenthesis `(`")?
+        };
+        let mut state = 1u8;
+        let mut args = Vec::new();
+        loop {
+            match (state, self.peek()) {
+                (1 | 2, Some(Token::CloseParen)) => {
+                    _ = self.next();
+                    break
+                }
+                (1 | 3, ..) => {
+                    state = 2;
+                    let expr = self.parse_expr(1)?;
+                    args.push(expr);
+                }
+                (2, Some(Token::Comma)) => {
+                    _ = self.next();
+                    state = 3;
+                },
+                (2, ..) => Error::syntatic("expected close parenthesis `)` or comma `,`")?,
                 _ => unreachable!("The state machine is out of control"),
             };
         }
