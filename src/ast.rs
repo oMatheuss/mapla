@@ -41,6 +41,12 @@ impl From<&str> for Identifier {
     }
 }
 
+impl PartialEq<str> for Identifier {
+    fn eq(&self, other: &str) -> bool {
+        self.0.eq(other)
+    }
+}
+
 impl Deref for Identifier {
     type Target = str;
 
@@ -67,12 +73,35 @@ pub enum ValueExpr {
 pub enum Expression {
     Value(ValueExpr),
     BinOp(Operator, Box<[Expression; 2]>),
+    Func(Identifier, Vec<Expression>, VarType),
     Cast(VarType, Box<Expression>),
 }
 
 impl From<ValueExpr> for Expression {
     fn from(value: ValueExpr) -> Self {
         Self::Value(value)
+    }
+}
+
+impl Expression {
+    #[inline]
+    pub fn float(f: f32) -> Self {
+        Expression::Value(ValueExpr::Float(f))
+    }
+
+    #[inline]
+    pub fn int(i: i32) -> Self {
+        Expression::Value(ValueExpr::Int(i))
+    }
+
+    #[inline]
+    pub fn identifier(id: &str) -> Self {
+        Expression::Value(ValueExpr::Identifier(Identifier(String::from(id))))
+    }
+
+    #[inline]
+    pub fn string(s: &str) -> Self {
+        Expression::Value(ValueExpr::String(String::from(s)))
     }
 }
 

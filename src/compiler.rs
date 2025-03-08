@@ -257,7 +257,7 @@ impl Compiler {
         for node in ast.iter() {
             match node {
                 AstNode::Func(identifier, arguments, var_type, ast_nodes) => {
-                    if identifier.eq("main") {
+                    if identifier == "main" {
                         code.label("_start");
                     } else {
                         code.label(identifier);
@@ -286,7 +286,7 @@ impl Compiler {
                         Self::compile_node(&mut code, &mut scope, inner);
                     }
 
-                    if identifier.ne("main") {
+                    if identifier != "main" {
                         code.pop_sf();
                         code.ret(arguments.len() * 4);
                     }
