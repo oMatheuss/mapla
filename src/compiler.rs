@@ -234,9 +234,15 @@ impl Compiler {
             Expression::Func(ident, args, ret_type) => {
                 let _offset = scope.off;
                 for arg in args {
-                    let arg = Self::compile_expr(code, scope, arg);
-                    scope.off -= 4; // TODO: other types
-                    let mem = Mem::offset(Reg::Rbp, scope.off, MemSize::DWord);
+                    let mut arg = Self::compile_expr(code, scope, arg);
+                    let mem_size = arg.mem_size();
+                    if arg.is_mem() {
+                        let a_reg = Reg::get_a(mem_size);
+                        code.mov(a_reg, arg);
+                        arg = Operand::Reg(a_reg);
+                    }
+                    scope.off -= mem_size as isize;
+                    let mem = Mem::offset(Reg::Rbp, scope.off, mem_size);
                     code.mov(mem, arg);
                 }
                 code.call(&ident);
@@ -333,10 +339,10 @@ impl Compiler {
             }
             AstNode::Ret(expr) => {
                 let result = Self::compile_expr(code, scope, expr);
-                match result {
-                    Operand::Reg(Reg::Eax) => {}
-                    _ => code.mov(Reg::Eax, result),
+                if !result.is_reg() {
+                    code.mov(Reg::Eax, result);
                 }
+                code.jmp(".return");
             }
             _ => {}
         }
@@ -353,46 +359,38 @@ impl Compiler {
         for node in ast.iter() {
             match node {
                 AstNode::Func(identifier, arguments, var_type, ast_nodes) => {
-                    if identifier == "main" {
-                        code.label("_start");
-                    } else {
-                        code.label(identifier);
-                        code.push_sf();
-                    };
+                    code.label(identifier);
+                    code.push_sf();
 
                     let mut scope = Scope::new_inner(&global);
 
                     let mut mem_offset = 16; // rip + rbp
                     for arg in arguments {
-                        let Argument {
-                            name,
-                            arg_type,
-                            default,
-                        } = arg;
                         let addr = Mem::offset(Reg::Rbp, mem_offset, MemSize::DWord);
                         let props = VarProps {
                             operand: Operand::Mem(addr),
-                            var_type: *arg_type,
+                            var_type: arg.arg_type,
                         };
                         mem_offset += 4; // TODO
-                        scope.set(name, props);
+                        scope.set(&arg.name, props);
                     }
 
                     for inner in ast_nodes {
                         Self::compile_node(&mut code, &mut scope, inner);
                     }
 
-                    if identifier != "main" {
-                        code.label(".return"); // TODO
-                        code.pop_sf();
-                        code.ret(arguments.len() * 4);
-                    }
+                    code.label(".return");
+                    code.pop_sf();
+                    code.ret(arguments.len() * 4);
                 }
                 _ => {}
             }
         }
 
+        code.label("_start");
+        code.call("main");
         code.sys_exit(0);
+
         code.to_string()
     }
 }
