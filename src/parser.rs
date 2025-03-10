@@ -270,9 +270,20 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
+    fn consume_use(&mut self) -> Result<AstNode> {
+        self.next(); // discard use token
+        let Token::Identifier(ident) = self.next_or_err()? else {
+            Error::syntatic("expected identifier")?
+        };
+        self.next_semi()?;
+        AstNode::Use((*ident).into()).ok()
+    }
+
     #[inline]
     fn match_token(&mut self, token: &Token<'_>) -> Result<AstNode> {
         match token {
+            Token::Use => self.consume_use(),
+
             Token::If => self.consume_if(),
             Token::While => self.consume_while(),
             Token::For => self.consume_for(),

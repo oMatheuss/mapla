@@ -136,6 +136,7 @@ impl Argument {
 
 #[derive(Debug)]
 pub enum AstNode {
+    Use(Identifier),
     Var(VarType, Identifier, Expression),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),

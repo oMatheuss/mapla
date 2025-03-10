@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Operand, Reg};
 use crate::ast::{Argument, Ast, AstNode, Expression, Operator, ValueExpr, VarType};
+use crate::intrinsic::intrisic;
 
 #[derive(Debug, Clone)]
 struct VarProps {
@@ -358,14 +359,15 @@ impl Compiler {
 
         for node in ast.iter() {
             match node {
-                AstNode::Func(identifier, arguments, var_type, ast_nodes) => {
-                    code.label(identifier);
+                AstNode::Use(ident) => intrisic(&ident, &mut code),
+                AstNode::Func(ident, args, var_type, ast_nodes) => {
+                    code.label(ident);
                     code.push_sf();
 
                     let mut scope = Scope::new_inner(&global);
 
                     let mut mem_offset = 16; // rip + rbp
-                    for arg in arguments {
+                    for arg in args {
                         let addr = Mem::offset(Reg::Rbp, mem_offset, MemSize::DWord);
                         let props = VarProps {
                             operand: Operand::Mem(addr),
@@ -381,7 +383,7 @@ impl Compiler {
 
                     code.label(".return");
                     code.pop_sf();
-                    code.ret(arguments.len() * 4);
+                    code.ret(args.len() * 4);
                 }
                 _ => {}
             }

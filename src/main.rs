@@ -7,25 +7,28 @@ mod asm;
 mod ast;
 mod compiler;
 mod error;
+mod intrinsic;
 mod lexer;
 mod parser;
 mod position;
 mod token;
 
 const CODE: &str = r#"
+use io;
+
 func soma(limit: int): int do
-    int x = 0
     for i to limit then
-        if i % 3 == 0 || i % 5 == 0 then
-            x += 1
+        if i > 0 && i % 3 == 0 && i % 5 == 0 then
+            return i;
         end
     end
 
-    return x
+    return 0;
 end
 
 func main() do
-    int r = soma(10)
+    int r = soma(100);
+    printInt(r);
 end
 "#;
 
