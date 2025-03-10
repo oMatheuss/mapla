@@ -43,6 +43,8 @@ impl<'a> Parser<'a> {
             Token::StrLiteral(string) => ValueExpr::String(string.into()),
             Token::IntLiteral(int) => ValueExpr::Int(int),
             Token::FloatLiteral(float) => ValueExpr::Float(float),
+            Token::True => ValueExpr::Bool(true),
+            Token::False => ValueExpr::Bool(false),
             _ => Error::syntatic("unexpected token")?,
         };
 
@@ -61,6 +63,8 @@ impl<'a> Parser<'a> {
             Token::StrLiteral(string) => Expression::string(string),
             Token::IntLiteral(int) => Expression::int(int),
             Token::FloatLiteral(float) => Expression::float(float),
+            Token::True => Expression::TRUE,
+            Token::False => Expression::FALSE,
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(1)?;
                 let Token::CloseParen = self.next_or_err()? else {
@@ -205,7 +209,7 @@ impl<'a> Parser<'a> {
             match (state, self.peek()) {
                 (1 | 2, Some(Token::CloseParen)) => {
                     _ = self.next();
-                    break
+                    break;
                 }
                 (1 | 3, ..) => {
                     state = 2;
@@ -215,7 +219,7 @@ impl<'a> Parser<'a> {
                 (2, Some(Token::Comma)) => {
                     _ = self.next();
                     state = 3;
-                },
+                }
                 (2, ..) => Error::syntatic("expected close parenthesis `)` or comma `,`")?,
                 _ => unreachable!("The state machine is out of control"),
             };

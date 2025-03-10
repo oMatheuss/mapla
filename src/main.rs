@@ -16,7 +16,9 @@ const CODE: &str = r#"
 func soma(limit: int): int do
     int x = 0
     for i to limit then
-        x += 1 * i + (i * 2 + i * 3)
+        if i % 3 == 0 || i % 5 == 0 then
+            x += 1
+        end
     end
 
     return x

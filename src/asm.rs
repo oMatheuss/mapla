@@ -13,6 +13,11 @@ pub enum OpCode {
     Jg,  // Jump if greater than
     Jl,  // Jump if less than
 
+    Sete,
+    Setne,
+    Setg,
+    Setl,
+
     Inc, // Increment one
     Dec, // Decrement one
     Mov, // Move x into y
@@ -56,6 +61,10 @@ impl Display for OpCode {
             OpCode::Jne => write!(f, "jne"),
             OpCode::Jg => write!(f, "jg"),
             OpCode::Jl => write!(f, "jl"),
+            OpCode::Sete => write!(f, "sete"),
+            OpCode::Setne => write!(f, "sete"),
+            OpCode::Setg => write!(f, "setg"),
+            OpCode::Setl => write!(f, "setl"),
             OpCode::Inc => write!(f, "inc"),
             OpCode::Dec => write!(f, "dec"),
             OpCode::Mov => write!(f, "mov"),
@@ -254,19 +263,96 @@ impl Display for Reg {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+impl Reg {
+    pub fn mem_size(&self) -> MemSize {
+        match self {
+            Reg::Rax
+            | Reg::Rcx
+            | Reg::Rdx
+            | Reg::Rbx
+            | Reg::Rsp
+            | Reg::Rbp
+            | Reg::Rsi
+            | Reg::Rdi
+            | Reg::R8
+            | Reg::R9
+            | Reg::R10
+            | Reg::R11
+            | Reg::R12
+            | Reg::R13
+            | Reg::R14
+            | Reg::R15 => MemSize::QWord,
+
+            Reg::Eax
+            | Reg::Ecx
+            | Reg::Edx
+            | Reg::Ebx
+            | Reg::Esp
+            | Reg::Ebp
+            | Reg::Esi
+            | Reg::Edi
+            | Reg::R8D
+            | Reg::R9D
+            | Reg::R10D
+            | Reg::R11D
+            | Reg::R12D
+            | Reg::R13D
+            | Reg::R14D
+            | Reg::R15D => MemSize::DWord,
+
+            Reg::Ax
+            | Reg::Cx
+            | Reg::Dx
+            | Reg::Bx
+            | Reg::Sp
+            | Reg::Bp
+            | Reg::Si
+            | Reg::Di
+            | Reg::R8W
+            | Reg::R9W
+            | Reg::R10W
+            | Reg::R11W
+            | Reg::R12W
+            | Reg::R13W
+            | Reg::R14W
+            | Reg::R15W => MemSize::Word,
+
+            Reg::Ah
+            | Reg::Al
+            | Reg::Ch
+            | Reg::Cl
+            | Reg::Dh
+            | Reg::Dl
+            | Reg::Bh
+            | Reg::Bl
+            | Reg::Spl
+            | Reg::Bpl
+            | Reg::Sil
+            | Reg::Dil => MemSize::Byte,
+        }
+    }
+
+    pub fn get_a(mem_size: MemSize) -> Reg {
+        match mem_size {
+            MemSize::Byte => Reg::Al,
+            MemSize::Word => Reg::Ax,
+            MemSize::DWord => Reg::Eax,
+            MemSize::QWord => Reg::Rax,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MemSize {
-    Infer = 0,
-    Byte = 8,
-    Word = 16,
-    DWord = 32,
-    QWord = 64,
+    Byte = 1,
+    Word = 2,
+    DWord = 4,
+    QWord = 8,
 }
 
 impl Display for MemSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Infer => Ok(()),
             Self::Byte => write!(f, "byte"),
             Self::Word => write!(f, "word"),
             Self::DWord => write!(f, "dword"),
@@ -353,6 +439,18 @@ impl Mem {
             scale: MemScale::Uni,
         }
     }
+
+    pub fn mem_size(&self) -> MemSize {
+        match self {
+            Mem::Abs { size, addr: _ } => *size,
+            Mem::Rel {
+                size,
+                base: _,
+                index: _,
+                scale: _,
+            } => *size,
+        }
+    }
 }
 
 impl Display for Mem {
@@ -398,6 +496,19 @@ impl Display for Imm {
     }
 }
 
+impl Imm {
+    pub const TRUE: Self = Self::Byte(1);
+    pub const FALSE: Self = Self::Byte(0);
+
+    pub fn mem_size(&self) -> MemSize {
+        match self {
+            Imm::Byte(..) | Imm::Char(..) => MemSize::Byte,
+            Imm::Int32(..) | Imm::Float32(..) => MemSize::DWord,
+            Imm::Int64(..) | Imm::Float64(..) => MemSize::QWord,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Operand {
     Reg(Reg),
@@ -430,6 +541,37 @@ impl From<Mem> for Operand {
 impl From<Imm> for Operand {
     fn from(value: Imm) -> Self {
         Self::Imm(value)
+    }
+}
+
+impl Operand {
+    pub fn mem_size(&self) -> MemSize {
+        match self {
+            Operand::Reg(reg) => reg.mem_size(),
+            Operand::Mem(mem) => mem.mem_size(),
+            Operand::Imm(imm) => imm.mem_size(),
+        }
+    }
+
+    pub fn is_reg(&self) -> bool {
+        match self {
+            Operand::Reg(..) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_mem(&self) -> bool {
+        match self {
+            Operand::Mem(..) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_imm(&self) -> bool {
+        match self {
+            Operand::Imm(..) => true,
+            _ => false,
+        }
     }
 }
 
@@ -510,6 +652,26 @@ impl AsmBuilder {
 
     pub fn jl(&mut self, label: &str) {
         let line = format!("  {opcode} {label}\n", opcode = OpCode::Jl);
+        self.builder.push_str(&line);
+    }
+
+    pub fn sete<T: Into<Operand> + Display>(&mut self, value: T) {
+        let line = format!("  {opcode} {value}\n", opcode = OpCode::Sete);
+        self.builder.push_str(&line);
+    }
+
+    pub fn setne<T: Into<Operand> + Display>(&mut self, value: T) {
+        let line = format!("  {opcode} {value}\n", opcode = OpCode::Setne);
+        self.builder.push_str(&line);
+    }
+
+    pub fn setg<T: Into<Operand> + Display>(&mut self, value: T) {
+        let line = format!("  {opcode} {value}\n", opcode = OpCode::Setg);
+        self.builder.push_str(&line);
+    }
+
+    pub fn setl<T: Into<Operand> + Display>(&mut self, value: T) {
+        let line = format!("  {opcode} {value}\n", opcode = OpCode::Setl);
         self.builder.push_str(&line);
     }
 
@@ -606,8 +768,25 @@ impl AsmBuilder {
     }
 
     // Rem,
-    // And,
-    // Or,
+
+    pub fn and<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::And);
+        self.builder.push_str(&line);
+    }
+
+    pub fn or<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Or);
+        self.builder.push_str(&line);
+    }
+
     // Not,
 
     pub fn xor<T1, T2>(&mut self, value1: T1, value2: T2)

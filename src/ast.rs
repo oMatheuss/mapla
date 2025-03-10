@@ -66,6 +66,7 @@ pub enum ValueExpr {
     String(String),
     Int(i32),
     Float(f32),
+    Bool(bool),
     Identifier(Identifier),
 }
 
@@ -84,6 +85,9 @@ impl From<ValueExpr> for Expression {
 }
 
 impl Expression {
+    pub const TRUE: Self = Self::Value(ValueExpr::Bool(true));
+    pub const FALSE: Self = Self::Value(ValueExpr::Bool(false));
+
     #[inline]
     pub fn float(f: f32) -> Self {
         Expression::Value(ValueExpr::Float(f))

@@ -12,6 +12,7 @@ struct VarProps {
 struct Scope<'a> {
     var: HashMap<String, VarProps>,
     off: isize,
+    lbl: usize,
     sup: Option<Box<&'a Scope<'a>>>,
 }
 
@@ -20,6 +21,7 @@ impl<'a> Scope<'a> {
         Self {
             var: HashMap::new(),
             off: 0,
+            lbl: 0,
             sup: None,
         }
     }
@@ -28,6 +30,7 @@ impl<'a> Scope<'a> {
         Self {
             var: HashMap::new(),
             off: 0,
+            lbl: 0,
             sup: Some(Box::new(outer)),
         }
     }
@@ -36,6 +39,7 @@ impl<'a> Scope<'a> {
         Self {
             var: HashMap::new(),
             off: outer.off,
+            lbl: outer.lbl,
             sup: Some(Box::new(outer)),
         }
     }
@@ -53,6 +57,11 @@ impl<'a> Scope<'a> {
     fn set(&mut self, ident: &str, props: VarProps) -> Option<VarProps> {
         self.var.insert(String::from(ident), props)
     }
+
+    fn new_label(&mut self) -> String {
+        self.lbl += 1;
+        format!(".L{lbl}", lbl = self.lbl)
+    }
 }
 
 pub struct Compiler;
@@ -62,9 +71,16 @@ impl Compiler {
         match expr {
             Expression::Value(value_expr) => match value_expr {
                 ValueExpr::String(_) => todo!(),
-                ValueExpr::Int(value) => Imm::Int32(*value).into(),
-                ValueExpr::Float(value) => Imm::Float32(*value).into(),
-                ValueExpr::Identifier(ident) => scope.get(ident).operand,
+                ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
+                ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
+                ValueExpr::Bool(value) => match value {
+                    true => Operand::Imm(Imm::TRUE),
+                    false => Operand::Imm(Imm::FALSE),
+                },
+                ValueExpr::Identifier(ident) => {
+                    let var = scope.get(ident);
+                    var.operand
+                }
             },
             Expression::BinOp(operator, sides) => {
                 let [lhs, rhs] = &**sides;
@@ -74,8 +90,8 @@ impl Compiler {
 
                 // clear register
                 if let Operand::Reg(reg) = lhs {
-                    scope.off -= 4;
-                    lhs = Mem::offset(Reg::Rbp, scope.off, MemSize::DWord).into();
+                    scope.off -= reg.mem_size() as isize;
+                    lhs = Mem::offset(Reg::Rbp, scope.off, reg.mem_size()).into();
                     code.mov(lhs, reg);
                 }
 
@@ -83,33 +99,60 @@ impl Compiler {
 
                 // clear register
                 if let Operand::Reg(reg) = rhs {
-                    scope.off -= 4;
-                    rhs = Mem::offset(Reg::Rbp, scope.off, MemSize::DWord).into();
+                    scope.off -= reg.mem_size() as isize;
+                    rhs = Mem::offset(Reg::Rbp, scope.off, reg.mem_size()).into();
                     code.mov(rhs, reg);
                 }
 
                 // prepare for operation
-                match lhs {
-                    Operand::Imm(imm) => {
-                        code.mov(Reg::Eax, imm);
-                        lhs = Operand::Reg(Reg::Eax);
-                    }
-                    Operand::Mem(mem) if !operator.is_assign() => {
-                        code.mov(Reg::Eax, mem);
-                        lhs = Operand::Reg(Reg::Eax)
-                    }
-                    _ => {}
+                if !lhs.is_reg() && !operator.is_assign() {
+                    let mem_size = lhs.mem_size();
+                    let a_reg = Reg::get_a(mem_size);
+                    code.mov(a_reg, lhs);
+                    lhs = Operand::Reg(a_reg);
                 }
 
+                assert!(
+                    operator.is_assign() == lhs.is_mem(),
+                    "cannot assign if lhs is not a memory"
+                );
+
+                assert!(
+                    lhs.mem_size() == rhs.mem_size(),
+                    "cannot operate on different sizes"
+                );
+
                 match operator {
-                    Operator::Equal => todo!(),
-                    Operator::NotEqual => todo!(),
-                    Operator::Greater => todo!(),
+                    Operator::Equal => {
+                        code.cmp(lhs, rhs);
+                        code.sete(Reg::Al);
+                        Operand::Reg(Reg::Al)
+                    }
+                    Operator::NotEqual => {
+                        code.cmp(lhs, rhs);
+                        code.setne(Reg::Al);
+                        Operand::Reg(Reg::Al)
+                    }
+                    Operator::Greater => {
+                        code.cmp(lhs, rhs);
+                        code.setg(Reg::Al);
+                        Operand::Reg(Reg::Al)
+                    }
                     Operator::GreaterEqual => todo!(),
-                    Operator::Less => todo!(),
+                    Operator::Less => {
+                        code.cmp(lhs, rhs);
+                        code.setl(Reg::Al);
+                        Operand::Reg(Reg::Al)
+                    }
                     Operator::LessEqual => todo!(),
-                    Operator::And => todo!(),
-                    Operator::Or => todo!(),
+                    Operator::And => {
+                        code.and(lhs, rhs);
+                        lhs
+                    }
+                    Operator::Or => {
+                        code.or(lhs, rhs);
+                        lhs
+                    }
                     Operator::Add => {
                         code.add(lhs, rhs);
                         lhs
@@ -127,10 +170,25 @@ impl Compiler {
                             code.mov(Reg::Eax, lhs); // quotient (lhs)
                         }
                         code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+                        if rhs.is_imm() {
+                            code.mov(Reg::Ebx, rhs);
+                            rhs = Operand::Reg(Reg::Ebx);
+                        }
                         code.idiv(rhs); // divisor (rhs)
                         lhs
                     }
-                    Operator::Mod => todo!(),
+                    Operator::Mod => {
+                        if !matches!(lhs, Operand::Reg(Reg::Eax)) {
+                            code.mov(Reg::Eax, lhs); // quotient (lhs)
+                        }
+                        code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+                        if rhs.is_imm() {
+                            code.mov(Reg::Ebx, rhs);
+                            rhs = Operand::Reg(Reg::Ebx);
+                        }
+                        code.idiv(rhs); // divisor (rhs)
+                        Operand::Reg(Reg::Edx)
+                    }
                     Operator::Assign => {
                         code.mov(lhs, rhs);
                         lhs
@@ -162,10 +220,17 @@ impl Compiler {
                         }
                         lhs
                     }
-                    Operator::DivAssign => todo!(),
+                    Operator::DivAssign => {
+                        // lhs must be a memory
+                        code.mov(Reg::Eax, lhs); // quotient (lhs)
+                        code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+                        code.idiv(rhs); // divisor (rhs)
+                        code.mov(lhs, Reg::Eax);
+                        lhs
+                    }
                 }
             }
-            Expression::Cast(var_type, expression) => todo!(),
+            Expression::Cast(var_type, expr) => todo!(),
             Expression::Func(ident, args, ret_type) => {
                 let _offset = scope.off;
                 for arg in args {
@@ -185,8 +250,8 @@ impl Compiler {
         match node {
             AstNode::Var(var_type, ident, expr) => {
                 let result = Self::compile_expr(code, scope, expr);
-                scope.off -= 4;
-                let addr = Mem::offset(Reg::Rbp, scope.off, MemSize::DWord);
+                scope.off -= result.mem_size() as isize;
+                let addr = Mem::offset(Reg::Rbp, scope.off, result.mem_size());
                 code.mov(addr, result);
                 let prop = VarProps {
                     operand: Operand::Mem(addr),
@@ -194,22 +259,40 @@ impl Compiler {
                 };
                 scope.set(ident, prop);
             }
-            AstNode::If(expression, ast_nodes) => {}
-            AstNode::While(expression, ast_nodes) => {
-                code.label(".startwhile");
-                let result = Self::compile_expr(code, scope, expression);
-                code.cmp(result, result); // TODO
-                code.je(".endwhile");
+            AstNode::If(expr, nodes) => {
+                let result = Self::compile_expr(code, scope, expr);
+                let endif_lbl = scope.new_label();
+                code.cmp(result, Imm::FALSE);
+                code.je(&endif_lbl);
 
                 let scope = &mut Scope::continue_on(&scope);
-                for inner in ast_nodes {
+                for inner in nodes {
                     Self::compile_node(code, scope, inner);
                 }
 
-                code.jmp(".startwhile");
-                code.label(".endwhile");
+                code.label(&endif_lbl);
             }
-            AstNode::For(identifier, value_expr, ast_nodes) => {
+            AstNode::While(expr, nodes) => {
+                let startwhile_lbl = scope.new_label();
+                let endwhile_lbl = scope.new_label();
+
+                code.label(&startwhile_lbl);
+                let result = Self::compile_expr(code, scope, expr);
+                code.cmp(result, Imm::FALSE);
+                code.je(&endwhile_lbl);
+
+                let scope = &mut Scope::continue_on(&scope);
+                for inner in nodes {
+                    Self::compile_node(code, scope, inner);
+                }
+
+                code.jmp(&startwhile_lbl);
+                code.label(&endwhile_lbl);
+            }
+            AstNode::For(ident, limit, nodes) => {
+                let startfor_lbl = scope.new_label();
+                let endfor_lbl = scope.new_label();
+
                 scope.off -= 4;
                 let ite_addr = Mem::offset(Reg::Rbp, scope.off, MemSize::DWord);
                 let ite_prop = VarProps {
@@ -218,9 +301,9 @@ impl Compiler {
                 };
 
                 code.mov(ite_addr, Imm::Int32(0));
-                code.label(".startfor");
+                code.label(&startfor_lbl);
 
-                match value_expr {
+                match limit {
                     ValueExpr::Int(value) => {
                         code.cmp(ite_addr, Imm::Int32(*value));
                     }
@@ -232,26 +315,27 @@ impl Compiler {
                     _ => unreachable!(),
                 };
 
-                code.jg(".endfor");
+                code.jg(&endfor_lbl);
 
                 let scope = &mut Scope::continue_on(&scope);
-                scope.set(identifier, ite_prop); // define the iterator variable
+                scope.set(ident, ite_prop); // define the iterator variable
 
-                for inner in ast_nodes {
+                for inner in nodes {
                     Self::compile_node(code, scope, inner);
                 }
 
                 code.inc(ite_addr);
-                code.jmp(".startfor");
-                code.label(".endfor");
+                code.jmp(&startfor_lbl);
+                code.label(&endfor_lbl);
             }
-            AstNode::Expr(expression) => {
-                let _ = Self::compile_expr(code, scope, expression);
+            AstNode::Expr(expr) => {
+                let _ = Self::compile_expr(code, scope, expr);
             }
-            AstNode::Ret(expression) => {
-                let result = Self::compile_expr(code, scope, expression);
-                if !matches!(result, Operand::Reg(Reg::Eax)) {
-                    code.mov(Reg::Eax, result);
+            AstNode::Ret(expr) => {
+                let result = Self::compile_expr(code, scope, expr);
+                match result {
+                    Operand::Reg(Reg::Eax) => {}
+                    _ => code.mov(Reg::Eax, result),
                 }
             }
             _ => {}
@@ -299,6 +383,7 @@ impl Compiler {
                     }
 
                     if identifier != "main" {
+                        code.label(".return"); // TODO
                         code.pop_sf();
                         code.ret(arguments.len() * 4);
                     }
