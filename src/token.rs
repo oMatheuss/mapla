@@ -41,6 +41,7 @@ pub enum Token<'a> {
     CloseParen,
     Comma,
     Colon,
+    SemiColon,
     Eof,
 }
 

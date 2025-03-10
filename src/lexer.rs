@@ -133,6 +133,7 @@ impl<'a> Lexer<'a> {
             ('/', _) => Token::Div,
             (',', _) => Token::Comma,
             (':', _) => Token::Colon,
+            (';', _) => Token::SemiColon,
             _ => Error::lexical("invalid token", self.position)?,
         };
 
@@ -145,7 +146,7 @@ impl<'a> Lexer<'a> {
                 'a'..'z' | 'A'..'Z' => self.next_ident(),
                 '0'..='9' | '.' => self.next_number(),
                 '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/'
-                | ':' | ',' => self.next_symbol(),
+                | ':' | ',' | ';' => self.next_symbol(),
                 '"' => self.next_string(),
                 _ if ch.is_whitespace() => {
                     self.next();

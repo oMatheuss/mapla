@@ -35,6 +35,13 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn next_semi(&mut self) -> Result<()> {
+        let Token::SemiColon = self.next_or_err()? else {
+            Error::syntatic("expected semicolon `;`")?
+        };
+        Ok(())
+    }
+
     fn parse_value(&mut self) -> Result<ValueExpr> {
         let token = self.next_or_err()?;
 
@@ -109,6 +116,7 @@ impl<'a> Parser<'a> {
 
     fn consume_expr(&mut self) -> Result<AstNode> {
         let expr = self.parse_expr(1)?;
+        self.next_semi()?;
         let expr = AstNode::Expr(expr);
         Ok(expr)
     }
@@ -158,6 +166,7 @@ impl<'a> Parser<'a> {
             Error::syntatic("expected assign operator `=`")?
         };
         let expr = self.parse_expr(1)?;
+        self.next_semi()?;
         AstNode::Var(ty, (*ident).into(), expr).ok()
     }
 
@@ -256,6 +265,7 @@ impl<'a> Parser<'a> {
     fn consume_ret(&mut self) -> Result<AstNode> {
         self.next(); // discard return token
         let expr = self.parse_expr(1)?;
+        self.next_semi()?;
         let expr = AstNode::Ret(expr);
         Ok(expr)
     }
