@@ -224,21 +224,22 @@ impl Compiler {
             }
             Expression::Cast(var_type, expr) => todo!(),
             Expression::Func(ident, args, ret_type) => {
-                let _offset = scope.off;
                 for arg in args {
                     let mut arg = Self::compile_expr(code, scope, arg);
                     let mem_size = arg.mem_size();
+                    
                     if arg.is_mem() {
                         let a_reg = Reg::get_a(mem_size);
                         code.mov(a_reg, arg);
                         arg = Operand::Reg(a_reg);
                     }
-                    scope.off -= mem_size as isize;
-                    let mem = Mem::offset(Reg::Rbp, scope.off, mem_size);
+
+                    let mem = Mem::reg(Reg::Rsp, mem_size);
+                    // TODO: allocate space for parameters all at once
+                    code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
                     code.mov(mem, arg);
                 }
                 code.call(&ident);
-                scope.off = _offset;
                 Operand::Reg(Reg::Eax)
             }
         }
