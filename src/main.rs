@@ -13,29 +13,14 @@ mod parser;
 mod position;
 mod token;
 
-const CODE: &str = r#"
-use io;
-
-func fib(num: int): int do
-    if num < 2 then
-        return num;
-    end
-
-    return fib(num - 1) + fib(num - 2);
-end
-
-func main() do
-    int r = fib(10);
-    printInt(r);
-end
-"#;
-
 fn main() -> Result<()> {
-    let lex = Lexer::from_source(CODE);
-    let tokens = lex.collect()?;
+    let code = match std::fs::read_to_string("examples/fibonacci.txt") {
+        Ok(input) => input,
+        Err(_) => todo!(),
+    };
 
-    let parser = Parser::new(&tokens);
-    let ast = parser.parse()?;
+    let tokens = Lexer::from_source(&code).collect()?;
+    let ast = Parser::new(&tokens).parse()?;
 
     let asm = Compiler::compile(ast);
 
