@@ -4,14 +4,8 @@ use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Operand, Reg};
 use crate::ast::{Argument, Ast, AstNode, Expression, Operator, ValueExpr, VarType};
 use crate::intrinsic::intrisic;
 
-#[derive(Debug, Clone)]
-struct VarProps {
-    operand: Operand,
-    var_type: VarType,
-}
-
 struct Scope<'a> {
-    var: HashMap<String, VarProps>,
+    var: HashMap<String, Operand>,
     off: isize,
     lbl: usize,
     sup: Option<Box<&'a Scope<'a>>>,
@@ -45,7 +39,7 @@ impl<'a> Scope<'a> {
         }
     }
 
-    fn get(&self, ident: &str) -> &VarProps {
+    fn get(&self, ident: &str) -> &Operand {
         if let Some(local) = self.var.get(ident) {
             local
         } else if let Some(sup) = &self.sup {
@@ -55,8 +49,8 @@ impl<'a> Scope<'a> {
         }
     }
 
-    fn set(&mut self, ident: &str, props: VarProps) -> Option<VarProps> {
-        self.var.insert(String::from(ident), props)
+    fn set(&mut self, ident: &str, operand: Operand) -> Option<Operand> {
+        self.var.insert(String::from(ident), operand)
     }
 
     fn new_label(&mut self) -> String {
@@ -68,6 +62,13 @@ impl<'a> Scope<'a> {
 pub struct Compiler;
 
 impl Compiler {
+    fn get_var_size(var_type: VarType) -> MemSize {
+        match var_type {
+            VarType::Int | VarType::Real => MemSize::DWord,
+            VarType::Bool | VarType::Char => MemSize::Byte,
+        }
+    }
+
     fn compile_expr(code: &mut AsmBuilder, scope: &mut Scope, expr: &Expression) -> Operand {
         match expr {
             Expression::Value(value_expr) => match value_expr {
@@ -78,10 +79,7 @@ impl Compiler {
                     true => Operand::Imm(Imm::TRUE),
                     false => Operand::Imm(Imm::FALSE),
                 },
-                ValueExpr::Identifier(ident) => {
-                    let var = scope.get(ident);
-                    var.operand
-                }
+                ValueExpr::Identifier(ident) => *scope.get(ident),
             },
             Expression::BinOp(operator, sides) => {
                 let [lhs, rhs] = &**sides;
@@ -113,15 +111,8 @@ impl Compiler {
                     lhs = Operand::Reg(a_reg);
                 }
 
-                assert!(
-                    operator.is_assign() == lhs.is_mem(),
-                    "cannot assign if lhs is not a memory"
-                );
-
-                assert!(
-                    lhs.mem_size() == rhs.mem_size(),
-                    "cannot operate on different sizes"
-                );
+                assert!(operator.is_assign() == lhs.is_mem());
+                assert!(lhs.mem_size() == rhs.mem_size());
 
                 match operator {
                     Operator::Equal => {
@@ -260,11 +251,7 @@ impl Compiler {
                 scope.off -= result.mem_size() as isize;
                 let addr = Mem::offset(Reg::Rbp, scope.off, result.mem_size());
                 code.mov(addr, result);
-                let prop = VarProps {
-                    operand: Operand::Mem(addr),
-                    var_type: *var_type,
-                };
-                scope.set(ident, prop);
+                scope.set(ident, addr.into());
             }
             AstNode::If(expr, nodes) => {
                 let result = Self::compile_expr(code, scope, expr);
@@ -300,12 +287,8 @@ impl Compiler {
                 let startfor_lbl = scope.new_label();
                 let endfor_lbl = scope.new_label();
 
-                scope.off -= 4;
+                scope.off -= MemSize::DWord as isize;
                 let ite_addr = Mem::offset(Reg::Rbp, scope.off, MemSize::DWord);
-                let ite_prop = VarProps {
-                    operand: Operand::Mem(ite_addr),
-                    var_type: VarType::Int,
-                };
 
                 code.mov(ite_addr, Imm::Int32(0));
                 code.label(&startfor_lbl);
@@ -315,8 +298,7 @@ impl Compiler {
                         code.cmp(ite_addr, Imm::Int32(*value));
                     }
                     ValueExpr::Identifier(ident) => {
-                        let prop = scope.get(ident);
-                        code.mov(Reg::Eax, prop.operand);
+                        code.mov(Reg::Eax, *scope.get(ident));
                         code.cmp(ite_addr, Reg::Eax);
                     }
                     _ => unreachable!(),
@@ -325,7 +307,7 @@ impl Compiler {
                 code.jg(&endfor_lbl);
 
                 let scope = &mut Scope::continue_on(&scope);
-                scope.set(ident, ite_prop); // define the iterator variable
+                scope.set(ident, ite_addr.into()); // define the iterator variable
 
                 for inner in nodes {
                     Self::compile_node(code, scope, inner);
@@ -366,15 +348,14 @@ impl Compiler {
 
                     let mut scope = Scope::new_inner(&global);
 
-                    let mut mem_offset = 16; // rip + rbp
+                    let mem_offset = 16; // rip + rbp
+                    let mut args_size = 0;
                     for arg in args {
-                        let addr = Mem::offset(Reg::Rbp, mem_offset, MemSize::DWord);
-                        let props = VarProps {
-                            operand: Operand::Mem(addr),
-                            var_type: arg.arg_type,
-                        };
-                        mem_offset += 4; // TODO
-                        scope.set(&arg.name, props);
+                        let mem_size = Self::get_var_size(arg.arg_type);
+                        let offset = mem_offset + args_size as isize;
+                        let addr = Mem::offset(Reg::Rbp, offset, mem_size);
+                        args_size += mem_size as usize;
+                        scope.set(&arg.name, addr.into());
                     }
 
                     for inner in ast_nodes {
@@ -383,7 +364,7 @@ impl Compiler {
 
                     code.label(".return");
                     code.pop_sf();
-                    code.ret(args.len() * 4);
+                    code.ret(args_size);
                 }
                 _ => {}
             }
