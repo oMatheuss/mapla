@@ -16,18 +16,16 @@ mod token;
 const CODE: &str = r#"
 use io;
 
-func soma(limit: int): int do
-    for i to limit then
-        if i > 0 && i % 3 == 0 && i % 5 == 0 then
-            return i;
-        end
+func fib(num: int): int do
+    if num < 2 then
+        return num;
     end
 
-    return 0;
+    return fib(num - 1) + fib(num - 2);
 end
 
 func main() do
-    int r = soma(100);
+    int r = fib(10);
     printInt(r);
 end
 "#;
