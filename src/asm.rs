@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 
 pub enum OpCode {
     Db, // Declare byte (1 byte)
@@ -582,44 +582,40 @@ impl AsmBuilder {
         Self(String::new())
     }
 
+    fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) {
+        let _ = self.0.write_fmt(args);
+    }
+
     pub fn global(&mut self, symbols: &[&str]) {
-        let line = format!("global {symbols}\n", symbols = symbols.join(", "));
-        self.0.push_str(&line);
+        writeln!(self, "global {symbols}", symbols = symbols.join(", "));
     }
 
     pub fn section(&mut self, label: &str) {
-        let line = format!("section .{label}\n");
-        self.0.push_str(&line);
+        writeln!(self, "section .{label}");
     }
 
     pub fn label(&mut self, label: &str) {
-        let line = format!("{label}:\n");
-        self.0.push_str(&line);
+        writeln!(self, "{label}:");
     }
 
     pub fn bits(&mut self, bits: u8) {
-        let line = format!("bits {bits}\n");
-        self.0.push_str(&line);
+        writeln!(self, "bits {bits}");
     }
 
     pub fn db(&mut self, label: &str, value: u8) {
-        let line = format!("  {label}: {opcode} {value}\n", opcode = OpCode::Db);
-        self.0.push_str(&line);
+        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Db);
     }
 
     pub fn dw(&mut self, label: &str, value: u16) {
-        let line = format!("  {label}: {opcode} {value}\n", opcode = OpCode::Dw);
-        self.0.push_str(&line);
+        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Dw);
     }
 
     pub fn dd(&mut self, label: &str, value: u32) {
-        let line = format!("  {label}: {opcode} {value}\n", opcode = OpCode::Dd);
-        self.0.push_str(&line);
+        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Dd);
     }
 
     pub fn dq(&mut self, label: &str, value: u64) {
-        let line = format!("  {label}: {opcode} {value}\n", opcode = OpCode::Dq);
-        self.0.push_str(&line);
+        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Dq);
     }
 
     pub fn dt(&mut self, label: &str, value: [u8; 10]) {
@@ -627,58 +623,47 @@ impl AsmBuilder {
     }
 
     pub fn jmp(&mut self, label: &str) {
-        let line = format!("  {opcode} {label}\n", opcode = OpCode::Jmp);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jmp);
     }
 
     pub fn je(&mut self, label: &str) {
-        let line = format!("  {opcode} {label}\n", opcode = OpCode::Je);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Je);
     }
 
     pub fn jne(&mut self, label: &str) {
-        let line = format!("  {opcode} {label}\n", opcode = OpCode::Jne);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jne);
     }
 
     pub fn jg(&mut self, label: &str) {
-        let line = format!("  {opcode} {label}\n", opcode = OpCode::Jg);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jg);
     }
 
     pub fn jl(&mut self, label: &str) {
-        let line = format!("  {opcode} {label}\n", opcode = OpCode::Jl);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jl);
     }
 
     pub fn sete<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Sete);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Sete);
     }
 
     pub fn setne<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Setne);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setne);
     }
 
     pub fn setg<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Setg);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setg);
     }
 
     pub fn setl<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Setl);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setl);
     }
 
     pub fn inc<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Inc);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Inc);
     }
 
     pub fn dec(&mut self, value: Operand) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Dec);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Dec);
     }
 
     pub fn mov<T1, T2>(&mut self, value1: T1, value2: T2)
@@ -686,8 +671,7 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Mov);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Mov);
     }
 
     pub fn cmp<T1, T2>(&mut self, value1: T1, value2: T2)
@@ -695,33 +679,27 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Cmp);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Cmp);
     }
 
     pub fn lea(&mut self, reg: Reg, mem: Mem) {
-        let line = format!("  {opcode} {reg} {mem}\n", opcode = OpCode::Lea);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {reg} {mem}", opcode = OpCode::Lea);
     }
 
     pub fn push<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Push);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Push);
     }
 
     pub fn pop<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Pop);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Pop);
     }
 
     pub fn call(&mut self, label: &str) {
-        let line = format!("  {opcode} {label}\n", opcode = OpCode::Call);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Call);
     }
 
     pub fn ret(&mut self, nbytes: usize) {
-        let line = format!("  {opcode} {nbytes}\n", opcode = OpCode::Ret);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {nbytes}", opcode = OpCode::Ret);
     }
 
     pub fn add<T1, T2>(&mut self, value1: T1, value2: T2)
@@ -729,8 +707,7 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Add);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Add);
     }
 
     pub fn sub<T1, T2>(&mut self, value1: T1, value2: T2)
@@ -738,8 +715,7 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Sub);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Sub);
     }
 
     // Mul,
@@ -749,18 +725,15 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Imul);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Imul);
     }
 
     pub fn div<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Div);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Div);
     }
 
     pub fn idiv<T: Into<Operand> + Display>(&mut self, value: T) {
-        let line = format!("  {opcode} {value}\n", opcode = OpCode::Idiv);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Idiv);
     }
 
     // Rem,
@@ -770,8 +743,7 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::And);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::And);
     }
 
     pub fn or<T1, T2>(&mut self, value1: T1, value2: T2)
@@ -779,8 +751,7 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Or);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Or);
     }
 
     // Not,
@@ -790,8 +761,7 @@ impl AsmBuilder {
         T1: Into<Operand> + Display,
         T2: Into<Operand> + Display,
     {
-        let line = format!("  {opcode} {value1}, {value2}\n", opcode = OpCode::Xor);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Xor);
     }
 
     // Shl, // Shift left
@@ -799,13 +769,11 @@ impl AsmBuilder {
     // Neg, // Negate
 
     pub fn syscall(&mut self) {
-        let line = format!("  {opcode}\n", opcode = OpCode::Syscall);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode}", opcode = OpCode::Syscall);
     }
 
     pub fn nop(&mut self) {
-        let line = format!("  {opcode}\n", opcode = OpCode::Nop);
-        self.0.push_str(&line);
+        writeln!(self, "  {opcode}", opcode = OpCode::Nop);
     }
 
     pub fn push_sf(&mut self) {
