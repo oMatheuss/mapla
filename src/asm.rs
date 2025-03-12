@@ -586,6 +586,10 @@ impl AsmBuilder {
         let _ = self.0.write_fmt(args);
     }
 
+    pub fn append(&mut self, another: Self) {
+        self.0.push_str(&another.0);
+    }
+
     pub fn global(&mut self, symbols: &[&str]) {
         writeln!(self, "global {symbols}", symbols = symbols.join(", "));
     }
