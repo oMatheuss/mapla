@@ -14,7 +14,7 @@ mod token;
 
 fn main() {
     let file = "examples/fibonacci.txt";
-    
+
     let code = match std::fs::read_to_string(file) {
         Ok(input) => input,
         Err(_) => todo!(),

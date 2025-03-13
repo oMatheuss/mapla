@@ -3,9 +3,9 @@ use std::slice::Iter;
 
 use crate::ast::{Argument, Ast, AstNode, Expression, Operator, ValueExpr, VarType};
 use crate::error::{Error, Result};
+use crate::lexer::LexItem;
 use crate::position::Position;
 use crate::token::Token;
-use crate::lexer::LexItem;
 
 pub struct Parser<'a> {
     tokens: Peekable<Iter<'a, LexItem<'a>>>,
@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [LexItem<'a>]) -> Self {
         Self {
             tokens: tokens.into_iter().peekable(),
-            pos: Position::default()
+            pos: Position::default(),
         }
     }
 
@@ -26,7 +26,7 @@ impl<'a> Parser<'a> {
             Some(item) => {
                 self.pos = *item.position();
                 Some(item.token())
-            },
+            }
             None => None,
         }
     }
@@ -236,7 +236,9 @@ impl<'a> Parser<'a> {
                     args.push(arg);
                 }
                 (2, Token::Comma) => state = 3,
-                (1 | 2, _) => Error::syntatic("expected close parenthesis `)` or argument", self.pos)?,
+                (1 | 2, _) => {
+                    Error::syntatic("expected close parenthesis `)` or argument", self.pos)?
+                }
                 (3, _) => Error::syntatic("expected another argument after comma", self.pos)?,
                 _ => unreachable!("The state machine is out of control"),
             };
@@ -265,7 +267,9 @@ impl<'a> Parser<'a> {
                     _ = self.next();
                     state = 3;
                 }
-                (2, ..) => Error::syntatic("expected close parenthesis `)` or comma `,`", self.pos)?,
+                (2, ..) => {
+                    Error::syntatic("expected close parenthesis `)` or comma `,`", self.pos)?
+                }
                 _ => unreachable!("The state machine is out of control"),
             };
         }

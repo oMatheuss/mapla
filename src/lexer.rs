@@ -174,7 +174,10 @@ impl<'a> Lexer<'a> {
             return Ok(LexItem { token, position });
         }
 
-        Ok(LexItem { token: Token::Eof, position: self.position })
+        Ok(LexItem {
+            token: Token::Eof,
+            position: self.position,
+        })
     }
 
     pub fn collect(mut self) -> Result<Vec<LexItem<'a>>> {
