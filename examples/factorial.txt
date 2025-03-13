@@ -1,0 +1,11 @@
+use io;
+
+func fact(acc: int, n: int) do
+    if n < 2 then return acc; end
+    return fact(n * acc, n - 1);
+end
+
+func main() do
+    int r = fact(1, 5);
+    printInt(r);
+end
