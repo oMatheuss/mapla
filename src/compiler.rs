@@ -284,7 +284,7 @@ impl Compiler {
         ident: &Identifier,
         args: &[Expression],
     ) -> Operand {
-        for arg in args {
+        for arg in args.iter().rev() {
             let mut arg = Self::compile_expr(code, scope, arg);
             let mem_size = arg.mem_size();
 
