@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::{error::Result, token::Token};
+use crate::error::Result;
 
 #[derive(Debug)]
 pub struct Ast(Vec<AstNode>);
@@ -173,36 +173,6 @@ pub enum Operator {
     SubAssign,
     MulAssign,
     DivAssign,
-}
-
-impl<'a> TryFrom<&Token<'a>> for Operator {
-    type Error = crate::error::Error;
-
-    fn try_from(value: &Token) -> std::result::Result<Self, Self::Error> {
-        let op = match value {
-            Token::Equal => Operator::Equal,
-            Token::NotEqual => Operator::NotEqual,
-            Token::Greater => Operator::Greater,
-            Token::GreaterEqual => Operator::GreaterEqual,
-            Token::Less => Operator::Less,
-            Token::LessEqual => Operator::LessEqual,
-            Token::And => Operator::And,
-            Token::Or => Operator::Or,
-            Token::Add => Operator::Add,
-            Token::Sub => Operator::Sub,
-            Token::Mul => Operator::Mul,
-            Token::Div => Operator::Div,
-            Token::Mod => Operator::Mod,
-            Token::Assign => Operator::Assign,
-            Token::AddAssign => Operator::AddAssign,
-            Token::SubAssign => Operator::SubAssign,
-            Token::MulAssign => Operator::MulAssign,
-            Token::DivAssign => Operator::DivAssign,
-            _ => crate::error::Error::syntatic("invalid token")?,
-        };
-
-        Ok(op)
-    }
 }
 
 impl Operator {

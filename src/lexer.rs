@@ -10,8 +10,23 @@ pub struct Lexer<'a> {
     position: Position,
 }
 
+pub struct LexItem<'a> {
+    token: Token<'a>,
+    position: Position,
+}
+
+impl<'a> LexItem<'a> {
+    pub fn token(&self) -> &Token {
+        &self.token
+    }
+
+    pub fn position(&self) -> &Position {
+        &self.position
+    }
+}
+
 impl<'a> Lexer<'a> {
-    pub fn from_source(input: &'a str) -> Self {
+    pub fn new(input: &'a str) -> Self {
         let chars = input.chars().peekable();
         Self {
             input,
@@ -140,9 +155,10 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    pub fn next_token(&mut self) -> Result<Token<'a>> {
-        while let Some(ch) = self.peek() {
-            return match ch {
+    pub fn next_token(&mut self) -> Result<LexItem<'a>> {
+        while let Some(&ch) = self.peek() {
+            let position = self.position.clone();
+            let token = match ch {
                 'a'..'z' | 'A'..'Z' => self.next_ident(),
                 '0'..='9' | '.' => self.next_number(),
                 '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/'
@@ -153,23 +169,29 @@ impl<'a> Lexer<'a> {
                     continue;
                 }
                 _ => Error::lexical("invalid token", self.position)?,
-            };
+            }?;
+
+            return Ok(LexItem { token, position });
         }
 
-        Ok(Token::Eof)
+        Ok(LexItem { token: Token::Eof, position: self.position })
     }
 
-    pub fn collect(mut self) -> Result<Vec<Token<'a>>> {
+    pub fn collect(mut self) -> Result<Vec<LexItem<'a>>> {
         let mut items = Vec::new();
         loop {
             let next = self.next_token()?;
 
-            if let Token::Eof = next {
+            if let Token::Eof = next.token() {
                 items.push(next);
                 break Ok(items);
             }
 
             items.push(next);
         }
+    }
+
+    pub fn parse(input: &'a str) -> Result<Vec<LexItem<'a>>> {
+        Lexer::new(input).collect()
     }
 }

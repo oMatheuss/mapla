@@ -1,5 +1,4 @@
 use compiler::Compiler;
-use error::Result;
 use lexer::Lexer;
 use parser::Parser;
 
@@ -13,18 +12,19 @@ mod parser;
 mod position;
 mod token;
 
-fn main() -> Result<()> {
-    let code = match std::fs::read_to_string("examples/fibonacci.txt") {
+fn main() {
+    let file = "examples/fibonacci.txt";
+    
+    let code = match std::fs::read_to_string(file) {
         Ok(input) => input,
         Err(_) => todo!(),
     };
 
-    let tokens = Lexer::from_source(&code).collect()?;
-    let ast = Parser::new(&tokens).parse()?;
-
-    let asm = Compiler::compile(ast);
-
-    println!("{asm}");
-
-    Ok(())
+    match Lexer::parse(&code) {
+        Ok(tokens) => match Parser::new(&tokens).parse() {
+            Ok(ast) => println!("{asm}", asm = Compiler::compile(ast)),
+            Err(err) => eprintln!("{file}:{err}"),
+        },
+        Err(err) => eprintln!("{file}:{err}"),
+    };
 }

@@ -3,27 +3,40 @@ use std::slice::Iter;
 
 use crate::ast::{Argument, Ast, AstNode, Expression, Operator, ValueExpr, VarType};
 use crate::error::{Error, Result};
+use crate::position::Position;
 use crate::token::Token;
+use crate::lexer::LexItem;
 
 pub struct Parser<'a> {
-    tokens: Peekable<Iter<'a, Token<'a>>>,
+    tokens: Peekable<Iter<'a, LexItem<'a>>>,
+    pos: Position,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: &'a [Token<'a>]) -> Self {
+    pub fn new(tokens: &'a [LexItem<'a>]) -> Self {
         Self {
             tokens: tokens.into_iter().peekable(),
+            pos: Position::default()
         }
     }
 
     #[inline]
     fn next(&mut self) -> Option<&'a Token<'a>> {
-        self.tokens.next()
+        match self.tokens.next() {
+            Some(item) => {
+                self.pos = *item.position();
+                Some(item.token())
+            },
+            None => None,
+        }
     }
 
     #[inline]
     fn peek(&mut self) -> Option<&'a Token<'a>> {
-        self.tokens.peek().map(|v| *v)
+        match self.tokens.peek() {
+            Some(some) => Some(some.token()),
+            None => None,
+        }
     }
 
     #[inline]
@@ -31,13 +44,13 @@ impl<'a> Parser<'a> {
         if let Some(token) = self.next() {
             Ok(token)
         } else {
-            Error::syntatic("unexpected end of tokens")
+            Error::syntatic("unexpected end of tokens", self.pos)
         }
     }
 
     fn next_semi(&mut self) -> Result<()> {
         let Token::SemiColon = self.next_or_err()? else {
-            Error::syntatic("expected semicolon `;`")?
+            Error::syntatic("expected semicolon `;`", self.pos)?
         };
         Ok(())
     }
@@ -52,7 +65,7 @@ impl<'a> Parser<'a> {
             Token::FloatLiteral(float) => ValueExpr::Float(float),
             Token::True => ValueExpr::Bool(true),
             Token::False => ValueExpr::Bool(false),
-            _ => Error::syntatic("unexpected token")?,
+            _ => Error::syntatic("unexpected token", self.pos)?,
         };
 
         Ok(expr)
@@ -75,11 +88,11 @@ impl<'a> Parser<'a> {
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(1)?;
                 let Token::CloseParen = self.next_or_err()? else {
-                    Error::syntatic("expected close parentheses")?
+                    Error::syntatic("expected close parentheses", self.pos)?
                 };
                 inner_expr
             }
-            _ => Error::syntatic("unexpected token")?,
+            _ => Error::syntatic("unexpected token", self.pos)?,
         };
 
         Ok(expr)
@@ -87,7 +100,30 @@ impl<'a> Parser<'a> {
 
     fn peek_operator(&mut self) -> Option<Operator> {
         let token = self.peek()?;
-        Operator::try_from(token).ok()
+
+        let op = match token {
+            Token::Equal => Operator::Equal,
+            Token::NotEqual => Operator::NotEqual,
+            Token::Greater => Operator::Greater,
+            Token::GreaterEqual => Operator::GreaterEqual,
+            Token::Less => Operator::Less,
+            Token::LessEqual => Operator::LessEqual,
+            Token::And => Operator::And,
+            Token::Or => Operator::Or,
+            Token::Add => Operator::Add,
+            Token::Sub => Operator::Sub,
+            Token::Mul => Operator::Mul,
+            Token::Div => Operator::Div,
+            Token::Mod => Operator::Mod,
+            Token::Assign => Operator::Assign,
+            Token::AddAssign => Operator::AddAssign,
+            Token::SubAssign => Operator::SubAssign,
+            Token::MulAssign => Operator::MulAssign,
+            Token::DivAssign => Operator::DivAssign,
+            _ => return None,
+        };
+
+        Some(op)
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Result<Expression> {
@@ -124,14 +160,14 @@ impl<'a> Parser<'a> {
     fn consume_for(&mut self) -> Result<AstNode> {
         self.next(); // discard 'for' token
         let Token::Identifier(ident) = self.next_or_err()? else {
-            Error::syntatic("expected identifier")?
+            Error::syntatic("expected identifier", self.pos)?
         };
         let Token::To = self.next_or_err()? else {
-            Error::syntatic("expected token `to`")?
+            Error::syntatic("expected token `to`", self.pos)?
         };
         let value = self.parse_value()?;
         let Token::Then = self.next_or_err()? else {
-            Error::syntatic("expected token `then`")?
+            Error::syntatic("expected token `then`", self.pos)?
         };
         let inner = self.consume_inner()?;
         AstNode::For((*ident).into(), value, inner).ok()
@@ -141,7 +177,7 @@ impl<'a> Parser<'a> {
         self.next(); // discard 'while' token
         let expr = self.parse_expr(1)?;
         let Token::Then = self.next_or_err()? else {
-            Error::syntatic("expected `then`")?
+            Error::syntatic("expected `then`", self.pos)?
         };
         let inner = self.consume_inner()?;
         AstNode::While(expr, inner).ok()
@@ -151,7 +187,7 @@ impl<'a> Parser<'a> {
         self.next(); // discard 'if' token
         let expr = self.parse_expr(1)?;
         let Token::Then = self.next_or_err()? else {
-            Error::syntatic("expected `then`")?
+            Error::syntatic("expected `then`", self.pos)?
         };
         let inner = self.consume_inner()?;
         AstNode::If(expr, inner).ok()
@@ -160,10 +196,10 @@ impl<'a> Parser<'a> {
     fn consume_var(&mut self, ty: VarType) -> Result<AstNode> {
         self.next(); // discard var type token
         let Token::Identifier(ident) = self.next_or_err()? else {
-            Error::syntatic("expected identifier")?
+            Error::syntatic("expected identifier", self.pos)?
         };
         let Token::Assign = self.next_or_err()? else {
-            Error::syntatic("expected assign operator `=`")?
+            Error::syntatic("expected assign operator `=`", self.pos)?
         };
         let expr = self.parse_expr(1)?;
         self.next_semi()?;
@@ -176,14 +212,14 @@ impl<'a> Parser<'a> {
             Token::Real => VarType::Real,
             Token::Char => VarType::Char,
             Token::Bool => VarType::Bool,
-            _ => Error::syntatic("expected type annotation")?,
+            _ => Error::syntatic("expected type annotation", self.pos)?,
         };
         Ok(t)
     }
 
     fn parse_args(&mut self) -> Result<Vec<Argument>> {
         let Token::OpenParen = self.next_or_err()? else {
-            Error::syntatic("expected open parenthesis `(`")?
+            Error::syntatic("expected open parenthesis `(`", self.pos)?
         };
         let mut state = 1u8;
         let mut args = Vec::new();
@@ -193,15 +229,15 @@ impl<'a> Parser<'a> {
                 (1 | 3, Token::Identifier(name)) => {
                     state = 2;
                     let Token::Colon = self.next_or_err()? else {
-                        Error::syntatic("expected token `:`")?
+                        Error::syntatic("expected token `:`", self.pos)?
                     };
                     let arg_type = self.parse_type()?;
                     let arg = Argument::new(name, arg_type);
                     args.push(arg);
                 }
                 (2, Token::Comma) => state = 3,
-                (1 | 2, _) => Error::syntatic("expected close parenthesis `)` or argument")?,
-                (3, _) => Error::syntatic("expected another argument after comma")?,
+                (1 | 2, _) => Error::syntatic("expected close parenthesis `)` or argument", self.pos)?,
+                (3, _) => Error::syntatic("expected another argument after comma", self.pos)?,
                 _ => unreachable!("The state machine is out of control"),
             };
         }
@@ -210,7 +246,7 @@ impl<'a> Parser<'a> {
 
     fn parse_callargs(&mut self) -> Result<Vec<Expression>> {
         let Token::OpenParen = self.next_or_err()? else {
-            Error::syntatic("expected open parenthesis `(`")?
+            Error::syntatic("expected open parenthesis `(`", self.pos)?
         };
         let mut state = 1u8;
         let mut args = Vec::new();
@@ -229,7 +265,7 @@ impl<'a> Parser<'a> {
                     _ = self.next();
                     state = 3;
                 }
-                (2, ..) => Error::syntatic("expected close parenthesis `)` or comma `,`")?,
+                (2, ..) => Error::syntatic("expected close parenthesis `)` or comma `,`", self.pos)?,
                 _ => unreachable!("The state machine is out of control"),
             };
         }
@@ -239,24 +275,24 @@ impl<'a> Parser<'a> {
     fn consume_func(&mut self) -> Result<AstNode> {
         self.next(); // discard function token
         let Token::Identifier(name) = self.next_or_err()? else {
-            Error::syntatic("expected name of the function")?
+            Error::syntatic("expected name of the function", self.pos)?
         };
         let args = self.parse_args()?;
         let ret_type = match self.next_or_err()? {
             Token::Colon => {
                 let ret_type = self.parse_type()?;
                 let Token::Do = self.next_or_err()? else {
-                    Error::syntatic("expected `do`")?
+                    Error::syntatic("expected `do`", self.pos)?
                 };
                 Some(ret_type)
             }
             Token::Do => None,
-            _ => Error::syntatic("expected type annotation or `do`")?,
+            _ => Error::syntatic("expected type annotation or `do`", self.pos)?,
         };
         let inner = self.consume_inner()?;
         if let Some(..) = ret_type {
             if !matches!(inner.last(), Some(AstNode::Ret(..))) {
-                Error::syntatic("expected a return statement for a typed funcion")?;
+                Error::syntatic("expected a return statement for a typed funcion", self.pos)?;
             }
         }
         AstNode::Func((*name).into(), args, ret_type, inner).ok()
@@ -273,7 +309,7 @@ impl<'a> Parser<'a> {
     fn consume_use(&mut self) -> Result<AstNode> {
         self.next(); // discard use token
         let Token::Identifier(ident) = self.next_or_err()? else {
-            Error::syntatic("expected identifier")?
+            Error::syntatic("expected identifier", self.pos)?
         };
         self.next_semi()?;
         AstNode::Use((*ident).into()).ok()
@@ -305,7 +341,7 @@ impl<'a> Parser<'a> {
             | Token::Identifier(..) => self.consume_expr(),
 
             Token::Eof | Token::End => panic!("token not allowed"),
-            _ => Error::syntatic("wrong placement for this token"),
+            _ => Error::syntatic("wrong placement for this token", self.pos),
         }
     }
 
@@ -319,7 +355,7 @@ impl<'a> Parser<'a> {
             }
 
             if let Token::Eof = token {
-                return Error::syntatic("unexpected end of file");
+                return Error::syntatic("unexpected end of file", self.pos);
             }
 
             let node = self.match_token(token)?;

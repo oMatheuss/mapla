@@ -26,11 +26,11 @@ impl Error {
         })
     }
 
-    pub fn syntatic<T>(message: &'static str) -> Result<T> {
+    pub fn syntatic<T>(message: &'static str, position: Position) -> Result<T> {
         Err(Error {
             kind: ErrorKind::SyntaxError,
             message,
-            position: Position::default(),
+            position,
         })
     }
 }
