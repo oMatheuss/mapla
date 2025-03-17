@@ -44,6 +44,19 @@ pub enum OpCode {
     Shr, // Shift right
     Neg, // Negate
 
+    Movss, // mov f32 to/from xmm to xmm/memory
+    Movsd, // mov f64
+
+    Addss,
+    Subss,
+    Mulss,
+    Divss,
+
+    Addsd,
+    Subsd,
+    Mulsd,
+    Divsd,
+
     Syscall,
     Nop,
 }
@@ -88,6 +101,16 @@ impl Display for OpCode {
             OpCode::Shl => write!(f, "shl"),
             OpCode::Shr => write!(f, "shr"),
             OpCode::Neg => write!(f, "neg"),
+            OpCode::Movss => write!(f, "movss"),
+            OpCode::Movsd => write!(f, "movsd"),
+            OpCode::Addss => write!(f, "addss"),
+            OpCode::Subss => write!(f, "subss"),
+            OpCode::Mulss => write!(f, "mulss"),
+            OpCode::Divss => write!(f, "divss"),
+            OpCode::Addsd => write!(f, "addsd"),
+            OpCode::Subsd => write!(f, "subsd"),
+            OpCode::Mulsd => write!(f, "mulsd"),
+            OpCode::Divsd => write!(f, "divsd"),
             OpCode::Syscall => write!(f, "syscall"),
             OpCode::Nop => write!(f, "nop"),
         }
@@ -332,7 +355,7 @@ impl Reg {
         }
     }
 
-    pub fn get_a(mem_size: MemSize) -> Reg {
+    pub fn get_a(mem_size: MemSize) -> Self {
         match mem_size {
             MemSize::Byte => Reg::Al,
             MemSize::Word => Reg::Ax,
@@ -490,8 +513,8 @@ impl Display for Imm {
             Imm::Char(value) => write!(f, "byte '{value}'"),
             Imm::Int32(value) => write!(f, "dword {value}"),
             Imm::Int64(value) => write!(f, "qword {value}"),
-            Imm::Float32(value) => write!(f, "dword {value}"),
-            Imm::Float64(value) => write!(f, "qword {value}"),
+            Imm::Float32(value) => write!(f, "dword __?float32?__({value:.7})"),
+            Imm::Float64(value) => write!(f, "qword __?float64?__({value:.7})"),
         }
     }
 }
@@ -507,6 +530,65 @@ impl Imm {
             Imm::Int64(..) | Imm::Float64(..) => MemSize::QWord,
         }
     }
+
+    pub fn is_float(&self) -> bool {
+        match self {
+            Imm::Float32(..) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum XmmReg {
+    Xmm0,
+    Xmm1,
+    Xmm2,
+    Xmm3,
+    Xmm4,
+    Xmm5,
+    Xmm6,
+    Xmm7,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Xmm {
+    reg: XmmReg,
+    size: MemSize,
+    packed: bool,
+}
+
+impl Xmm {
+    pub fn new(reg: XmmReg, mem_size: MemSize) -> Self {
+        Self {
+            reg,
+            size: mem_size,
+            packed: false,
+        }
+    }
+
+    pub fn get_0(mem_size: MemSize) -> Self {
+        Self::new(XmmReg::Xmm0, mem_size)
+    }
+
+    pub fn mem_size(&self) -> MemSize {
+        self.size
+    }
+}
+
+impl Display for Xmm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.reg {
+            XmmReg::Xmm0 => write!(f, "xmm0"),
+            XmmReg::Xmm1 => write!(f, "xmm1"),
+            XmmReg::Xmm2 => write!(f, "xmm2"),
+            XmmReg::Xmm3 => write!(f, "xmm3"),
+            XmmReg::Xmm4 => write!(f, "xmm4"),
+            XmmReg::Xmm5 => write!(f, "xmm5"),
+            XmmReg::Xmm6 => write!(f, "xmm6"),
+            XmmReg::Xmm7 => write!(f, "xmm7"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -514,6 +596,7 @@ pub enum Operand {
     Reg(Reg),
     Mem(Mem),
     Imm(Imm),
+    Xmm(Xmm),
 }
 
 impl Display for Operand {
@@ -522,6 +605,7 @@ impl Display for Operand {
             Self::Reg(reg) => reg.fmt(f),
             Self::Mem(mem) => mem.fmt(f),
             Self::Imm(imm) => imm.fmt(f),
+            Self::Xmm(xmm) => xmm.fmt(f),
         }
     }
 }
@@ -544,12 +628,19 @@ impl From<Imm> for Operand {
     }
 }
 
+impl From<Xmm> for Operand {
+    fn from(value: Xmm) -> Self {
+        Self::Xmm(value)
+    }
+}
+
 impl Operand {
     pub fn mem_size(&self) -> MemSize {
         match self {
             Operand::Reg(reg) => reg.mem_size(),
             Operand::Mem(mem) => mem.mem_size(),
             Operand::Imm(imm) => imm.mem_size(),
+            Operand::Xmm(xmm) => xmm.mem_size(),
         }
     }
 
@@ -570,6 +661,13 @@ impl Operand {
     pub fn is_imm(&self) -> bool {
         match self {
             Operand::Imm(..) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_xmm(&self) -> bool {
+        match self {
+            Operand::Xmm(..) => true,
             _ => false,
         }
     }
@@ -771,6 +869,72 @@ impl AsmBuilder {
     // Shl, // Shift left
     // Shr, // Shift right
     // Neg, // Negate
+
+    pub fn movss<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        writeln!(
+            self,
+            "  {opcode} {value1}, {value2}",
+            opcode = OpCode::Movss
+        );
+    }
+
+    pub fn addss<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        writeln!(
+            self,
+            "  {opcode} {value1}, {value2}",
+            opcode = OpCode::Addss
+        );
+    }
+
+    pub fn subss<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        writeln!(
+            self,
+            "  {opcode} {value1}, {value2}",
+            opcode = OpCode::Subss
+        );
+    }
+
+    pub fn mulss<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        writeln!(
+            self,
+            "  {opcode} {value1}, {value2}",
+            opcode = OpCode::Mulss
+        );
+    }
+
+    pub fn divss<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        writeln!(
+            self,
+            "  {opcode} {value1}, {value2}",
+            opcode = OpCode::Divss
+        );
+    }
+
+    // Movsd, // mov f64
+    // Addsd,
+    // Subsd,
+    // Mulsd,
+    // Divsd,
 
     pub fn syscall(&mut self) {
         writeln!(self, "  {opcode}", opcode = OpCode::Syscall);

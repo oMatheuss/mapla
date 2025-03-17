@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Operand, Reg};
-use crate::ast::{Argument, Ast, AstNode, Expression, Identifier, Operator, ValueExpr, VarType};
+use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Operand, Reg, Xmm};
+use crate::ast::{
+    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Operator, ValueExpr, VarType,
+};
 use crate::intrinsic::intrisic;
 
 struct MemAlloc {
@@ -118,6 +120,7 @@ impl Compiler {
         match var_type {
             VarType::Int | VarType::Real => MemSize::DWord,
             VarType::Bool | VarType::Char => MemSize::Byte,
+            VarType::Void => panic!("void does not have a known size"),
         }
     }
 
@@ -130,38 +133,51 @@ impl Compiler {
                 true => Operand::Imm(Imm::TRUE),
                 false => Operand::Imm(Imm::FALSE),
             },
-            ValueExpr::Identifier(ident) => *scope.get(ident),
+            ValueExpr::Identifier(ident, ..) => *scope.get(ident),
         }
     }
 
-    fn compile_binop(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        operator: &Operator,
-        lhs: &Expression,
-        rhs: &Expression,
-    ) -> Operand {
+    fn compile_binop(code: &mut AsmBuilder, scope: &mut Scope, bin_op: &BinaryOp) -> Operand {
+        let is_float_expr = bin_op.is_float_expr();
+
         // depth-first search
-        let mut lhs = Self::compile_expr(code, scope, lhs);
+        let mut lhs = Self::compile_expr(code, scope, bin_op.lhs());
 
         // clear register
         if let Operand::Reg(reg) = lhs {
             lhs = scope.new_temp(reg.mem_size());
             code.mov(lhs, reg);
+        } else if let Operand::Xmm(xmm) = lhs {
+            lhs = scope.new_temp(xmm.mem_size());
+            code.movss(lhs, xmm);
         }
 
-        let mut rhs = Self::compile_expr(code, scope, rhs);
+        let mut rhs = Self::compile_expr(code, scope, bin_op.rhs());
 
         // clear register
         if let Operand::Reg(reg) = rhs {
             rhs = scope.new_temp(reg.mem_size());
             code.mov(rhs, reg);
+        } else if let Operand::Xmm(xmm) = rhs {
+            lhs = scope.new_temp(xmm.mem_size());
+            code.movss(rhs, xmm);
         }
 
+        match is_float_expr {
+            true => Self::compile_fop(code, scope, bin_op.operator(), lhs, rhs),
+            false => Self::compile_iop(code, bin_op.operator(), lhs, rhs),
+        }
+    }
+
+    fn compile_iop(
+        code: &mut AsmBuilder,
+        operator: Operator,
+        mut lhs: Operand,
+        mut rhs: Operand,
+    ) -> Operand {
         // prepare for operation
-        if !lhs.is_reg() && !operator.is_assign() {
-            let mem_size = lhs.mem_size();
-            let a_reg = Reg::get_a(mem_size);
+        if !(lhs.is_reg() || operator.is_assign()) {
+            let a_reg = Reg::get_a(lhs.mem_size());
             code.mov(a_reg, lhs);
             lhs = Operand::Reg(a_reg);
         }
@@ -278,13 +294,93 @@ impl Compiler {
         }
     }
 
-    fn compile_func(
+    fn compile_fop(
         code: &mut AsmBuilder,
         scope: &mut Scope,
-        ident: &Identifier,
-        args: &[Expression],
+        operator: Operator,
+        mut lhs: Operand,
+        mut rhs: Operand,
     ) -> Operand {
-        for arg in args.iter().rev() {
+        let old_lhs = lhs.clone();
+
+        match lhs {
+            Operand::Mem(mem) => {
+                let xmm0 = Xmm::get_0(mem.mem_size());
+                code.movss(xmm0, mem);
+                lhs = Operand::Xmm(xmm0);
+            }
+            Operand::Imm(imm) => {
+                lhs = scope.new_temp(imm.mem_size());
+                code.mov(lhs, imm);
+                let xmm0 = Xmm::get_0(lhs.mem_size());
+                code.movss(xmm0, lhs);
+                lhs = Operand::Xmm(xmm0);
+            }
+            _ => {}
+        }
+
+        if let Operand::Imm(imm) = rhs {
+            rhs = scope.new_temp(imm.mem_size());
+            code.mov(rhs, imm);
+        }
+
+        assert!(lhs.mem_size() == rhs.mem_size());
+
+        match operator {
+            Operator::Equal => todo!(),
+            Operator::NotEqual => todo!(),
+            Operator::Greater => todo!(),
+            Operator::GreaterEqual => todo!(),
+            Operator::Less => todo!(),
+            Operator::LessEqual => todo!(),
+            Operator::And => todo!(),
+            Operator::Or => todo!(),
+            Operator::Add => {
+                code.addss(lhs, rhs);
+                lhs
+            }
+            Operator::Sub => {
+                code.subss(lhs, rhs);
+                lhs
+            }
+            Operator::Mul => {
+                code.mulss(lhs, rhs);
+                lhs
+            }
+            Operator::Div => {
+                code.divss(lhs, rhs);
+                lhs
+            }
+            Operator::Mod => todo!(),
+            Operator::Assign => {
+                code.movss(lhs, rhs);
+                lhs
+            }
+            Operator::AddAssign => {
+                code.addss(lhs, rhs);
+                code.movss(old_lhs, lhs);
+                old_lhs
+            }
+            Operator::SubAssign => {
+                code.subss(lhs, rhs);
+                code.movss(old_lhs, lhs);
+                old_lhs
+            }
+            Operator::MulAssign => {
+                code.mulss(lhs, rhs);
+                code.movss(old_lhs, lhs);
+                old_lhs
+            }
+            Operator::DivAssign => {
+                code.divss(lhs, rhs);
+                code.movss(old_lhs, lhs);
+                old_lhs
+            }
+        }
+    }
+
+    fn compile_func(code: &mut AsmBuilder, scope: &mut Scope, func: &FunctionCall) -> Operand {
+        for arg in func.args().iter().rev() {
             let mut arg = Self::compile_expr(code, scope, arg);
             let mem_size = arg.mem_size();
 
@@ -299,19 +395,16 @@ impl Compiler {
             code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
             code.mov(mem, arg);
         }
-        code.call(&ident);
+        code.call(func.name());
         Operand::Reg(Reg::Eax)
     }
 
     fn compile_expr(code: &mut AsmBuilder, scope: &mut Scope, expr: &Expression) -> Operand {
         match expr {
             Expression::Value(value) => Self::compile_value(scope, value),
-            Expression::BinOp(operator, sides) => {
-                let [lhs, rhs] = &**sides;
-                Self::compile_binop(code, scope, operator, lhs, rhs)
-            }
-            Expression::Cast(var_type, expr) => todo!(),
-            Expression::Func(ident, args, ..) => Self::compile_func(code, scope, ident, args),
+            Expression::BinOp(bin_op) => Self::compile_binop(code, scope, bin_op),
+            Expression::Cast(..) => todo!(),
+            Expression::Func(func) => Self::compile_func(code, scope, func),
         }
     }
 
@@ -323,10 +416,14 @@ impl Compiler {
 
     fn compile_node(code: &mut AsmBuilder, scope: &mut Scope, node: &AstNode) {
         match node {
-            AstNode::Var(var_type, ident, expr) => {
+            AstNode::Var(_, ident, expr) => {
                 let result = Self::do_compile_expr(code, scope, expr);
                 let local = scope.new_local(ident, result.mem_size());
-                code.mov(local, result);
+                if let Operand::Xmm(_) = result {
+                    code.movss(local, result);
+                } else {
+                    code.mov(local, result);
+                }
             }
             AstNode::If(expr, nodes) => {
                 let endif_lbl = scope.new_label();
@@ -374,7 +471,7 @@ impl Compiler {
                     ValueExpr::Int(value) => {
                         code.cmp(counter, Imm::Int32(*value));
                     }
-                    ValueExpr::Identifier(ident) => {
+                    ValueExpr::Identifier(ident, ..) => {
                         code.mov(Reg::Eax, *scope.get(ident));
                         code.cmp(counter, Reg::Eax);
                     }

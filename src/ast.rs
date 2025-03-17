@@ -30,6 +30,7 @@ pub enum VarType {
     Real,
     Bool,
     Char,
+    Void,
 }
 
 #[derive(Debug)]
@@ -67,14 +68,84 @@ pub enum ValueExpr {
     Int(i32),
     Float(f32),
     Bool(bool),
-    Identifier(Identifier),
+    Identifier(Identifier, VarType),
+}
+
+impl ValueExpr {
+    fn value_type(&self) -> VarType {
+        match self {
+            ValueExpr::String(..) => todo!(),
+            ValueExpr::Int(..) => VarType::Int,
+            ValueExpr::Float(..) => VarType::Real,
+            ValueExpr::Bool(..) => VarType::Bool,
+            ValueExpr::Identifier(.., var_type) => *var_type,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BinaryOp {
+    operator: Operator,
+    lhs: Box<Expression>,
+    rhs: Box<Expression>,
+    result: VarType,
+}
+
+impl BinaryOp {
+    #[inline]
+    pub fn lhs(&self) -> &Expression {
+        &self.lhs
+    }
+
+    #[inline]
+    pub fn rhs(&self) -> &Expression {
+        &self.rhs
+    }
+
+    #[inline]
+    pub fn operator(&self) -> Operator {
+        self.operator
+    }
+
+    #[inline]
+    pub fn result_type(&self) -> VarType {
+        self.result
+    }
+
+    pub fn is_float_expr(&self) -> bool {
+        self.lhs.expr_type() == VarType::Real || self.rhs.expr_type() == VarType::Real
+    }
+}
+
+#[derive(Debug)]
+pub struct FunctionCall {
+    name: Identifier,
+    args: Vec<Expression>,
+    ret: VarType,
+}
+
+impl FunctionCall {
+    #[inline]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[inline]
+    pub fn args(&self) -> &[Expression] {
+        &self.args
+    }
+
+    #[inline]
+    pub fn return_type(&self) -> VarType {
+        self.ret
+    }
 }
 
 #[derive(Debug)]
 pub enum Expression {
     Value(ValueExpr),
-    BinOp(Operator, Box<[Expression; 2]>),
-    Func(Identifier, Vec<Expression>, VarType),
+    BinOp(BinaryOp),
+    Func(FunctionCall),
     Cast(VarType, Box<Expression>),
 }
 
@@ -84,28 +155,68 @@ impl From<ValueExpr> for Expression {
     }
 }
 
+impl From<BinaryOp> for Expression {
+    fn from(value: BinaryOp) -> Self {
+        Self::BinOp(value)
+    }
+}
+
+impl From<FunctionCall> for Expression {
+    fn from(value: FunctionCall) -> Self {
+        Self::Func(value)
+    }
+}
+
 impl Expression {
     pub const TRUE: Self = Self::Value(ValueExpr::Bool(true));
     pub const FALSE: Self = Self::Value(ValueExpr::Bool(false));
 
     #[inline]
     pub fn float(f: f32) -> Self {
-        Expression::Value(ValueExpr::Float(f))
+        Self::Value(ValueExpr::Float(f))
     }
 
     #[inline]
     pub fn int(i: i32) -> Self {
-        Expression::Value(ValueExpr::Int(i))
+        Self::Value(ValueExpr::Int(i))
     }
 
     #[inline]
-    pub fn identifier(id: &str) -> Self {
-        Expression::Value(ValueExpr::Identifier(Identifier(String::from(id))))
+    pub fn identifier(id: &str, var_type: VarType) -> Self {
+        Self::Value(ValueExpr::Identifier(id.into(), var_type))
     }
 
     #[inline]
     pub fn string(s: &str) -> Self {
-        Expression::Value(ValueExpr::String(String::from(s)))
+        Self::Value(ValueExpr::String(String::from(s)))
+    }
+
+    #[inline]
+    pub fn bin_op(op: Operator, lhs: Expression, rhs: Expression, result: VarType) -> Self {
+        Self::BinOp(BinaryOp {
+            operator: op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            result,
+        })
+    }
+
+    #[inline]
+    pub fn func(name: &str, args: Vec<Expression>, ret: VarType) -> Self {
+        Self::Func(FunctionCall {
+            name: name.into(),
+            args,
+            ret,
+        })
+    }
+
+    pub fn expr_type(&self) -> VarType {
+        match self {
+            Expression::Value(value) => value.value_type(),
+            Expression::BinOp(bin_op) => bin_op.result_type(),
+            Expression::Func(func) => func.return_type(),
+            Expression::Cast(..) => todo!(),
+        }
     }
 }
 
@@ -124,14 +235,6 @@ impl Argument {
             default: None,
         }
     }
-
-    pub fn with_default(name: &str, arg_type: VarType, default: ValueExpr) -> Self {
-        Self {
-            name: name.into(),
-            arg_type,
-            default: Some(default),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -142,7 +245,7 @@ pub enum AstNode {
     While(Expression, Vec<AstNode>),
     For(Identifier, ValueExpr, Vec<AstNode>),
     Expr(Expression),
-    Func(Identifier, Vec<Argument>, Option<VarType>, Vec<AstNode>),
+    Func(Identifier, Vec<Argument>, VarType, Vec<AstNode>),
     Ret(Expression),
 }
 

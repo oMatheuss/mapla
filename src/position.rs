@@ -8,6 +8,12 @@ pub struct Position {
 }
 
 impl Position {
+    pub const ZERO: Self = Self {
+        index: 0,
+        line: 0,
+        column: 0,
+    };
+
     pub fn new() -> Self {
         Self {
             index: 0,

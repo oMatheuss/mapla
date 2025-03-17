@@ -13,11 +13,11 @@ fn print_int(code: &mut AsmBuilder) {
     code.label("printInt");
     code.push_sf();
 
-    let param1 = Mem::offset(Reg::Rbp, 16, MemSize::DWord);
+    let param = Mem::offset(Reg::Rbp, 16, MemSize::DWord);
 
     code.mov(Reg::Rcx, Imm::Int64(0)); // counter
 
-    code.mov(Reg::Eax, param1); // quotient
+    code.mov(Reg::Eax, param); // quotient
     code.mov(Reg::Ebx, Imm::Int32(10)); // divisor
     code.mov(Reg::Edx, Imm::Int32(0)); // remainder
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::iter::Peekable;
 use std::slice::Iter;
 
@@ -7,8 +8,65 @@ use crate::lexer::LexItem;
 use crate::position::Position;
 use crate::token::Token;
 
+#[derive(Debug, Clone)]
+struct Symbol {
+    position: Position,
+    var_type: VarType,
+}
+
+impl Symbol {
+    fn new(pos: Position, typ: VarType) -> Self {
+        Self {
+            position: pos,
+            var_type: typ,
+        }
+    }
+}
+
+struct SymbolTable<'a>(Vec<HashMap<&'a str, Symbol>>);
+
+const GLOBALS: [(&'static str, Symbol); 1] = [(
+    "printInt",
+    Symbol {
+        position: Position::ZERO,
+        var_type: VarType::Void,
+    },
+)];
+
+impl<'a> SymbolTable<'a> {
+    fn new() -> Self {
+        let global = HashMap::from(GLOBALS);
+        Self(vec![global])
+    }
+
+    fn enter_scope(&mut self) {
+        self.0.push(HashMap::new());
+    }
+
+    fn exit_scope(&mut self) {
+        self.0.pop();
+    }
+
+    fn find(&self, k: &str) -> Option<&Symbol> {
+        self.0.iter().rev().find_map(|scope| scope.get(k))
+    }
+
+    fn set(&mut self, k: &'a str, symbol: Symbol) {
+        if let Some(scope) = self.0.last_mut() {
+            scope.insert(k, symbol);
+        }
+    }
+
+    fn set_global(&mut self, k: &'a str, symbol: Symbol) {
+        if let Some(scope) = self.0.first_mut() {
+            scope.insert(k, symbol);
+        }
+    }
+}
+
 pub struct Parser<'a> {
     tokens: Peekable<Iter<'a, LexItem<'a>>>,
+    symbols: SymbolTable<'a>,
     pos: Position,
 }
 
@@ -16,6 +74,7 @@ impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [LexItem<'a>]) -> Self {
         Self {
             tokens: tokens.into_iter().peekable(),
+            symbols: SymbolTable::new(),
             pos: Position::default(),
         }
     }
@@ -48,7 +107,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn next_semi(&mut self) -> Result<()> {
+    fn consume_semi(&mut self) -> Result<()> {
         let Token::SemiColon = self.next_or_err()? else {
             Error::syntatic("expected semicolon `;`", self.pos)?
         };
@@ -59,7 +118,12 @@ impl<'a> Parser<'a> {
         let token = self.next_or_err()?;
 
         let expr = match *token {
-            Token::Identifier(id) => ValueExpr::Identifier(id.into()),
+            Token::Identifier(id) => {
+                let Some(symbol) = self.symbols.find(id) else {
+                    Error::syntatic("symbol not found in scope", self.pos)?
+                };
+                ValueExpr::Identifier(id.into(), symbol.var_type)
+            }
             Token::StrLiteral(string) => ValueExpr::String(string.into()),
             Token::IntLiteral(int) => ValueExpr::Int(int),
             Token::FloatLiteral(float) => ValueExpr::Float(float),
@@ -76,10 +140,18 @@ impl<'a> Parser<'a> {
 
         let expr = match *token {
             Token::Identifier(id) if matches!(self.peek(), Some(Token::OpenParen)) => {
+                let Some(symbol) = self.symbols.find(id).cloned() else {
+                    Error::syntatic("symbol not found in scope", self.pos)?
+                };
                 let args = self.parse_callargs()?;
-                Expression::Func(id.into(), args, VarType::Int)
+                Expression::func(id, args, symbol.var_type)
             }
-            Token::Identifier(id) => Expression::identifier(id),
+            Token::Identifier(id) => {
+                let Some(symbol) = self.symbols.find(id) else {
+                    Error::syntatic("symbol not found in scope", self.pos)?
+                };
+                Expression::identifier(id, symbol.var_type)
+            }
             Token::StrLiteral(string) => Expression::string(string),
             Token::IntLiteral(int) => Expression::int(int),
             Token::FloatLiteral(float) => Expression::float(float),
@@ -126,6 +198,41 @@ impl<'a> Parser<'a> {
         Some(op)
     }
 
+    fn check_expr(&mut self, op: Operator, lhs: &Expression, rhs: &Expression) -> Result<VarType> {
+        let lhs = lhs.expr_type();
+        let rhs = rhs.expr_type();
+
+        match op {
+            Operator::Equal | Operator::NotEqual if lhs == rhs => Ok(VarType::Bool),
+
+            Operator::Greater | Operator::GreaterEqual | Operator::Less | Operator::LessEqual
+                if lhs == rhs && (lhs == VarType::Int || lhs == VarType::Real) =>
+            {
+                Ok(VarType::Bool)
+            }
+
+            Operator::And | Operator::Or if lhs == rhs && lhs == VarType::Bool => Ok(VarType::Bool),
+
+            Operator::Add
+            | Operator::Sub
+            | Operator::Mul
+            | Operator::Div
+            | Operator::Assign
+            | Operator::AddAssign
+            | Operator::SubAssign
+            | Operator::MulAssign
+            | Operator::DivAssign
+                if lhs == rhs && (lhs == VarType::Int || lhs == VarType::Real) =>
+            {
+                Ok(lhs)
+            }
+
+            Operator::Mod if lhs == VarType::Int && rhs == VarType::Int => Ok(lhs),
+
+            _ => Error::syntatic("invalid operation between types", self.pos),
+        }
+    }
+
     fn parse_expr(&mut self, min_prec: u8) -> Result<Expression> {
         let mut lhs = self.parse_atom()?;
 
@@ -143,8 +250,9 @@ impl<'a> Parser<'a> {
             self.next(); // consume operator
 
             let rhs = self.parse_expr(min_prec)?;
+            let result = self.check_expr(op, &lhs, &rhs)?;
 
-            lhs = Expression::BinOp(op, Box::new([lhs, rhs]));
+            lhs = Expression::bin_op(op, lhs, rhs, result);
         }
 
         Ok(lhs)
@@ -152,7 +260,7 @@ impl<'a> Parser<'a> {
 
     fn consume_expr(&mut self) -> Result<AstNode> {
         let expr = self.parse_expr(1)?;
-        self.next_semi()?;
+        self.consume_semi()?;
         let expr = AstNode::Expr(expr);
         Ok(expr)
     }
@@ -162,6 +270,8 @@ impl<'a> Parser<'a> {
         let Token::Identifier(ident) = self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
+        self.symbols
+            .set(&ident, Symbol::new(self.pos, VarType::Int));
         let Token::To = self.next_or_err()? else {
             Error::syntatic("expected token `to`", self.pos)?
         };
@@ -198,11 +308,13 @@ impl<'a> Parser<'a> {
         let Token::Identifier(ident) = self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
+        let position = self.pos;
         let Token::Assign = self.next_or_err()? else {
             Error::syntatic("expected assign operator `=`", self.pos)?
         };
         let expr = self.parse_expr(1)?;
-        self.next_semi()?;
+        self.consume_semi()?;
+        self.symbols.set(&ident, Symbol::new(position, ty));
         AstNode::Var(ty, (*ident).into(), expr).ok()
     }
 
@@ -228,12 +340,14 @@ impl<'a> Parser<'a> {
                 (1 | 2, Token::CloseParen) => break,
                 (1 | 3, Token::Identifier(name)) => {
                     state = 2;
+                    let arg_pos = self.pos;
                     let Token::Colon = self.next_or_err()? else {
                         Error::syntatic("expected token `:`", self.pos)?
                     };
                     let arg_type = self.parse_type()?;
                     let arg = Argument::new(name, arg_type);
                     args.push(arg);
+                    self.symbols.set(&name, Symbol::new(arg_pos, arg_type));
                 }
                 (2, Token::Comma) => state = 3,
                 (1 | 2, _) => {
@@ -281,31 +395,38 @@ impl<'a> Parser<'a> {
         let Token::Identifier(name) = self.next_or_err()? else {
             Error::syntatic("expected name of the function", self.pos)?
         };
+        let fn_pos = self.pos;
+
+        self.symbols.enter_scope(); // args
         let args = self.parse_args()?;
+
         let ret_type = match self.next_or_err()? {
             Token::Colon => {
                 let ret_type = self.parse_type()?;
                 let Token::Do = self.next_or_err()? else {
                     Error::syntatic("expected `do`", self.pos)?
                 };
-                Some(ret_type)
+                ret_type
             }
-            Token::Do => None,
+            Token::Do => VarType::Void,
             _ => Error::syntatic("expected type annotation or `do`", self.pos)?,
         };
+
+        self.symbols
+            .set_global(&name, Symbol::new(fn_pos, ret_type));
+
         let inner = self.consume_inner()?;
-        if let Some(..) = ret_type {
-            if !matches!(inner.last(), Some(AstNode::Ret(..))) {
-                Error::syntatic("expected a return statement for a typed funcion", self.pos)?;
-            }
-        }
+        self.symbols.exit_scope(); // args
+
+        // TODO: validate returns
+
         AstNode::Func((*name).into(), args, ret_type, inner).ok()
     }
 
     fn consume_ret(&mut self) -> Result<AstNode> {
         self.next(); // discard return token
         let expr = self.parse_expr(1)?;
-        self.next_semi()?;
+        self.consume_semi()?;
         let expr = AstNode::Ret(expr);
         Ok(expr)
     }
@@ -315,7 +436,7 @@ impl<'a> Parser<'a> {
         let Token::Identifier(ident) = self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
-        self.next_semi()?;
+        self.consume_semi()?;
         AstNode::Use((*ident).into()).ok()
     }
 
@@ -352,6 +473,8 @@ impl<'a> Parser<'a> {
     fn consume_inner(&mut self) -> Result<Vec<AstNode>> {
         let mut nodes = Vec::new();
 
+        self.symbols.enter_scope();
+
         while let Some(token) = self.peek() {
             if let Token::End = token {
                 self.next();
@@ -365,6 +488,8 @@ impl<'a> Parser<'a> {
             let node = self.match_token(token)?;
             nodes.push(node);
         }
+
+        self.symbols.exit_scope();
 
         Ok(nodes)
     }
