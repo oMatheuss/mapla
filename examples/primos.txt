@@ -1,9 +1,0 @@
-use io;
-
-func main() do
-    for x to 1000 then
-        int y = 2;
-        while y * y < x && x % y > 0 then y += 1; end
-        if y * y > x then printInt(x); end
-    end
-end
