@@ -28,7 +28,7 @@ fn main() -> std::io::Result<()> {
         Ok(tokens) => match Parser::new(&tokens).parse() {
             Ok(ast) => {
                 std::fs::write(out, Compiler::compile(ast))?;
-            },
+            }
             Err(err) => eprintln!("{file}:{err}"),
         },
         Err(err) => eprintln!("{file}:{err}"),
