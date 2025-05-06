@@ -11,7 +11,9 @@ pub enum OpCode {
     Je,  // Jump if equal
     Jne, // Jump if not equal
     Jg,  // Jump if greater than
-    Jl,  // Jump if less than
+    Jge,
+    Jl, // Jump if less than
+    Jle,
 
     Sete,
     Setne,
@@ -73,7 +75,9 @@ impl Display for OpCode {
             OpCode::Je => write!(f, "je"),
             OpCode::Jne => write!(f, "jne"),
             OpCode::Jg => write!(f, "jg"),
+            OpCode::Jge => write!(f, "jge"),
             OpCode::Jl => write!(f, "jl"),
+            OpCode::Jle => write!(f, "jle"),
             OpCode::Sete => write!(f, "sete"),
             OpCode::Setne => write!(f, "sete"),
             OpCode::Setg => write!(f, "setg"),
@@ -692,6 +696,10 @@ impl AsmBuilder {
         writeln!(self, "global {symbols}", symbols = symbols.join(", "));
     }
 
+    pub fn _extern(&mut self, symbols: &[&str]) {
+        writeln!(self, "extern {symbols}", symbols = symbols.join(", "));
+    }
+
     pub fn section(&mut self, label: &str) {
         writeln!(self, "section .{label}");
     }
@@ -740,8 +748,16 @@ impl AsmBuilder {
         writeln!(self, "  {opcode} {label}", opcode = OpCode::Jg);
     }
 
+    pub fn jge(&mut self, label: &str) {
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jge);
+    }
+
     pub fn jl(&mut self, label: &str) {
         writeln!(self, "  {opcode} {label}", opcode = OpCode::Jl);
+    }
+
+    pub fn jle(&mut self, label: &str) {
+        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jle)
     }
 
     pub fn sete<T: Into<Operand> + Display>(&mut self, value: T) {
@@ -785,7 +801,7 @@ impl AsmBuilder {
     }
 
     pub fn lea(&mut self, reg: Reg, mem: Mem) {
-        writeln!(self, "  {opcode} {reg} {mem}", opcode = OpCode::Lea);
+        writeln!(self, "  {opcode} {reg}, {mem}", opcode = OpCode::Lea);
     }
 
     pub fn push<T: Into<Operand> + Display>(&mut self, value: T) {
@@ -866,8 +882,24 @@ impl AsmBuilder {
         writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Xor);
     }
 
-    // Shl, // Shift left
-    // Shr, // Shift right
+    pub fn shl<T: Into<Operand> + Display>(&mut self, value1: T, value2: Imm) {
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Shl);
+    }
+
+    pub fn shl_cl<T: Into<Operand> + Display>(&mut self, value: T) {
+        let reg = Reg::Cl;
+        writeln!(self, "  {opcode} {value}, {reg}", opcode = OpCode::Shl);
+    }
+
+    pub fn shr<T: Into<Operand> + Display>(&mut self, value1: T, value2: Imm) {
+        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Shr);
+    }
+
+    pub fn shr_cl<T: Into<Operand> + Display>(&mut self, value: T) {
+        let reg = Reg::Cl;
+        writeln!(self, "  {opcode} {value}, {reg}", opcode = OpCode::Shr);
+    }
+
     // Neg, // Negate
 
     pub fn movss<T1, T2>(&mut self, value1: T1, value2: T2)

@@ -21,17 +21,21 @@ impl Symbol {
             var_type: typ,
         }
     }
+
+    const fn intrinsic(typ: VarType) -> Self {
+        Self {
+            position: Position::ZERO,
+            var_type: typ,
+        }
+    }
 }
 
 struct SymbolTable<'a>(Vec<HashMap<&'a str, Symbol>>);
 
-const GLOBALS: [(&'static str, Symbol); 1] = [(
-    "printInt",
-    Symbol {
-        position: Position::ZERO,
-        var_type: VarType::Void,
-    },
-)];
+const GLOBALS: [(&'static str, Symbol); 2] = [
+    ("putchar", Symbol::intrinsic(VarType::Void)),
+    ("printInt", Symbol::intrinsic(VarType::Void)),
+];
 
 impl<'a> SymbolTable<'a> {
     fn new() -> Self {

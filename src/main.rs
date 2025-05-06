@@ -1,3 +1,5 @@
+use std::env;
+
 use compiler::Compiler;
 use lexer::Lexer;
 use parser::Parser;
@@ -12,19 +14,25 @@ mod parser;
 mod position;
 mod token;
 
-fn main() {
-    let file = "examples/fibonacci.txt";
+fn main() -> std::io::Result<()> {
+    let cur_dir = env::current_dir()?;
+    let args = env::args().collect::<Vec<_>>();
+    let file = args.get(1).unwrap();
 
-    let code = match std::fs::read_to_string(file) {
-        Ok(input) => input,
-        Err(_) => todo!(),
-    };
+    let path = cur_dir.join(file);
+    let code = std::fs::read_to_string(path)?;
+
+    let out = cur_dir.join("out.asm");
 
     match Lexer::parse(&code) {
         Ok(tokens) => match Parser::new(&tokens).parse() {
-            Ok(ast) => println!("{asm}", asm = Compiler::compile(ast)),
+            Ok(ast) => {
+                std::fs::write(out, Compiler::compile(ast))?;
+            },
             Err(err) => eprintln!("{file}:{err}"),
         },
         Err(err) => eprintln!("{file}:{err}"),
     };
+
+    Ok(())
 }

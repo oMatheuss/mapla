@@ -3,10 +3,21 @@ use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Reg};
 pub fn intrisic(name: &str, code: &mut AsmBuilder) {
     match name {
         "io" => {
+            putchar(code);
             print_int(code);
         }
         _ => {}
     }
+}
+
+fn putchar(code: &mut AsmBuilder) {
+    code.label("putchar");
+    code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
+    code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
+    code.lea(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::DWord)); // *buffer
+    code.mov(Reg::Edx, Imm::Int32(1)); // count
+    code.syscall();
+    code.ret(4);
 }
 
 fn print_int(code: &mut AsmBuilder) {
