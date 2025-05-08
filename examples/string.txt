@@ -1,0 +1,5 @@
+use io;
+
+func main() do
+    printString("Hello, World!", 13);
+end
