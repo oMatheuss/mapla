@@ -88,7 +88,24 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_string(&mut self) -> Result<Token<'a>> {
-        todo!()
+        self.next(); // discard quotation mark
+        let start = self.index();
+        while let Some(ch) = self.peek() {
+            if ch.is_control() {
+                return Error::lexical("control characters are not allowed", self.position);
+            }
+            if '"'.eq(ch) {
+                break;
+            }
+            self.next();
+        }
+        let end = self.index();
+        if let Some('"') = self.next() {
+            let string = &self.input[start..end];
+            Ok(Token::StrLiteral(string))
+        } else {
+            Error::lexical("unexpected end of file", self.position)
+        }
     }
 
     fn next_symbol(&mut self) -> Result<Token<'a>> {
