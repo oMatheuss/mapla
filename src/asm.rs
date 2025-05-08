@@ -1,4 +1,5 @@
 use std::fmt::{Display, Write};
+use std::hash::Hasher;
 
 pub enum OpCode {
     Db, // Declare byte (1 byte)
@@ -563,12 +564,34 @@ impl Display for Xmm {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Lbl(u64);
+
+impl Lbl {
+    pub fn from_str(slice: &str) -> Self {
+        let mut state = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash_slice(slice.as_bytes(), &mut state);
+        Self(state.finish())
+    }
+
+    pub fn mem_size() -> MemSize {
+        MemSize::QWord
+    }
+}
+
+impl Display for Lbl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "D{:x}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Operand {
     Reg(Reg),
     Mem(Mem),
     Imm(Imm),
     Xmm(Xmm),
+    Lbl(Lbl),
 }
 
 impl Display for Operand {
@@ -578,6 +601,7 @@ impl Display for Operand {
             Self::Mem(mem) => mem.fmt(f),
             Self::Imm(imm) => imm.fmt(f),
             Self::Xmm(xmm) => xmm.fmt(f),
+            Self::Lbl(lbl) => lbl.fmt(f),
         }
     }
 }
@@ -613,6 +637,7 @@ impl Operand {
             Operand::Mem(mem) => mem.mem_size(),
             Operand::Imm(imm) => imm.mem_size(),
             Operand::Xmm(xmm) => xmm.mem_size(),
+            Operand::Lbl(..) => Lbl::mem_size(),
         }
     }
 
@@ -680,24 +705,12 @@ impl AsmBuilder {
         writeln!(self, "bits {bits}");
     }
 
-    pub fn db(&mut self, label: &str, value: u8) {
-        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Db);
-    }
+    pub fn db(&mut self, label: &str, value: &[u8]) {
+        let byte_seq = value
+            .iter()
+            .fold(String::new(), |acc, b| acc + &format!("0x{b:x},"));
 
-    pub fn dw(&mut self, label: &str, value: u16) {
-        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Dw);
-    }
-
-    pub fn dd(&mut self, label: &str, value: u32) {
-        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Dd);
-    }
-
-    pub fn dq(&mut self, label: &str, value: u64) {
-        writeln!(self, "  {label}: {opcode} {value}", opcode = OpCode::Dq);
-    }
-
-    pub fn dt(&mut self, label: &str, value: [u8; 10]) {
-        todo!()
+        writeln!(self, "{label}: {} {byte_seq}0x00", OpCode::Db);
     }
 
     pub fn jmp(&mut self, label: &str) {

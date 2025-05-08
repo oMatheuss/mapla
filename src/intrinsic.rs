@@ -5,6 +5,7 @@ pub fn intrisic(name: &str, code: &mut AsmBuilder) {
         "io" => {
             print_int(code);
             print_char(code);
+            print_string(code);
         }
         _ => {}
     }
@@ -14,7 +15,7 @@ fn print_char(code: &mut AsmBuilder) {
     code.label("printChar");
     code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
     code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
-    code.lea(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::DWord)); // *buffer
+    code.mov(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::QWord)); // *buffer
     code.mov(Reg::Edx, Imm::Int32(1)); // count
     code.syscall();
     code.ret(4);
@@ -53,5 +54,15 @@ fn print_int(code: &mut AsmBuilder) {
     code.syscall();
 
     code.pop_sf();
+    code.ret(4);
+}
+
+pub fn print_string(code: &mut AsmBuilder) {
+    code.label("printString");
+    code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
+    code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
+    code.mov(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::QWord)); // *buffer
+    code.mov(Reg::Edx, Mem::offset(Reg::Rsp, 16, MemSize::DWord)); // count
+    code.syscall();
     code.ret(4);
 }

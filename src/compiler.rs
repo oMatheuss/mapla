@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Operand, Reg, Xmm};
+use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, Operand, Reg, Xmm};
 use crate::ast::{
     Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Operator, ValueExpr, VarType,
 };
@@ -113,6 +113,8 @@ impl<'a> Scope<'a> {
     }
 }
 
+type AsmData = HashMap<Lbl, Vec<u8>>;
+
 pub struct Compiler;
 
 impl Compiler {
@@ -124,9 +126,13 @@ impl Compiler {
         }
     }
 
-    fn compile_value(scope: &mut Scope, value: &ValueExpr) -> Operand {
+    fn compile_value(scope: &mut Scope, data: &mut AsmData, value: &ValueExpr) -> Operand {
         match value {
-            ValueExpr::String(_) => todo!(),
+            ValueExpr::String(string) => {
+                let label = Lbl::from_str(&string);
+                data.insert(label, string.as_bytes().to_vec());
+                Operand::Lbl(label)
+            }
             ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
             ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
             ValueExpr::Bool(value) => match value {
@@ -137,11 +143,16 @@ impl Compiler {
         }
     }
 
-    fn compile_binop(code: &mut AsmBuilder, scope: &mut Scope, bin_op: &BinaryOp) -> Operand {
+    fn compile_binop(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        data: &mut AsmData,
+        bin_op: &BinaryOp,
+    ) -> Operand {
         let is_float_expr = bin_op.is_float_expr();
 
         // depth-first search
-        let mut lhs = Self::compile_expr(code, scope, bin_op.lhs());
+        let mut lhs = Self::compile_expr(code, scope, data, bin_op.lhs());
 
         // clear register
         if let Operand::Reg(reg) = lhs {
@@ -152,7 +163,7 @@ impl Compiler {
             code.movss(lhs, xmm);
         }
 
-        let mut rhs = Self::compile_expr(code, scope, bin_op.rhs());
+        let mut rhs = Self::compile_expr(code, scope, data, bin_op.rhs());
 
         // clear register
         if let Operand::Reg(reg) = rhs {
@@ -379,9 +390,14 @@ impl Compiler {
         }
     }
 
-    fn compile_func(code: &mut AsmBuilder, scope: &mut Scope, func: &FunctionCall) -> Operand {
+    fn compile_func(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        data: &mut AsmData,
+        func: &FunctionCall,
+    ) -> Operand {
         for arg in func.args().iter().rev() {
-            let mut arg = Self::compile_expr(code, scope, arg);
+            let mut arg = Self::compile_expr(code, scope, data, arg);
             let mem_size = arg.mem_size();
 
             if arg.is_mem() {
@@ -399,25 +415,35 @@ impl Compiler {
         Operand::Reg(Reg::Eax)
     }
 
-    fn compile_expr(code: &mut AsmBuilder, scope: &mut Scope, expr: &Expression) -> Operand {
+    fn compile_expr(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        data: &mut AsmData,
+        expr: &Expression,
+    ) -> Operand {
         match expr {
-            Expression::Value(value) => Self::compile_value(scope, value),
-            Expression::BinOp(bin_op) => Self::compile_binop(code, scope, bin_op),
+            Expression::Value(value) => Self::compile_value(scope, data, value),
+            Expression::BinOp(bin_op) => Self::compile_binop(code, scope, data, bin_op),
             Expression::Cast(..) => todo!(),
-            Expression::Func(func) => Self::compile_func(code, scope, func),
+            Expression::Func(func) => Self::compile_func(code, scope, data, func),
         }
     }
 
-    fn do_compile_expr(code: &mut AsmBuilder, scope: &mut Scope, expr: &Expression) -> Operand {
-        let operand = Self::compile_expr(code, scope, expr);
+    fn do_compile_expr(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        data: &mut AsmData,
+        expr: &Expression,
+    ) -> Operand {
+        let operand = Self::compile_expr(code, scope, data, expr);
         scope.reset_temps();
         return operand;
     }
 
-    fn compile_node(code: &mut AsmBuilder, scope: &mut Scope, node: &AstNode) {
+    fn compile_node(code: &mut AsmBuilder, scope: &mut Scope, data: &mut AsmData, node: &AstNode) {
         match node {
             AstNode::Var(_, ident, expr) => {
-                let result = Self::do_compile_expr(code, scope, expr);
+                let result = Self::do_compile_expr(code, scope, data, expr);
                 let local = scope.new_local(ident, result.mem_size());
                 if let Operand::Xmm(_) = result {
                     code.movss(local, result);
@@ -428,13 +454,13 @@ impl Compiler {
             AstNode::If(expr, nodes) => {
                 let endif_lbl = scope.new_label();
 
-                let result = Self::do_compile_expr(code, scope, expr);
+                let result = Self::do_compile_expr(code, scope, data, expr);
                 code.cmp(result, Imm::FALSE);
                 code.je(&endif_lbl);
 
                 let scope = &mut Scope::continue_on(&scope);
                 for inner in nodes {
-                    Self::compile_node(code, scope, inner);
+                    Self::compile_node(code, scope, data, inner);
                 }
 
                 code.label(&endif_lbl);
@@ -445,13 +471,13 @@ impl Compiler {
 
                 code.label(&startwhile_lbl);
 
-                let result = Self::do_compile_expr(code, scope, expr);
+                let result = Self::do_compile_expr(code, scope, data, expr);
                 code.cmp(result, Imm::FALSE);
                 code.je(&endwhile_lbl);
 
                 let scope = &mut Scope::continue_on(&scope);
                 for inner in nodes {
-                    Self::compile_node(code, scope, inner);
+                    Self::compile_node(code, scope, data, inner);
                 }
 
                 code.jmp(&startwhile_lbl);
@@ -481,7 +507,7 @@ impl Compiler {
                 code.jg(&endfor_lbl);
 
                 for inner in nodes {
-                    Self::compile_node(code, scope, inner);
+                    Self::compile_node(code, scope, data, inner);
                 }
 
                 code.inc(counter);
@@ -489,10 +515,10 @@ impl Compiler {
                 code.label(&endfor_lbl);
             }
             AstNode::Expr(expr) => {
-                let _ = Self::do_compile_expr(code, scope, expr);
+                let _ = Self::do_compile_expr(code, scope, data, expr);
             }
             AstNode::Ret(expr) => {
-                let result = Self::do_compile_expr(code, scope, expr);
+                let result = Self::do_compile_expr(code, scope, data, expr);
                 if !result.is_reg() {
                     code.mov(Reg::Eax, result);
                 }
@@ -519,6 +545,7 @@ impl Compiler {
         let mut code = AsmBuilder::new();
         let mem = MemAlloc::new_ref_cell();
         let global = Scope::new(&mem);
+        let mut data = AsmData::new();
 
         code.bits(64);
         code.section("text");
@@ -538,11 +565,13 @@ impl Compiler {
                     let args_size = Self::compile_args(&mut scope, args);
 
                     for inner in ast_nodes {
-                        Self::compile_node(&mut inner_code, &mut scope, inner);
+                        Self::compile_node(&mut inner_code, &mut scope, &mut data, inner);
                     }
 
                     let mem = mem.borrow();
-                    code.sub(Reg::Rsp, Imm::Int64(mem.get_total()));
+                    if mem.get_total() > 0 {
+                        code.sub(Reg::Rsp, Imm::Int64(mem.get_total()));
+                    }
                     code.append(inner_code);
 
                     code.label(".return");
@@ -556,6 +585,14 @@ impl Compiler {
         code.label("_start");
         code.call("main");
         code.sys_exit(0);
+
+        if !data.is_empty() {
+            code.section("data");
+
+            for (label, val) in data.iter() {
+                code.db(&label.to_string(), val);
+            }
+        }
 
         code.to_string()
     }
