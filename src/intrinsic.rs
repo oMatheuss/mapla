@@ -15,8 +15,8 @@ fn print_char(code: &mut AsmBuilder) {
     code.label("printChar");
     code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
     code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
-    code.mov(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::QWord)); // *buffer
-    code.mov(Reg::Edx, Imm::Int32(1)); // count
+    code.lea(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::QWord)); // *buffer
+    code.mov(Reg::Edx, Imm::Int32(4)); // count
     code.syscall();
     code.ret(4);
 }
