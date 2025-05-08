@@ -431,26 +431,16 @@ impl Display for MemScale {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Mem {
-    Abs {
-        size: MemSize,
-        addr: usize,
-    },
-    Rel {
-        size: MemSize,
-        base: Reg,
-        index: MemIndex,
-        scale: MemScale,
-    },
+pub struct Mem {
+    size: MemSize,
+    base: Reg,
+    index: MemIndex,
+    scale: MemScale,
 }
 
 impl Mem {
-    pub fn abs(addr: usize, size: MemSize) -> Self {
-        Self::Abs { size, addr }
-    }
-
     pub fn reg(reg: Reg, size: MemSize) -> Self {
-        Self::Rel {
+        Self {
             size,
             base: reg,
             index: MemIndex::None,
@@ -459,7 +449,7 @@ impl Mem {
     }
 
     pub fn offset(reg: Reg, offset: isize, size: MemSize) -> Self {
-        Self::Rel {
+        Self {
             size,
             base: reg,
             index: MemIndex::Offset(offset),
@@ -468,33 +458,18 @@ impl Mem {
     }
 
     pub fn mem_size(&self) -> MemSize {
-        match self {
-            Mem::Abs { size, addr: _ } => *size,
-            Mem::Rel {
-                size,
-                base: _,
-                index: _,
-                scale: _,
-            } => *size,
-        }
+        self.size
     }
 }
 
 impl Display for Mem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Mem::Abs { size, addr } => write!(f, "{size} [{addr:#X}]"),
-            Mem::Rel {
-                size,
-                base,
-                index,
-                scale,
-            } => match index {
-                MemIndex::None => write!(f, "{size} [{base}]"),
-                _ => match scale {
-                    MemScale::Uni => write!(f, "{size} [{base} {index}]"),
-                    _ => write!(f, "{size} [{base} {index} {scale}]"),
-                },
+        let Mem { size, base, .. } = *self;
+        match self.index {
+            MemIndex::None => write!(f, "{size} [{base}]"),
+            index => match self.scale {
+                MemScale::Uni => write!(f, "{size} [{base} {index}]"),
+                scale => write!(f, "{size} [{base} {index} {scale}]"),
             },
         }
     }
@@ -532,13 +507,6 @@ impl Imm {
             Imm::Byte(..) | Imm::Char(..) => MemSize::Byte,
             Imm::Int32(..) | Imm::Float32(..) => MemSize::DWord,
             Imm::Int64(..) | Imm::Float64(..) => MemSize::QWord,
-        }
-    }
-
-    pub fn is_float(&self) -> bool {
-        match self {
-            Imm::Float32(..) => true,
-            _ => false,
         }
     }
 }
