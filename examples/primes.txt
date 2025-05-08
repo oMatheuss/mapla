@@ -8,7 +8,7 @@ func main() do
         end
         if y * y > x then
             printInt(x);
-            putchar(10);
+            printChar(10);
         end
     end
 end

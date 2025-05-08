@@ -1,17 +1,17 @@
 use io;
 
 func main() do
-    putchar(72);
-    putchar(101);
-    putchar(108);
-    putchar(108);
-    putchar(111);
-    putchar(44);
-    putchar(32);
-    putchar(87);
-    putchar(111);
-    putchar(114);
-    putchar(108);
-    putchar(100);
-    putchar(33);
+    printChar( 72);
+    printChar(101);
+    printChar(108);
+    printChar(108);
+    printChar(111);
+    printChar( 44);
+    printChar( 32);
+    printChar( 87);
+    printChar(111);
+    printChar(114);
+    printChar(108);
+    printChar(100);
+    printChar( 33);
 end
