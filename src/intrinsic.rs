@@ -18,7 +18,7 @@ fn print_char(code: &mut AsmBuilder) {
     code.lea(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::QWord)); // *buffer
     code.mov(Reg::Edx, Imm::Int32(4)); // count
     code.syscall();
-    code.ret(4);
+    code.ret(8);
 }
 
 fn print_int(code: &mut AsmBuilder) {
@@ -64,5 +64,5 @@ pub fn print_string(code: &mut AsmBuilder) {
     code.mov(Reg::Rsi, Mem::offset(Reg::Rsp, 8, MemSize::QWord)); // *buffer
     code.mov(Reg::Edx, Mem::offset(Reg::Rsp, 16, MemSize::DWord)); // count
     code.syscall();
-    code.ret(4);
+    code.ret(12);
 }
