@@ -22,7 +22,8 @@ fn main() -> std::io::Result<()> {
     let path = cur_dir.join(file);
     let code = std::fs::read_to_string(path)?;
 
-    let out = cur_dir.join("out.asm");
+    let out_file = args.get(2).map_or("out.asm", |x| x.as_str());
+    let out = cur_dir.join(out_file);
 
     match Lexer::parse(&code) {
         Ok(tokens) => match Parser::new(&tokens).parse() {
