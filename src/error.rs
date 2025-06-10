@@ -1,11 +1,11 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use crate::position::Position;
 
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
-    message: &'static str,
+    message: String,
     position: Position,
 }
 
@@ -18,48 +18,39 @@ pub enum ErrorKind {
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
-    pub fn lexical<T>(message: &'static str, position: Position) -> Result<T> {
+    pub fn lexical<T>(message: &str, position: Position) -> Result<T> {
         Err(Error {
             kind: ErrorKind::LexicalError,
-            message,
+            message: String::from(message),
             position,
         })
     }
 
-    pub fn syntatic<T>(message: &'static str, position: Position) -> Result<T> {
+    pub fn syntatic<T>(message: &str, position: Position) -> Result<T> {
         Err(Error {
             kind: ErrorKind::SyntaxError,
-            message,
+            message: String::from(message),
             position,
         })
     }
 }
 
-impl From<std::num::ParseIntError> for Error {
-    fn from(value: std::num::ParseIntError) -> Self {
-        let message = match value.kind() {
-            std::num::IntErrorKind::Empty => todo!(),
-            std::num::IntErrorKind::InvalidDigit => "invalid digit",
-            std::num::IntErrorKind::PosOverflow => "number too large",
-            std::num::IntErrorKind::NegOverflow => "negative number too large",
-            std::num::IntErrorKind::Zero => todo!(),
-            _ => "invalid number",
-        };
-
-        Error {
-            kind: ErrorKind::LexicalError,
-            message,
-            position: Position::default(),
-        }
-    }
+pub trait PositionResult<T> {
+    fn with_position(self, position: Position) -> Result<T>;
 }
 
-impl From<std::num::ParseFloatError> for Error {
-    fn from(_value: std::num::ParseFloatError) -> Self {
-        Error {
-            kind: ErrorKind::LexicalError,
-            message: "invalid floating pointer",
-            position: Position::default(),
+impl<T, E> PositionResult<T> for std::result::Result<T, E>
+where
+    E: Display,
+{
+    fn with_position(self, position: Position) -> Result<T> {
+        match self {
+            Ok(ok) => Ok(ok),
+            Err(err) => Err(Error {
+                kind: ErrorKind::LexicalError,
+                message: err.to_string(),
+                position,
+            }),
         }
     }
 }

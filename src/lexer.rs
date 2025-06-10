@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::{Error, PositionResult, Result};
 use crate::position::Position;
 use crate::token::Token;
 use std::iter::Peekable;
@@ -77,12 +77,13 @@ impl<'a> Lexer<'a> {
             }
             self.next();
         }
-        let end = self.index();
+
+        let slice = &self.input[start..self.index()];
         if state == 1 {
-            let num = self.input[start..end].parse()?;
+            let num = slice.parse().with_position(self.position)?;
             Ok(Token::IntLiteral(num))
         } else {
-            let num = self.input[start..end].parse()?;
+            let num = slice.parse().with_position(self.position)?;
             Ok(Token::FloatLiteral(num))
         }
     }

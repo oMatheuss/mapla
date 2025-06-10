@@ -21,7 +21,7 @@ fn main() -> std::io::Result<()> {
     let Some(file) = args.get(1) else {
         return Err(std::io::Error::other("Error: no input file provided"));
     };
-    
+
     let in_file = cur_dir.join(file);
     let out_file = in_file.with_extension("asm");
 
