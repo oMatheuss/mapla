@@ -27,7 +27,7 @@ fn main() -> std::io::Result<()> {
 
     let code = std::fs::read_to_string(in_file)?;
 
-    match Lexer::parse(&code) {
+    match Lexer::lex(&code) {
         Ok(tokens) => match Parser::new(&tokens).parse() {
             Ok(ast) => {
                 std::fs::write(out_file, Compiler::compile(ast))?;
