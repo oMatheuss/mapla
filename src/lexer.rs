@@ -7,21 +7,41 @@ use std::str::Chars;
 pub struct Lexer<'a> {
     input: &'a str,
     chars: Peekable<Chars<'a>>,
+    ended: bool,
     position: Position,
 }
 
+#[derive(Debug)]
 pub struct LexItem<'a> {
     token: Token<'a>,
     position: Position,
 }
 
 impl<'a> LexItem<'a> {
+    #[inline]
     pub fn token(&self) -> &Token {
         &self.token
     }
 
+    #[inline]
     pub fn position(&self) -> &Position {
         &self.position
+    }
+
+    #[inline]
+    pub fn new(token: Token<'a>, position: Position) -> Self {
+        Self { token, position }
+    }
+
+    #[inline]
+    pub fn eof(position: Position) -> Self {
+        let token = Token::Eof;
+        Self { token, position }
+    }
+
+    #[inline]
+    pub fn ok(self) -> Result<Self> {
+        Result::Ok(self)
     }
 }
 
@@ -31,6 +51,7 @@ impl<'a> Lexer<'a> {
         Self {
             input,
             chars,
+            ended: false,
             position: Position::new(),
         }
     }
@@ -50,6 +71,15 @@ impl<'a> Lexer<'a> {
     #[inline]
     fn index(&mut self) -> usize {
         self.position.index()
+    }
+
+    #[inline]
+    fn skip_whitespace(&mut self) -> bool {
+        let is = self.peek().is_some_and(|ch| ch.is_whitespace());
+        if is {
+            self.next();
+        }
+        is
     }
 
     fn next_ident(&mut self) -> Result<Token<'a>> {
@@ -174,45 +204,40 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Result<LexItem<'a>> {
+        let position = self.position.clone();
+
         while let Some(&ch) = self.peek() {
-            let position = self.position.clone();
+            if self.skip_whitespace() {
+                continue;
+            }
+
             let token = match ch {
                 'a'..'z' | 'A'..'Z' => self.next_ident(),
                 '0'..='9' | '.' => self.next_number(),
-                '(' | ')' | '=' | '!' | '>' | '<' | '&' | '|' | '%' | '+' | '-' | '*' | '/'
-                | ':' | ',' | ';' => self.next_symbol(),
                 '"' => self.next_string(),
-                _ if ch.is_whitespace() => {
-                    self.next();
-                    continue;
-                }
-                _ => Error::lexical("invalid token", self.position)?,
+                _ => self.next_symbol(),
             }?;
 
-            return Ok(LexItem { token, position });
+            return LexItem::new(token, position).ok();
         }
 
-        Ok(LexItem {
-            token: Token::Eof,
-            position: self.position,
-        })
+        self.ended = true;
+        LexItem::eof(position).ok()
     }
 
-    pub fn collect(mut self) -> Result<Vec<LexItem<'a>>> {
-        let mut items = Vec::new();
-        loop {
-            let next = self.next_token()?;
-
-            if let Token::Eof = next.token() {
-                items.push(next);
-                break Ok(items);
-            }
-
-            items.push(next);
-        }
-    }
-
-    pub fn parse(input: &'a str) -> Result<Vec<LexItem<'a>>> {
+    pub fn lex(input: &str) -> Result<Vec<LexItem>> {
         Lexer::new(input).collect()
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<LexItem<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.ended {
+            Some(self.next_token())
+        } else {
+            None
+        }
     }
 }
