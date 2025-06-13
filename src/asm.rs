@@ -707,12 +707,12 @@ impl AsmBuilder {
         writeln!(self, "bits {bits}");
     }
 
-    pub fn db(&mut self, label: &str, value: &[u8]) {
-        let byte_seq = value
-            .iter()
-            .fold(String::new(), |acc, b| acc + &format!("0x{b:x},"));
-
-        writeln!(self, "{label}: {} {byte_seq}0x00", OpCode::Db);
+    pub fn db(&mut self, label: &str, bytes: &[u8]) {
+        write!(self, "{label}: {} ", OpCode::Db);
+        for byte in bytes {
+            write!(self, "0x{byte:x},");
+        }
+        write!(self, "0x00\n");
     }
 
     pub fn jmp(&mut self, label: &str) {
@@ -800,7 +800,11 @@ impl AsmBuilder {
     }
 
     pub fn ret(&mut self, nbytes: usize) {
-        writeln!(self, "  {opcode} {nbytes}", opcode = OpCode::Ret);
+        if nbytes == 0 {
+            writeln!(self, "  {opcode}", opcode = OpCode::Ret);
+        } else {
+            writeln!(self, "  {opcode} {nbytes}", opcode = OpCode::Ret);
+        }
     }
 
     pub fn add<T1, T2>(&mut self, value1: T1, value2: T2)
@@ -967,24 +971,6 @@ impl AsmBuilder {
     pub fn pop_sf(&mut self) {
         self.mov(Reg::Rsp, Reg::Rbp);
         self.pop(Reg::Rbp);
-    }
-
-    pub fn sys_exit(&mut self, code: i64) {
-        self.mov(Reg::Rax, Imm::Int64(60));
-        self.mov(Reg::Rdi, Imm::Int64(code));
-        self.syscall();
-    }
-
-    pub fn sys_write<T1, T2>(&mut self, buffer: T1, nbytes: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        self.mov(Reg::Rax, Imm::Int64(1));
-        self.mov(Reg::Rdi, Imm::Int64(1));
-        self.mov(Reg::Rsi, buffer);
-        self.mov(Reg::Rdx, nbytes);
-        self.syscall();
     }
 }
 

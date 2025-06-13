@@ -3,9 +3,10 @@ use std::collections::HashMap;
 
 use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, Operand, Reg, Xmm};
 use crate::ast::{
-    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Operator, ValueExpr, VarType,
+    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier, Operator, ValueExpr, VarType
 };
 use crate::intrinsic::intrisic;
+use crate::target::CompilerTarget;
 
 struct MemAlloc {
     local_off: isize,
@@ -390,7 +391,7 @@ impl Compiler {
         }
     }
 
-    fn compile_func(
+    fn compile_call(
         code: &mut AsmBuilder,
         scope: &mut Scope,
         data: &mut AsmData,
@@ -425,7 +426,7 @@ impl Compiler {
             Expression::Value(value) => Self::compile_value(scope, data, value),
             Expression::BinOp(bin_op) => Self::compile_binop(code, scope, data, bin_op),
             Expression::Cast(..) => todo!(),
-            Expression::Func(func) => Self::compile_func(code, scope, data, func),
+            Expression::Func(func) => Self::compile_call(code, scope, data, func),
         }
     }
 
@@ -522,7 +523,7 @@ impl Compiler {
                 if !result.is_reg() {
                     code.mov(Reg::Eax, result);
                 }
-                code.jmp(".return");
+                code.jmp(".R");
             }
             _ => {}
         }
@@ -541,7 +542,32 @@ impl Compiler {
         return args_size;
     }
 
-    pub fn compile(ast: Ast) -> String {
+    fn compile_func(code: &mut AsmBuilder, global: &Scope, data: &mut AsmData, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
+        code.label(ident);
+        code.push_sf();
+
+        let mut inner_code = AsmBuilder::new();
+        let mem = MemAlloc::new_ref_cell();
+        let mut scope = Scope::new_inner(global, &mem);
+
+        let args_size = Self::compile_args(&mut scope, args);
+
+        for inner in nodes {
+            Self::compile_node(&mut inner_code, &mut scope, data, inner);
+        }
+
+        let mem = mem.borrow();
+        if mem.get_total() > 0 {
+            code.sub(Reg::Rsp, Imm::Int64(mem.get_total()));
+        }
+        code.append(inner_code);
+
+        code.label(".R");
+        code.pop_sf();
+        code.ret(args_size);
+    }
+
+    pub fn compile(ast: Ast, target: CompilerTarget) -> String {
         let mut code = AsmBuilder::new();
         let mem = MemAlloc::new_ref_cell();
         let global = Scope::new(&mem);
@@ -549,42 +575,17 @@ impl Compiler {
 
         code.bits(64);
         code.section("text");
-        code.global(&["_start"]);
+        code.global(&["main"]);
 
         for node in ast.iter() {
             match node {
-                AstNode::Use(ident) => intrisic(&ident, &mut code),
+                AstNode::Use(ident) => intrisic(&ident, &mut code, target),
                 AstNode::Func(ident, args, _, ast_nodes) => {
-                    code.label(ident);
-                    code.push_sf();
-
-                    let mut inner_code = AsmBuilder::new();
-                    let mem = MemAlloc::new_ref_cell();
-                    let mut scope = Scope::new_inner(&global, &mem);
-
-                    let args_size = Self::compile_args(&mut scope, args);
-
-                    for inner in ast_nodes {
-                        Self::compile_node(&mut inner_code, &mut scope, &mut data, inner);
-                    }
-
-                    let mem = mem.borrow();
-                    if mem.get_total() > 0 {
-                        code.sub(Reg::Rsp, Imm::Int64(mem.get_total()));
-                    }
-                    code.append(inner_code);
-
-                    code.label(".return");
-                    code.pop_sf();
-                    code.ret(args_size);
+                    Self::compile_func(&mut code, &global, &mut data, ident, args, ast_nodes);
                 }
                 _ => {}
             }
         }
-
-        code.label("_start");
-        code.call("main");
-        code.sys_exit(0);
 
         if !data.is_empty() {
             code.section("data");

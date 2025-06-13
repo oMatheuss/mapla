@@ -9,6 +9,8 @@ pub struct Error {
     position: Position,
 }
 
+impl std::error::Error for Error { }
+
 #[derive(Debug)]
 pub enum ErrorKind {
     LexicalError,
