@@ -13,13 +13,13 @@ mod intrinsic;
 mod lexer;
 mod parser;
 mod position;
-mod token;
 mod target;
+mod token;
 
 fn main() -> std::io::Result<()> {
     let cur_dir = env::current_dir()?;
     let mut args = env::args();
-    
+
     let mut file = None;
     let mut out_file = None;
     let mut target = CompilerTarget::Unknown;
@@ -28,18 +28,22 @@ fn main() -> std::io::Result<()> {
         match arg.as_str() {
             "-o" => {
                 let Some(sout) = args.next() else {
-                    return Err(std::io::Error::other("Error: output path must be informed after -o flag"));
+                    return Err(std::io::Error::other(
+                        "Error: output path must be informed after -o flag",
+                    ));
                 };
 
                 out_file = Some(PathBuf::from(sout));
-            },
+            }
             "-t" => {
                 let Some(starget) = args.next() else {
-                    return Err(std::io::Error::other("Error: target must be informed after -t flag"));
+                    return Err(std::io::Error::other(
+                        "Error: target must be informed after -t flag",
+                    ));
                 };
 
                 target = starget.parse().unwrap();
-            },
+            }
             _ => file = Some(arg),
         }
     }

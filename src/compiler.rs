@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, Operand, Reg, Xmm};
 use crate::ast::{
-    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier, Operator, ValueExpr, VarType
+    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier, Operator, ValueExpr,
+    VarType,
 };
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
@@ -527,7 +528,9 @@ impl Compiler {
             AstNode::Ret(expr) => {
                 let result = Self::do_compile_expr(code, scope, data, expr);
                 if !result.is_reg() {
-                    code.mov(Reg::Eax, result);
+                    let mem_size = result.mem_size();
+                    let reg = Reg::get_a(mem_size);
+                    code.mov(reg, result);
                 }
                 code.jmp(".R");
             }
@@ -548,7 +551,14 @@ impl Compiler {
         return args_size;
     }
 
-    fn compile_func(code: &mut AsmBuilder, global: &Scope, data: &mut AsmData, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
+    fn compile_func(
+        code: &mut AsmBuilder,
+        global: &Scope,
+        data: &mut AsmData,
+        ident: &Identifier,
+        args: &Vec<Argument>,
+        nodes: &Vec<AstNode>,
+    ) {
         code.label(ident);
         code.push_sf();
 

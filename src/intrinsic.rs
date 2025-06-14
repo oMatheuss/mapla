@@ -8,12 +8,12 @@ pub fn intrisic(name: &str, code: &mut AsmBuilder, target: CompilerTarget) {
                 CompilerTarget::Linux => {
                     linux::read(code);
                     linux::write(code);
-                },
+                }
                 CompilerTarget::Windows => {
                     windows::read(code);
                     windows::write(code);
-                },
-                CompilerTarget::Unknown => {},
+                }
+                CompilerTarget::Unknown => {}
             };
             print_int(code);
             print_char(code);
