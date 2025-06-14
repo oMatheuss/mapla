@@ -434,9 +434,24 @@ impl Display for MemScale {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum MemBase {
+    Reg(Reg),
+    Lbl(Lbl),
+}
+
+impl Display for MemBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemBase::Reg(reg) => write!(f, "{reg}"),
+            MemBase::Lbl(lbl) => write!(f, "rel {lbl}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Mem {
     size: MemSize,
-    base: Reg,
+    base: MemBase,
     index: MemIndex,
     scale: MemScale,
 }
@@ -445,7 +460,16 @@ impl Mem {
     pub fn reg(reg: Reg, size: MemSize) -> Self {
         Self {
             size,
-            base: reg,
+            base: MemBase::Reg(reg),
+            index: MemIndex::None,
+            scale: MemScale::Uni,
+        }
+    }
+
+    pub fn lbl(label: Lbl, size: MemSize) -> Self {
+        Self {
+            size,
+            base: MemBase::Lbl(label),
             index: MemIndex::None,
             scale: MemScale::Uni,
         }
@@ -454,7 +478,7 @@ impl Mem {
     pub fn offset(reg: Reg, offset: isize, size: MemSize) -> Self {
         Self {
             size,
-            base: reg,
+            base: MemBase::Reg(reg),
             index: MemIndex::Offset(offset),
             scale: MemScale::Uni,
         }
