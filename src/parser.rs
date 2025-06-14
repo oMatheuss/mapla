@@ -32,10 +32,11 @@ impl Symbol {
 
 struct SymbolTable<'a>(Vec<HashMap<&'a str, Symbol>>);
 
-const GLOBALS: [(&'static str, Symbol); 3] = [
+const GLOBALS: [(&'static str, Symbol); 4] = [
     ("printInt", Symbol::intrinsic(VarType::Void)),
     ("printChar", Symbol::intrinsic(VarType::Void)),
     ("printString", Symbol::intrinsic(VarType::Void)),
+    ("readString", Symbol::intrinsic(VarType::Int)),
 ];
 
 impl<'a> SymbolTable<'a> {

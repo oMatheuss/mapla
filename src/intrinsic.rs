@@ -10,6 +10,7 @@ pub fn intrisic(name: &str, code: &mut AsmBuilder, target: CompilerTarget) {
                     linux::write(code);
                 }
                 CompilerTarget::Windows => {
+                    code._extern(&["_read", "_write"]);
                     windows::read(code);
                     windows::write(code);
                 }
@@ -18,25 +19,43 @@ pub fn intrisic(name: &str, code: &mut AsmBuilder, target: CompilerTarget) {
             print_int(code);
             print_char(code);
             print_string(code);
+
+            read_string(code);
         }
         _ => todo!(),
     }
 }
 
 // func write(int fd, char* buffer, int count);
-// func read(int fd): char*;
+// func read(int fd, char* buffer, int buffer_size): int;
 
 mod windows {
     use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Reg};
 
-    pub fn read(code: &mut AsmBuilder) {}
+    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170
+    // The caller must always allocate sufficient space to store four register parameters, even if the callee doesn't take that many parameters
+    // Any parameters beyond the first four must be stored on the stack after the shadow store before the call.
+
+    pub fn read(code: &mut AsmBuilder) {
+        code.label("read");
+        code.push_sf();
+        code.sub(Reg::Rsp, Imm::Int64(32));
+        code.mov(Reg::Ecx, Mem::offset(Reg::Rbp, 16, MemSize::DWord)); // file descriptor
+        code.mov(Reg::Rdx, Mem::offset(Reg::Rbp, 20, MemSize::QWord)); // *buffer
+        code.mov(Reg::R8D, Mem::offset(Reg::Rbp, 28, MemSize::DWord)); // buffer_size
+        code.call("_read"); // return is already on rax
+        code.pop_sf();
+        code.ret(16);
+    }
     pub fn write(code: &mut AsmBuilder) {
-        code._extern(&["_write"]);
         code.label("write");
-        code.mov(Reg::Ecx, Mem::offset(Reg::Rsp, 8, MemSize::DWord)); // file descriptor
-        code.mov(Reg::Rdx, Mem::offset(Reg::Rsp, 12, MemSize::QWord)); // *buffer
-        code.mov(Reg::R8D, Mem::offset(Reg::Rsp, 20, MemSize::DWord)); // count
+        code.push_sf();
+        code.sub(Reg::Rsp, Imm::Int64(32));
+        code.mov(Reg::Ecx, Mem::offset(Reg::Rbp, 16, MemSize::DWord)); // file descriptor
+        code.mov(Reg::Rdx, Mem::offset(Reg::Rbp, 20, MemSize::QWord)); // *buffer
+        code.mov(Reg::R8D, Mem::offset(Reg::Rbp, 28, MemSize::DWord)); // count
         code.call("_write");
+        code.pop_sf();
         code.ret(16);
     }
 }
@@ -108,7 +127,7 @@ fn print_int(code: &mut AsmBuilder) {
     code.ret(4);
 }
 
-pub fn print_string(code: &mut AsmBuilder) {
+fn print_string(code: &mut AsmBuilder) {
     code.label("printString");
 
     code.sub(Reg::Rsp, Imm::Int64(16));
@@ -118,6 +137,20 @@ pub fn print_string(code: &mut AsmBuilder) {
     code.mov(Reg::Eax, Mem::offset(Reg::Rsp, 32, MemSize::DWord));
     code.mov(Mem::offset(Reg::Rsp, 12, MemSize::DWord), Reg::Eax); // int count
     code.call("write");
+
+    code.ret(12);
+}
+
+fn read_string(code: &mut AsmBuilder) {
+    code.label("readString");
+
+    code.sub(Reg::Rsp, Imm::Int64(16));
+    code.mov(Mem::reg(Reg::Rsp, MemSize::DWord), Imm::Int32(0)); // int fd
+    code.mov(Reg::Rax, Mem::offset(Reg::Rsp, 24, MemSize::QWord));
+    code.mov(Mem::offset(Reg::Rsp, 4, MemSize::QWord), Reg::Rax); // char* buffer
+    code.mov(Reg::Eax, Mem::offset(Reg::Rsp, 32, MemSize::DWord));
+    code.mov(Mem::offset(Reg::Rsp, 12, MemSize::DWord), Reg::Eax); // int buffer_size
+    code.call("read");
 
     code.ret(12);
 }
