@@ -320,6 +320,12 @@ impl<'a> Parser<'a> {
         };
         let expr = self.parse_expr(1)?;
         self.consume_semi()?;
+
+        let expr_type = expr.expr_type();
+        if expr_type != ty {
+            Error::syntatic(&format!("cannot assign {expr_type} to {ty}"), position)?
+        }
+
         self.symbols.set(&ident, Symbol::new(position, ty));
         AstNode::Var(ty, (*ident).into(), expr).ok()
     }

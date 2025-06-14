@@ -33,6 +33,18 @@ pub enum VarType {
     Void,
 }
 
+impl std::fmt::Display for VarType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VarType::Int => write!(f, "int"),
+            VarType::Real => write!(f, "real"),
+            VarType::Bool => write!(f, "bool"),
+            VarType::Char => write!(f, "char"),
+            VarType::Void => write!(f, "void"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Identifier(String);
 
@@ -215,7 +227,7 @@ impl Expression {
             Expression::Value(value) => value.value_type(),
             Expression::BinOp(bin_op) => bin_op.result_type(),
             Expression::Func(func) => func.return_type(),
-            Expression::Cast(..) => todo!(),
+            Expression::Cast(cast, ..) => *cast,
         }
     }
 }
