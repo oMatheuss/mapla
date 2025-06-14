@@ -127,12 +127,18 @@ impl Compiler {
         }
     }
 
-    fn compile_value(scope: &mut Scope, data: &mut AsmData, value: &ValueExpr) -> Operand {
+    fn compile_value(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        data: &mut AsmData,
+        value: &ValueExpr,
+    ) -> Operand {
         match value {
             ValueExpr::String(string) => {
                 let label = Lbl::from_str(&string);
                 data.insert(label, string.as_bytes().to_vec());
-                Operand::Lbl(label)
+                code.lea(Reg::Rax, Mem::lbl(label, MemSize::QWord));
+                Operand::Reg(Reg::Rax)
             }
             ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
             ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
@@ -423,7 +429,7 @@ impl Compiler {
         expr: &Expression,
     ) -> Operand {
         match expr {
-            Expression::Value(value) => Self::compile_value(scope, data, value),
+            Expression::Value(value) => Self::compile_value(code, scope, data, value),
             Expression::BinOp(bin_op) => Self::compile_binop(code, scope, data, bin_op),
             Expression::Cast(..) => todo!(),
             Expression::Func(func) => Self::compile_call(code, scope, data, func),
