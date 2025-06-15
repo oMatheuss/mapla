@@ -271,7 +271,6 @@ impl Expression {
 pub struct Argument {
     pub name: Identifier,
     pub arg_type: VarType,
-    pub default: Option<ValueExpr>,
 }
 
 impl Argument {
@@ -279,7 +278,6 @@ impl Argument {
         Self {
             name: name.into(),
             arg_type,
-            default: None,
         }
     }
 }
