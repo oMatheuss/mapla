@@ -63,7 +63,15 @@ mod windows {
 mod linux {
     use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Reg};
 
-    pub fn read(code: &mut AsmBuilder) {}
+    pub fn read(code: &mut AsmBuilder) {
+        code.label("read");
+        code.mov(Reg::Eax, Imm::Int32(0)); // sys_read call
+        code.mov(Reg::Edi, Mem::offset(Reg::Rsp, 8, MemSize::DWord)); // file descriptor
+        code.mov(Reg::Rsi, Mem::offset(Reg::Rsp, 12, MemSize::QWord)); // *buffer
+        code.mov(Reg::Edx, Mem::offset(Reg::Rsp, 20, MemSize::DWord)); // count
+        code.syscall();
+        code.ret(16);
+    }
     pub fn write(code: &mut AsmBuilder) {
         code.label("write");
         code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
