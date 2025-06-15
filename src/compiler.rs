@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, Operand, Reg, Xmm};
 use crate::ast::{
-    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier, Operator, ValueExpr,
-    VarType,
+    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier, Operator, UnaryOp,
+    UnaryOperator, ValueExpr, VarType,
 };
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
@@ -35,7 +35,7 @@ impl MemAlloc {
 }
 
 struct Scope<'a> {
-    var: HashMap<String, Operand>,
+    var: HashMap<String, Mem>,
     mem: &'a RefCell<MemAlloc>,
     lbl: usize,
     sup: Option<&'a Scope<'a>>,
@@ -69,7 +69,7 @@ impl<'a> Scope<'a> {
         }
     }
 
-    fn get(&self, ident: &str) -> &Operand {
+    fn get(&self, ident: &str) -> &Mem {
         if let Some(local) = self.var.get(ident) {
             local
         } else if let Some(sup) = &self.sup {
@@ -80,7 +80,7 @@ impl<'a> Scope<'a> {
     }
 
     #[inline]
-    fn set(&mut self, ident: &str, operand: Operand) -> Option<Operand> {
+    fn set(&mut self, ident: &str, operand: Mem) -> Option<Mem> {
         self.var.insert(String::from(ident), operand)
     }
 
@@ -88,7 +88,7 @@ impl<'a> Scope<'a> {
         let mut mem = self.mem.borrow_mut();
         mem.local_off -= mem_size as isize;
         let mem = Mem::offset(Reg::Rbp, mem.local_off, mem_size);
-        self.var.insert(String::from(ident), Operand::Mem(mem));
+        self.var.insert(String::from(ident), mem);
         Operand::Mem(mem)
     }
 
@@ -147,7 +147,7 @@ impl Compiler {
                 true => Operand::Imm(Imm::TRUE),
                 false => Operand::Imm(Imm::FALSE),
             },
-            ValueExpr::Identifier(ident, ..) => *scope.get(ident),
+            ValueExpr::Identifier(ident, ..) => Operand::Mem(*scope.get(ident)),
         }
     }
 
@@ -423,6 +423,21 @@ impl Compiler {
         Operand::Reg(Reg::Eax)
     }
 
+    fn compile_unaop(code: &mut AsmBuilder, scope: &mut Scope, una_op: &UnaryOp) -> Operand {
+        let operand = una_op.operand();
+        match una_op.operator() {
+            UnaryOperator::AddressOf => {
+                let Expression::Value(ValueExpr::Identifier(id, ..)) = operand else {
+                    panic!("operator AddressOf can only be used on vars");
+                };
+                code.lea(Reg::Rax, *scope.get(id));
+                Operand::Reg(Reg::Rax)
+            }
+            UnaryOperator::Minus => todo!(),
+            UnaryOperator::Not => todo!(),
+        }
+    }
+
     fn compile_expr(
         code: &mut AsmBuilder,
         scope: &mut Scope,
@@ -431,8 +446,8 @@ impl Compiler {
     ) -> Operand {
         match expr {
             Expression::Value(value) => Self::compile_value(code, scope, data, value),
+            Expression::UnaOp(una_op) => Self::compile_unaop(code, scope, una_op),
             Expression::BinOp(bin_op) => Self::compile_binop(code, scope, data, bin_op),
-            Expression::Cast(..) => todo!(),
             Expression::Func(func) => Self::compile_call(code, scope, data, func),
         }
     }

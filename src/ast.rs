@@ -154,11 +154,35 @@ impl FunctionCall {
 }
 
 #[derive(Debug)]
+pub struct UnaryOp {
+    operator: UnaryOperator,
+    operand: Box<Expression>,
+    result: VarType,
+}
+
+impl UnaryOp {
+    #[inline]
+    pub fn operand(&self) -> &Expression {
+        &self.operand
+    }
+
+    #[inline]
+    pub fn operator(&self) -> UnaryOperator {
+        self.operator
+    }
+
+    #[inline]
+    pub fn result_type(&self) -> VarType {
+        self.result
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Value(ValueExpr),
+    UnaOp(UnaryOp),
     BinOp(BinaryOp),
     Func(FunctionCall),
-    Cast(VarType, Box<Expression>),
 }
 
 impl From<ValueExpr> for Expression {
@@ -176,6 +200,12 @@ impl From<BinaryOp> for Expression {
 impl From<FunctionCall> for Expression {
     fn from(value: FunctionCall) -> Self {
         Self::Func(value)
+    }
+}
+
+impl From<UnaryOp> for Expression {
+    fn from(value: UnaryOp) -> Self {
+        Self::UnaOp(value)
     }
 }
 
@@ -214,11 +244,16 @@ impl Expression {
     }
 
     #[inline]
-    pub fn func(name: &str, args: Vec<Expression>, ret: VarType) -> Self {
-        Self::Func(FunctionCall {
-            name: name.into(),
-            args,
-            ret,
+    pub fn func(name: Identifier, args: Vec<Expression>, ret: VarType) -> Self {
+        Self::Func(FunctionCall { name, args, ret })
+    }
+
+    #[inline]
+    pub fn una_op(op: UnaryOperator, operand: Expression, result: VarType) -> Self {
+        Self::UnaOp(UnaryOp {
+            operator: op,
+            operand: Box::new(operand),
+            result,
         })
     }
 
@@ -227,7 +262,7 @@ impl Expression {
             Expression::Value(value) => value.value_type(),
             Expression::BinOp(bin_op) => bin_op.result_type(),
             Expression::Func(func) => func.return_type(),
-            Expression::Cast(cast, ..) => *cast,
+            Expression::UnaOp(una_op) => una_op.result_type(),
         }
     }
 }
@@ -328,4 +363,11 @@ impl Operator {
                 | Operator::DivAssign
         )
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryOperator {
+    AddressOf,
+    Minus,
+    Not,
 }

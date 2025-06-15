@@ -169,6 +169,7 @@ impl<'a> Lexer<'a> {
                 self.next();
                 Token::And
             }
+            ('&', _) => Token::Ampersand,
             ('|', Some('|')) => {
                 self.next();
                 Token::Or

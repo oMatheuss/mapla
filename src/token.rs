@@ -43,6 +43,7 @@ pub enum Token<'a> {
     Comma,
     Colon,
     SemiColon,
+    Ampersand,
     Eof,
 }
 

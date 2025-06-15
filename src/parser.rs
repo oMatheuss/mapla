@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::slice::Iter;
 
-use crate::ast::{Argument, Ast, AstNode, Expression, Operator, ValueExpr, VarType};
+use crate::ast::{Argument, Ast, AstNode, Expression, Operator, UnaryOperator, ValueExpr, VarType};
 use crate::error::{Error, Result};
 use crate::lexer::LexItem;
 use crate::position::Position;
@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
                     Error::syntatic("symbol not found in scope", self.pos)?
                 };
                 let args = self.parse_callargs()?;
-                Expression::func(id, args, symbol.var_type)
+                Expression::func(id.into(), args, symbol.var_type)
             }
             Token::Identifier(id) => {
                 let Some(symbol) = self.symbols.find(id) else {
@@ -169,6 +169,24 @@ impl<'a> Parser<'a> {
                     Error::syntatic("expected close parentheses", self.pos)?
                 };
                 inner_expr
+            }
+            Token::Ampersand => {
+                let Token::Identifier(id) = *self.next_or_err()? else {
+                    Error::syntatic("a ref can only be taken from a var", self.pos)?
+                };
+                let Some(symbol) = self.symbols.find(id).cloned() else {
+                    Error::syntatic("symbol not found in scope", self.pos)?
+                };
+                let operand = ValueExpr::Identifier(id.into(), symbol.var_type);
+                Expression::una_op(UnaryOperator::AddressOf, operand.into(), VarType::Void)
+            }
+            Token::Sub => {
+                let operand = self.parse_atom()?;
+                let result = operand.expr_type();
+                if !matches!(result, VarType::Int | VarType::Real) {
+                    Error::syntatic("can only apply unary operator minus to numbers", self.pos)?
+                }
+                Expression::una_op(UnaryOperator::Minus, operand, result)
             }
             _ => Error::syntatic("unexpected token", self.pos)?,
         };
