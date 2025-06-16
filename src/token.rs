@@ -40,6 +40,8 @@ pub enum Token<'a> {
     DivAssign,
     OpenParen,
     CloseParen,
+    OpenBracket,
+    CloseBracket,
     Comma,
     Colon,
     SemiColon,

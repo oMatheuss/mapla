@@ -146,6 +146,8 @@ impl<'a> Lexer<'a> {
         let token = match (first, second) {
             ('(', _) => Token::OpenParen,
             (')', _) => Token::CloseParen,
+            ('[', _) => Token::OpenBracket,
+            (']', _) => Token::CloseBracket,
             ('=', Some('=')) => {
                 self.next();
                 Token::Equal
