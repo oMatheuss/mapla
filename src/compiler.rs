@@ -433,8 +433,10 @@ impl Compiler {
                 code.lea(Reg::Rax, *scope.get(id));
                 Operand::Reg(Reg::Rax)
             }
+            UnaryOperator::Dereference => todo!(),
             UnaryOperator::Minus => todo!(),
             UnaryOperator::Not => todo!(),
+            UnaryOperator::BitwiseNot => todo!(),
         }
     }
 

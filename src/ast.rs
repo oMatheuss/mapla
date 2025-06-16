@@ -366,6 +366,8 @@ impl Operator {
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOperator {
     AddressOf,
+    Dereference,
     Minus,
     Not,
+    BitwiseNot,
 }
