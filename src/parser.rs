@@ -329,23 +329,37 @@ impl<'a> Parser<'a> {
 
     fn consume_var(&mut self, ty: VarType) -> Result<AstNode> {
         self.next(); // discard var type token
+        let array = if let Some(Token::OpenBracket) = self.peek() {
+            self.next_or_err()?; // discard open bracket
+            let ValueExpr::Int(size) = self.parse_value()? else {
+                Error::syntatic("expected integer value", self.pos)?
+            };
+            let Token::CloseBracket = self.next_or_err()? else {
+                Error::syntatic("expected close bracket", self.pos)?
+            };
+            Some(size as u32)
+        } else {
+            None
+        };
+        let id_pos = self.pos;
         let Token::Identifier(ident) = self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
-        let position = self.pos;
-        let Token::Assign = self.next_or_err()? else {
-            Error::syntatic("expected assign operator `=`", self.pos)?
+        let expr = if let Some(Token::Assign) = self.peek() {
+            self.next_or_err()?; // discard assign signal
+            let expr_pos = self.pos;
+            let expr = self.parse_expr(1)?;
+            let expr_type = expr.expr_type();
+            if expr_type != ty {
+                Error::syntatic(&format!("cannot assign {expr_type} to {ty}"), expr_pos)?
+            }
+            Some(expr)
+        } else {
+            None
         };
-        let expr = self.parse_expr(1)?;
         self.consume_semi()?;
-
-        let expr_type = expr.expr_type();
-        if expr_type != ty {
-            Error::syntatic(&format!("cannot assign {expr_type} to {ty}"), position)?
-        }
-
-        self.symbols.set(&ident, Symbol::new(position, ty));
-        AstNode::Var(ty, (*ident).into(), expr).ok()
+        self.symbols.set(&ident, Symbol::new(id_pos, ty));
+        AstNode::Var(ty, array, (*ident).into(), expr).ok()
     }
 
     fn parse_type(&mut self) -> Result<VarType> {

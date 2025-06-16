@@ -92,6 +92,14 @@ impl<'a> Scope<'a> {
         Operand::Mem(mem)
     }
 
+    fn new_array(&mut self, ident: &str, size: u32, mem_size: MemSize) -> Operand {
+        let mut mem = self.mem.borrow_mut();
+        mem.local_off -= mem_size as isize * size as isize;
+        let mem = Mem::offset(Reg::Rbp, mem.local_off, mem_size);
+        self.var.insert(String::from(ident), mem);
+        Operand::Mem(mem)
+    }
+
     fn new_temp(&mut self, mem_size: MemSize) -> Operand {
         let mut mem = self.mem.borrow_mut();
         mem.temp_off -= mem_size as isize;
@@ -476,13 +484,20 @@ impl Compiler {
 
     fn compile_node(code: &mut AsmBuilder, scope: &mut Scope, data: &mut AsmData, node: &AstNode) {
         match node {
-            AstNode::Var(_, ident, expr) => {
-                let result = Self::do_compile_expr(code, scope, data, expr);
-                let local = scope.new_local(ident, result.mem_size());
-                if let Operand::Xmm(_) = result {
-                    code.movss(local, result);
+            AstNode::Var(ty, arr, ident, expr) => {
+                let mem_size = Self::get_var_size(*ty);
+                let local = if let Some(size) = *arr {
+                    scope.new_array(ident, size, mem_size)
                 } else {
-                    code.mov(local, result);
+                    scope.new_local(ident, mem_size)
+                };
+                if let Some(expr) = expr {
+                    let result = Self::do_compile_expr(code, scope, data, expr);
+                    if result.is_xmm() {
+                        code.movss(local, result);
+                    } else {
+                        code.mov(local, result);
+                    }
                 }
             }
             AstNode::If(expr, nodes) => {

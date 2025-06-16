@@ -285,7 +285,7 @@ impl Argument {
 #[derive(Debug)]
 pub enum AstNode {
     Use(Identifier),
-    Var(VarType, Identifier, Expression),
+    Var(VarType, Option<u32>, Identifier, Option<Expression>),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),
     For(Identifier, ValueExpr, Vec<AstNode>),
