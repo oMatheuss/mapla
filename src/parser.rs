@@ -420,6 +420,31 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
+    fn check_func(&mut self, inner: &Vec<AstNode>, ret_type: VarType, fn_pos: Position) -> Result<VarType> {
+        for node in inner {
+            if let AstNode::Ret(expr) = node {
+                if expr.expr_type() == ret_type {
+                    return Ok(ret_type);
+                } else {
+                    return Error::syntatic("return type does not match declaration", fn_pos);
+                }
+            }
+            
+            let block_type = match node {
+                AstNode::If(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
+                AstNode::While(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
+                AstNode::For(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
+                _ => continue,
+            };
+
+            if block_type != ret_type {
+                return Error::syntatic("return type does not match declaration", fn_pos)
+            }
+        }
+
+        Ok(VarType::Void)
+    }
+
     fn consume_func(&mut self) -> Result<AstNode> {
         self.next(); // discard function token
         let Token::Identifier(name) = self.next_or_err()? else {
@@ -448,7 +473,7 @@ impl<'a> Parser<'a> {
         let inner = self.consume_inner()?;
         self.symbols.exit_scope(); // args
 
-        // TODO: validate returns
+        self.check_func(&inner, ret_type, fn_pos)?;
 
         AstNode::Func((*name).into(), args, ret_type, inner).ok()
     }
