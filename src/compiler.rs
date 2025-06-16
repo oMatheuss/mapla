@@ -433,7 +433,16 @@ impl Compiler {
                 code.lea(Reg::Rax, *scope.get(id));
                 Operand::Reg(Reg::Rax)
             }
-            UnaryOperator::Dereference => todo!(),
+            UnaryOperator::Dereference => {
+                let Expression::Value(ValueExpr::Identifier(id, ty)) = operand else {
+                    panic!("operator Dereference can only be used on vars");
+                };
+                code.mov(Reg::Rax, *scope.get(id));
+                let size = Self::get_var_size(*ty);
+                let temp = scope.new_temp(size);
+                code.mov(temp, Mem::reg(Reg::Rax, size));
+                temp
+            },
             UnaryOperator::Minus => todo!(),
             UnaryOperator::Not => todo!(),
             UnaryOperator::BitwiseNot => todo!(),
