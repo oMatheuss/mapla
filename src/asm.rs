@@ -82,7 +82,7 @@ impl Display for OpCode {
             OpCode::Jl => write!(f, "jl"),
             OpCode::Jle => write!(f, "jle"),
             OpCode::Sete => write!(f, "sete"),
-            OpCode::Setne => write!(f, "sete"),
+            OpCode::Setne => write!(f, "setne"),
             OpCode::Setg => write!(f, "setg"),
             OpCode::Setl => write!(f, "setl"),
             OpCode::Inc => write!(f, "inc"),
