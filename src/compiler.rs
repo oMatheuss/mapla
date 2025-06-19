@@ -532,14 +532,17 @@ impl Compiler {
                 code.jmp(&startwhile_lbl);
                 code.label(&endwhile_lbl);
             }
-            AstNode::For(ident, limit, nodes) => {
+            AstNode::For(ident, init, limit, nodes) => {
                 let startfor_lbl = scope.new_label();
                 let endfor_lbl = scope.new_label();
 
                 let scope = &mut Scope::continue_on(&scope);
                 let counter = scope.new_local(ident, MemSize::DWord);
-
-                code.mov(counter, Imm::Int32(0));
+                let init = match init {
+                    Some(expr) => Self::compile_value(code, scope, data, expr),
+                    None => Imm::Int32(0).into(),
+                };
+                code.mov(counter, init);
                 code.label(&startfor_lbl);
 
                 match limit {

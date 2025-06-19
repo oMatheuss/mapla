@@ -288,7 +288,7 @@ pub enum AstNode {
     Var(VarType, Option<u32>, Identifier, Option<Expression>),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),
-    For(Identifier, ValueExpr, Vec<AstNode>),
+    For(Identifier, Option<ValueExpr>, ValueExpr, Vec<AstNode>),
     Expr(Expression),
     Func(Identifier, Vec<Argument>, VarType, Vec<AstNode>),
     Ret(Expression),

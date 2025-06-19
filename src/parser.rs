@@ -296,15 +296,21 @@ impl<'a> Parser<'a> {
         };
         self.symbols
             .set(&ident, Symbol::new(self.pos, VarType::Int));
+        let init = if let Some(Token::Assign) = self.peek() {
+            self.next_or_err()?;
+            Some(self.parse_value()?)
+        } else {
+            None
+        };
         let Token::To = self.next_or_err()? else {
             Error::syntatic("expected token `to`", self.pos)?
         };
-        let value = self.parse_value()?;
+        let limit = self.parse_value()?;
         let Token::Then = self.next_or_err()? else {
             Error::syntatic("expected token `then`", self.pos)?
         };
         let inner = self.consume_inner()?;
-        AstNode::For((*ident).into(), value, inner).ok()
+        AstNode::For((*ident).into(), init, limit, inner).ok()
     }
 
     fn consume_while(&mut self) -> Result<AstNode> {
