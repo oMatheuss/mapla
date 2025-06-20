@@ -1,0 +1,17 @@
+use io;
+
+func main(): int do
+    real sum = 0.0;
+    real neg = 0.0 - 1.0;
+    real flip = neg;
+    real i = 1.0;
+
+    for j to 100000 then
+        flip *= neg;
+        sum += flip / ( 2.0 * i - 1.0 );
+        i += 1.0;
+    end
+    
+    printInt(sum * 4.0);
+    return 0;
+end

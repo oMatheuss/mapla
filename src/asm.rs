@@ -21,7 +21,9 @@ pub enum OpCode {
     Sete,
     Setne,
     Setg,
+    Setge,
     Setl,
+    Setle,
 
     Inc, // Increment one
     Dec, // Decrement one
@@ -49,13 +51,18 @@ pub enum OpCode {
     Shr, // Shift right
     Neg, // Negate
 
-    Movss, // mov f32 to/from xmm to xmm/memory
-    Movsd, // mov f64
+    Movss,  // mov f32 to/from xmm to xmm/memory
+    Comiss, // compares f32 and set eflags (branchfull)
+    Cmpss,  // xmm1, xmm2/mem, imm (branchless)
 
     Addss,
     Subss,
     Mulss,
     Divss,
+
+    Movsd,  // mov f64
+    Comisd, // compares f64 and set eflags (branchfull)
+    Cmpsd,  // xmm1, xmm2/mem, imm (branchless)
 
     Addsd,
     Subsd,
@@ -84,7 +91,9 @@ impl Display for OpCode {
             OpCode::Sete => write!(f, "sete"),
             OpCode::Setne => write!(f, "setne"),
             OpCode::Setg => write!(f, "setg"),
+            OpCode::Setge => write!(f, "setge"),
             OpCode::Setl => write!(f, "setl"),
+            OpCode::Setle => write!(f, "setle"),
             OpCode::Inc => write!(f, "inc"),
             OpCode::Dec => write!(f, "dec"),
             OpCode::Mov => write!(f, "mov"),
@@ -109,11 +118,15 @@ impl Display for OpCode {
             OpCode::Shr => write!(f, "shr"),
             OpCode::Neg => write!(f, "neg"),
             OpCode::Movss => write!(f, "movss"),
-            OpCode::Movsd => write!(f, "movsd"),
+            OpCode::Comiss => write!(f, "comiss"),
+            OpCode::Cmpss => write!(f, "cmpss"),
             OpCode::Addss => write!(f, "addss"),
             OpCode::Subss => write!(f, "subss"),
             OpCode::Mulss => write!(f, "mulss"),
             OpCode::Divss => write!(f, "divss"),
+            OpCode::Movsd => write!(f, "movsd"),
+            OpCode::Comisd => write!(f, "comisd"),
+            OpCode::Cmpsd => write!(f, "cmpsd"),
             OpCode::Addsd => write!(f, "addsd"),
             OpCode::Subsd => write!(f, "subsd"),
             OpCode::Mulsd => write!(f, "mulsd"),
@@ -779,8 +792,16 @@ impl AsmBuilder {
         writeln!(self, "  {opcode} {value}", opcode = OpCode::Setg);
     }
 
+    pub fn setge<T: Into<Operand> + Display>(&mut self, value: T) {
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setge);
+    }
+
     pub fn setl<T: Into<Operand> + Display>(&mut self, value: T) {
         writeln!(self, "  {opcode} {value}", opcode = OpCode::Setl);
+    }
+
+    pub fn setle<T: Into<Operand> + Display>(&mut self, value: T) {
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setle);
     }
 
     pub fn inc<T: Into<Operand> + Display>(&mut self, value: T) {
@@ -922,6 +943,18 @@ impl AsmBuilder {
             self,
             "  {opcode} {value1}, {value2}",
             opcode = OpCode::Movss
+        );
+    }
+
+    pub fn comiss<T1, T2>(&mut self, value1: T1, value2: T2)
+    where
+        T1: Into<Operand> + Display,
+        T2: Into<Operand> + Display,
+    {
+        writeln!(
+            self,
+            "  {opcode} {value1}, {value2}",
+            opcode = OpCode::Comiss
         );
     }
 

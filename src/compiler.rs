@@ -165,8 +165,6 @@ impl Compiler {
         data: &mut AsmData,
         bin_op: &BinaryOp,
     ) -> Operand {
-        let is_float_expr = bin_op.is_float_expr();
-
         // depth-first search
         let mut lhs = Self::compile_expr(code, scope, data, bin_op.lhs());
 
@@ -186,11 +184,11 @@ impl Compiler {
             rhs = scope.new_temp(reg.mem_size());
             code.mov(rhs, reg);
         } else if let Operand::Xmm(xmm) = rhs {
-            lhs = scope.new_temp(xmm.mem_size());
+            rhs = scope.new_temp(xmm.mem_size());
             code.movss(rhs, xmm);
         }
 
-        match is_float_expr {
+        match bin_op.is_float_expr() {
             true => Self::compile_fop(code, scope, bin_op.operator(), lhs, rhs),
             false => Self::compile_iop(code, bin_op.operator(), lhs, rhs),
         }
@@ -228,13 +226,21 @@ impl Compiler {
                 code.setg(Reg::Al);
                 Operand::Reg(Reg::Al)
             }
-            Operator::GreaterEqual => todo!(),
+            Operator::GreaterEqual => {
+                code.cmp(lhs, rhs);
+                code.setge(Reg::Al);
+                Operand::Reg(Reg::Al)
+            },
             Operator::Less => {
                 code.cmp(lhs, rhs);
                 code.setl(Reg::Al);
                 Operand::Reg(Reg::Al)
             }
-            Operator::LessEqual => todo!(),
+            Operator::LessEqual => {
+                code.cmp(lhs, rhs);
+                code.setle(Reg::Al);
+                Operand::Reg(Reg::Al)
+            },
             Operator::And => {
                 code.and(lhs, rhs);
                 lhs
@@ -280,6 +286,10 @@ impl Compiler {
                 Operand::Reg(Reg::Edx)
             }
             Operator::Assign => {
+                if let Operand::Mem(mem) = rhs {
+                    code.mov(Reg::Eax, mem);
+                    rhs = Operand::Reg(Reg::Eax)
+                }
                 code.mov(lhs, rhs);
                 lhs
             }
@@ -356,9 +366,17 @@ impl Compiler {
         match operator {
             Operator::Equal => todo!(),
             Operator::NotEqual => todo!(),
-            Operator::Greater => todo!(),
+            Operator::Greater => {
+                code.comiss(lhs, rhs);
+                code.setg(Reg::Al);
+                Operand::Reg(Reg::Al)
+            }
             Operator::GreaterEqual => todo!(),
-            Operator::Less => todo!(),
+            Operator::Less => {
+                code.comiss(lhs, rhs);
+                code.setl(Reg::Al);
+                Operand::Reg(Reg::Al)
+            }
             Operator::LessEqual => todo!(),
             Operator::And => todo!(),
             Operator::Or => todo!(),
@@ -380,7 +398,12 @@ impl Compiler {
             }
             Operator::Mod => todo!(),
             Operator::Assign => {
-                code.movss(lhs, rhs);
+                if let Operand::Mem(mem) = rhs {
+                    let xmm0 = Xmm::get_0(mem.mem_size());
+                    code.movss(xmm0, mem);
+                    rhs = Operand::Xmm(xmm0);
+                }
+                code.movss(old_lhs, rhs);
                 lhs
             }
             Operator::AddAssign => {
@@ -413,19 +436,21 @@ impl Compiler {
         func: &FunctionCall,
     ) -> Operand {
         for arg in func.args().iter().rev() {
-            let mut arg = Self::compile_expr(code, scope, data, arg);
+            let arg = Self::compile_expr(code, scope, data, arg);
             let mem_size = arg.mem_size();
-
-            if arg.is_mem() {
-                let a_reg = Reg::get_a(mem_size);
-                code.mov(a_reg, arg);
-                arg = Operand::Reg(a_reg);
-            }
-
             let mem = Mem::reg(Reg::Rsp, mem_size);
             // TODO: allocate space for parameters all at once
             code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
-            code.mov(mem, arg);
+
+            if arg.is_xmm() {
+                code.movss(mem, arg);
+            } else if arg.is_mem() {
+                let a_reg = Reg::get_a(mem_size);
+                code.mov(a_reg, arg);
+                code.mov(mem, a_reg);
+            } else {
+                code.mov(mem, arg);
+            }
         }
         code.call(func.name());
         Operand::Reg(Reg::Eax)
@@ -495,6 +520,10 @@ impl Compiler {
                     let result = Self::do_compile_expr(code, scope, data, expr);
                     if result.is_xmm() {
                         code.movss(local, result);
+                    } else if result.is_mem() {
+                        let reg_a = Reg::get_a(result.mem_size());
+                        code.mov(reg_a, result);
+                        code.mov(local, reg_a);
                     } else {
                         code.mov(local, result);
                     }
