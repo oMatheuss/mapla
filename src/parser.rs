@@ -462,7 +462,7 @@ impl<'a> Parser<'a> {
                 _ => continue,
             };
 
-            if block_type != ret_type {
+            if block_type != VarType::Void && block_type != ret_type {
                 return Error::syntatic("return type does not match declaration", fn_pos);
             }
         }
