@@ -440,7 +440,12 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn check_func(&mut self, inner: &Vec<AstNode>, ret_type: VarType, fn_pos: Position) -> Result<VarType> {
+    fn check_func(
+        &mut self,
+        inner: &Vec<AstNode>,
+        ret_type: VarType,
+        fn_pos: Position,
+    ) -> Result<VarType> {
         for node in inner {
             if let AstNode::Ret(expr) = node {
                 if expr.expr_type() == ret_type {
@@ -449,7 +454,7 @@ impl<'a> Parser<'a> {
                     return Error::syntatic("return type does not match declaration", fn_pos);
                 }
             }
-            
+
             let block_type = match node {
                 AstNode::If(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
                 AstNode::While(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
@@ -458,7 +463,7 @@ impl<'a> Parser<'a> {
             };
 
             if block_type != ret_type {
-                return Error::syntatic("return type does not match declaration", fn_pos)
+                return Error::syntatic("return type does not match declaration", fn_pos);
             }
         }
 

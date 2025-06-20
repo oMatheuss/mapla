@@ -450,7 +450,7 @@ impl Compiler {
                 let temp = scope.new_temp(size);
                 code.mov(temp, Mem::reg(Reg::Rax, size));
                 temp
-            },
+            }
             UnaryOperator::Minus => todo!(),
             UnaryOperator::Not => todo!(),
             UnaryOperator::BitwiseNot => todo!(),
