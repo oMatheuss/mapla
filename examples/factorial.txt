@@ -1,11 +1,12 @@
 use io;
 
-func fact(acc: int, n: int) do
+func fact(acc: int, n: int): int do
     if n < 2 then return acc; end
     return fact(n * acc, n - 1);
 end
 
-func main() do
+func main(): int do
     int r = fact(1, 5);
     printInt(r);
+    return 0;
 end

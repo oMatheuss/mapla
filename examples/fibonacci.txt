@@ -1,14 +1,12 @@
 use io;
 
 func fib(num: int): int do
-    if num < 2 then
-        return num;
-    end
-
+    if num < 2 then return num; end
     return fib(num - 1) + fib(num - 2);
 end
 
-func main() do
+func main(): int do
     int r = fib(10);
     printInt(r);
+    return 0;
 end
