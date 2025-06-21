@@ -230,7 +230,7 @@ impl Compiler {
                 code.cmp(lhs, rhs);
                 code.setge(Reg::Al);
                 Operand::Reg(Reg::Al)
-            },
+            }
             Operator::Less => {
                 code.cmp(lhs, rhs);
                 code.setl(Reg::Al);
@@ -240,7 +240,7 @@ impl Compiler {
                 code.cmp(lhs, rhs);
                 code.setle(Reg::Al);
                 Operand::Reg(Reg::Al)
-            },
+            }
             Operator::And => {
                 code.and(lhs, rhs);
                 lhs

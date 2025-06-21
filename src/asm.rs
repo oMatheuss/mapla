@@ -532,8 +532,8 @@ impl Display for Imm {
             Imm::Char(value) => write!(f, "byte '{value}'"),
             Imm::Int32(value) => write!(f, "dword {value}"),
             Imm::Int64(value) => write!(f, "qword {value}"),
-            Imm::Float32(value) => write!(f, "dword __?float32?__({value:.7})"),
-            Imm::Float64(value) => write!(f, "qword __?float64?__({value:.7})"),
+            Imm::Float32(value) => write!(f, "dword 0x{:x}", value.to_bits()),
+            Imm::Float64(value) => write!(f, "qword 0x{:x}", value.to_bits()),
         }
     }
 }
