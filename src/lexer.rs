@@ -227,10 +227,6 @@ impl<'a> Lexer<'a> {
         self.ended = true;
         LexItem::eof(position).ok()
     }
-
-    pub fn lex(input: &str) -> Result<Vec<LexItem>> {
-        Lexer::new(input).collect()
-    }
 }
 
 impl<'a> Iterator for Lexer<'a> {

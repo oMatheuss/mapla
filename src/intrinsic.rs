@@ -14,7 +14,6 @@ pub fn intrisic(name: &str, code: &mut AsmBuilder, target: CompilerTarget) {
                     windows::read(code);
                     windows::write(code);
                 }
-                CompilerTarget::Unknown => {}
             };
             print_int(code);
             print_char(code);
