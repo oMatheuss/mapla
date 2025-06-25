@@ -1,5 +1,5 @@
+use std::process::ExitCode;
 use std::{env, path::PathBuf};
-use std::process::{ExitCode};
 
 use compiler::Compiler;
 use error::{Error, Result};
@@ -18,12 +18,17 @@ mod position;
 mod target;
 mod token;
 
-fn run() -> Result<()> {
-    let cur_dir = env::current_dir()?;
+struct ParsedArgs {
+    input: String,
+    output: Option<String>,
+    target: CompilerTarget,
+}
+
+fn parse_args() -> Result<ParsedArgs> {
     let mut args = env::args();
 
-    let mut file = None;
-    let mut out_file = None;
+    let mut input = None;
+    let mut output = None;
     let mut target = CompilerTarget::Linux;
 
     args.next().expect("first argument should be program path");
@@ -35,7 +40,7 @@ fn run() -> Result<()> {
                     return Error::cli("output path must be informed after -o flag");
                 };
 
-                out_file = Some(PathBuf::from(sout));
+                output = Some(sout);
             }
             "-t" => {
                 let Some(starget) = args.next() else {
@@ -44,28 +49,43 @@ fn run() -> Result<()> {
 
                 target = starget.parse()?;
             }
-            _ => file = Some(arg),
+            _ => input = Some(arg),
         }
     }
 
-    let Some(file) = &file else {
+    let Some(input) = input else {
         return Error::cli("no input file provided");
     };
 
-    let in_file = cur_dir.join(file);
-    let out_file = out_file.unwrap_or(in_file.with_extension("asm"));
+    Ok(ParsedArgs {
+        input,
+        output,
+        target,
+    })
+}
 
+fn run() -> Result<()> {
+    let args = parse_args()?;
+    let cur_dir = env::current_dir()?;
+
+    let in_file = cur_dir.join(&args.input);
+    let out_file = args
+        .output
+        .map(PathBuf::from)
+        .unwrap_or(in_file.with_extension("asm"));
+
+    let source = &args.input;
     let code = std::fs::read_to_string(in_file)?;
 
     let tokens = Lexer::new(&code)
         .collect::<Result<Vec<_>>>()
-        .map_err(|err| err.with_source(file))?;
+        .map_err(|err| err.with_source(source))?;
 
     let ast = Parser::new(&tokens)
         .parse()
-        .map_err(|err| err.with_source(file))?;
+        .map_err(|err| err.with_source(source))?;
 
-    let assembly = Compiler::compile(ast, target);
+    let assembly = Compiler::compile(ast, args.target);
 
     std::fs::write(out_file, assembly)?;
 
