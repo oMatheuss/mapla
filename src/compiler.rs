@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, Operand, Reg, Xmm};
 use crate::ast::{
-    Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier, Operator, UnaryOp,
-    UnaryOperator, ValueExpr, VarType,
+    Annotated, Annotation, Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier,
+    Operator, UnaryOp, UnaryOperator, ValueExpr, VarType,
 };
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
@@ -155,7 +155,7 @@ impl Compiler {
                 true => Operand::Imm(Imm::TRUE),
                 false => Operand::Imm(Imm::FALSE),
             },
-            ValueExpr::Identifier(ident, ..) => Operand::Mem(*scope.get(ident)),
+            ValueExpr::Identifier(.., id) => Operand::Mem(*scope.get(id)),
         }
     }
 
@@ -188,7 +188,7 @@ impl Compiler {
             code.movss(rhs, xmm);
         }
 
-        match bin_op.is_float_expr() {
+        match bin_op.get_annot().is_float() {
             true => Self::compile_fop(code, scope, bin_op.operator(), lhs, rhs),
             false => Self::compile_iop(code, bin_op.operator(), lhs, rhs),
         }
@@ -460,18 +460,18 @@ impl Compiler {
         let operand = una_op.operand();
         match una_op.operator() {
             UnaryOperator::AddressOf => {
-                let Expression::Value(ValueExpr::Identifier(id, ..)) = operand else {
+                let Expression::Value(ValueExpr::Identifier(.., id)) = operand else {
                     panic!("operator AddressOf can only be used on vars");
                 };
                 code.lea(Reg::Rax, *scope.get(id));
                 Operand::Reg(Reg::Rax)
             }
             UnaryOperator::Dereference => {
-                let Expression::Value(ValueExpr::Identifier(id, ty)) = operand else {
+                let Expression::Value(ValueExpr::Identifier(ty, id)) = operand else {
                     panic!("operator Dereference can only be used on vars");
                 };
                 code.mov(Reg::Rax, *scope.get(id));
-                let size = Self::get_var_size(*ty);
+                let size = Self::get_var_size(ty.inner_type());
                 let temp = scope.new_temp(size);
                 code.mov(temp, Mem::reg(Reg::Rax, size));
                 temp
@@ -509,9 +509,9 @@ impl Compiler {
 
     fn compile_node(code: &mut AsmBuilder, scope: &mut Scope, data: &mut AsmData, node: &AstNode) {
         match node {
-            AstNode::Var(ty, arr, ident, expr) => {
-                let mem_size = Self::get_var_size(*ty);
-                let local = if let Some(size) = *arr {
+            AstNode::Var(ty, ident, expr) => {
+                let mem_size = Self::get_var_size(ty.inner_type());
+                let local = if let Annotation::Array(size) = ty.annotation() {
                     scope.new_array(ident, size, mem_size)
                 } else {
                     scope.new_local(ident, mem_size)
@@ -578,8 +578,8 @@ impl Compiler {
                     ValueExpr::Int(value) => {
                         code.cmp(counter, Imm::Int32(*value));
                     }
-                    ValueExpr::Identifier(ident, ..) => {
-                        code.mov(Reg::Eax, *scope.get(ident));
+                    ValueExpr::Identifier(.., id) => {
+                        code.mov(Reg::Eax, *scope.get(id));
                         code.cmp(counter, Reg::Eax);
                     }
                     _ => unreachable!(),
@@ -614,12 +614,12 @@ impl Compiler {
     fn compile_args(scope: &mut Scope, args: &[Argument]) -> usize {
         let mem_offset = 16; // rip + rbp
         let mut args_size = 0;
-        for arg in args {
-            let mem_size = Self::get_var_size(arg.arg_type);
+        for Argument { name, annot } in args {
+            let mem_size = Self::get_var_size(annot.inner_type());
             let offset = mem_offset + args_size as isize;
             let addr = Mem::offset(Reg::Rbp, offset, mem_size);
             args_size += mem_size as usize;
-            scope.set(&arg.name, addr.into());
+            scope.set(name, addr.into());
         }
         return args_size;
     }

@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::slice::Iter;
 
-use crate::ast::{Argument, Ast, AstNode, Expression, Operator, UnaryOperator, ValueExpr, VarType};
+use crate::ast::{
+    Annotated, Annotation, Argument, Ast, AstNode, Expression, Operator, TypeAnnot, UnaryOperator,
+    ValueExpr, VarType,
+};
 use crate::error::{Error, Result};
 use crate::lexer::LexItem;
 use crate::position::Position;
@@ -11,21 +14,18 @@ use crate::token::Token;
 #[derive(Debug, Clone)]
 struct Symbol {
     position: Position,
-    var_type: VarType,
+    annot: TypeAnnot,
 }
 
 impl Symbol {
-    fn new(pos: Position, typ: VarType) -> Self {
-        Self {
-            position: pos,
-            var_type: typ,
-        }
+    fn new(position: Position, annot: TypeAnnot) -> Self {
+        Self { position, annot }
     }
 
-    const fn intrinsic(typ: VarType) -> Self {
+    const fn intrinsic(ty: VarType) -> Self {
         Self {
             position: Position::ZERO,
-            var_type: typ,
+            annot: TypeAnnot::new(ty),
         }
     }
 }
@@ -128,7 +128,7 @@ impl<'a> Parser<'a> {
                 let Some(symbol) = self.symbols.find(id) else {
                     Error::syntatic("symbol not found in scope", self.pos)?
                 };
-                ValueExpr::Identifier(id.into(), symbol.var_type)
+                ValueExpr::Identifier(symbol.annot, id.into())
             }
             Token::StrLiteral(string) => ValueExpr::String(string.into()),
             Token::IntLiteral(int) => ValueExpr::Int(int),
@@ -150,13 +150,13 @@ impl<'a> Parser<'a> {
                     Error::syntatic("symbol not found in scope", self.pos)?
                 };
                 let args = self.parse_callargs()?;
-                Expression::func(id.into(), args, symbol.var_type)
+                Expression::func(id.into(), args, symbol.annot)
             }
             Token::Identifier(id) => {
                 let Some(symbol) = self.symbols.find(id) else {
                     Error::syntatic("symbol not found in scope", self.pos)?
                 };
-                Expression::identifier(id, symbol.var_type)
+                Expression::identifier(symbol.annot, id)
             }
             Token::StrLiteral(string) => Expression::string(string),
             Token::IntLiteral(int) => Expression::int(int),
@@ -177,16 +177,23 @@ impl<'a> Parser<'a> {
                 let Some(symbol) = self.symbols.find(id).cloned() else {
                     Error::syntatic("symbol not found in scope", self.pos)?
                 };
-                let operand = ValueExpr::Identifier(id.into(), symbol.var_type);
-                Expression::una_op(UnaryOperator::AddressOf, operand.into(), VarType::Void)
+                let operand = ValueExpr::Identifier(symbol.annot, id.into());
+                let annot = TypeAnnot::new_ptr(symbol.annot.inner_type());
+                Expression::una_op(UnaryOperator::AddressOf, operand.into(), annot)
             }
             Token::Sub => {
                 let operand = self.parse_atom()?;
-                let result = operand.expr_type();
-                if !matches!(result, VarType::Int | VarType::Real) {
+                let annot = operand.get_annot();
+                if matches!(
+                    annot.annotation(),
+                    Annotation::Array(..) | Annotation::Pointer
+                ) {
                     Error::syntatic("can only apply unary operator minus to numbers", self.pos)?
                 }
-                Expression::una_op(UnaryOperator::Minus, operand, result)
+                if !matches!(annot.inner_type(), VarType::Int | VarType::Real) {
+                    Error::syntatic("can only apply unary operator minus to numbers", self.pos)?
+                }
+                Expression::una_op(UnaryOperator::Minus, operand, annot)
             }
             _ => Error::syntatic("unexpected token", self.pos)?,
         };
@@ -222,20 +229,24 @@ impl<'a> Parser<'a> {
         Some(op)
     }
 
-    fn check_expr(&mut self, op: Operator, lhs: &Expression, rhs: &Expression) -> Result<VarType> {
-        let lhs = lhs.expr_type();
-        let rhs = rhs.expr_type();
-
+    fn check_expr(
+        &mut self,
+        op: Operator,
+        lhs: &Expression,
+        rhs: &Expression,
+    ) -> Result<TypeAnnot> {
+        let lhs = lhs.get_annot();
+        let rhs = rhs.get_annot();
         match op {
-            Operator::Equal | Operator::NotEqual if lhs == rhs => Ok(VarType::Bool),
+            Operator::Equal | Operator::NotEqual if lhs == rhs => Ok(TypeAnnot::BOOL),
 
             Operator::Greater | Operator::GreaterEqual | Operator::Less | Operator::LessEqual
-                if lhs == rhs && (lhs == VarType::Int || lhs == VarType::Real) =>
+                if lhs == rhs && lhs.is_number() =>
             {
-                Ok(VarType::Bool)
+                Ok(TypeAnnot::BOOL)
             }
 
-            Operator::And | Operator::Or if lhs == rhs && lhs == VarType::Bool => Ok(VarType::Bool),
+            Operator::And | Operator::Or if lhs == rhs && lhs.is_bool() => Ok(TypeAnnot::BOOL),
 
             Operator::Add
             | Operator::Sub
@@ -246,12 +257,12 @@ impl<'a> Parser<'a> {
             | Operator::SubAssign
             | Operator::MulAssign
             | Operator::DivAssign
-                if lhs == rhs && (lhs == VarType::Int || lhs == VarType::Real) =>
+                if lhs == rhs && lhs.is_number() =>
             {
                 Ok(lhs)
             }
 
-            Operator::Mod if lhs == VarType::Int && rhs == VarType::Int => Ok(lhs),
+            Operator::Mod if lhs.is_int() && lhs == rhs => Ok(lhs),
 
             _ => Error::syntatic("invalid operation between types", self.pos),
         }
@@ -295,7 +306,7 @@ impl<'a> Parser<'a> {
             Error::syntatic("expected identifier", self.pos)?
         };
         self.symbols
-            .set(&ident, Symbol::new(self.pos, VarType::Int));
+            .set(&ident, Symbol::new(self.pos, TypeAnnot::INT));
         let init = if let Some(Token::Assign) = self.peek() {
             self.next_or_err()?;
             Some(self.parse_value()?)
@@ -335,7 +346,7 @@ impl<'a> Parser<'a> {
 
     fn consume_var(&mut self, ty: VarType) -> Result<AstNode> {
         self.next(); // discard var type token
-        let array = if let Some(Token::OpenBracket) = self.peek() {
+        let annot = if let Some(Token::OpenBracket) = self.peek() {
             self.next_or_err()?; // discard open bracket
             let ValueExpr::Int(size) = self.parse_value()? else {
                 Error::syntatic("expected integer value", self.pos)?
@@ -343,40 +354,46 @@ impl<'a> Parser<'a> {
             let Token::CloseBracket = self.next_or_err()? else {
                 Error::syntatic("expected close bracket", self.pos)?
             };
-            Some(size as u32)
+            TypeAnnot::new_array(ty, size as u32)
         } else {
-            None
+            TypeAnnot::new(ty)
         };
         let id_pos = self.pos;
-        let Token::Identifier(ident) = self.next_or_err()? else {
+        let Token::Identifier(ident) = *self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
         let expr = if let Some(Token::Assign) = self.peek() {
             self.next_or_err()?; // discard assign signal
             let expr_pos = self.pos;
             let expr = self.parse_expr(1)?;
-            let expr_type = expr.expr_type();
-            if expr_type != ty {
-                Error::syntatic(&format!("cannot assign {expr_type} to {ty}"), expr_pos)?
+            let expr_annot = expr.get_annot();
+            if expr_annot != annot {
+                Error::syntatic(&format!("cannot assign {expr_annot} to {annot}"), expr_pos)?
             }
             Some(expr)
         } else {
             None
         };
         self.consume_semi()?;
-        self.symbols.set(&ident, Symbol::new(id_pos, ty));
-        AstNode::Var(ty, array, (*ident).into(), expr).ok()
+        self.symbols.set(&ident, Symbol::new(id_pos, annot));
+        AstNode::Var(annot, ident.into(), expr).ok()
     }
 
-    fn parse_type(&mut self) -> Result<VarType> {
-        let t = match self.next_or_err()? {
+    fn parse_annot(&mut self) -> Result<TypeAnnot> {
+        let ty = match self.next_or_err()? {
             Token::Int => VarType::Int,
             Token::Real => VarType::Real,
             Token::Char => VarType::Char,
             Token::Bool => VarType::Bool,
             _ => Error::syntatic("expected type annotation", self.pos)?,
         };
-        Ok(t)
+        let annot = if let Some(Token::Mul) = self.peek() {
+            self.next_or_err()?; // discard asterisk
+            TypeAnnot::new_ptr(ty)
+        } else {
+            TypeAnnot::new(ty)
+        };
+        Ok(annot)
     }
 
     fn parse_args(&mut self) -> Result<Vec<Argument>> {
@@ -394,10 +411,10 @@ impl<'a> Parser<'a> {
                     let Token::Colon = self.next_or_err()? else {
                         Error::syntatic("expected token `:`", self.pos)?
                     };
-                    let arg_type = self.parse_type()?;
-                    let arg = Argument::new(name, arg_type);
+                    let annot = self.parse_annot()?;
+                    let arg = Argument::new(name, annot);
                     args.push(arg);
-                    self.symbols.set(&name, Symbol::new(arg_pos, arg_type));
+                    self.symbols.set(&name, Symbol::new(arg_pos, annot));
                 }
                 (2, Token::Comma) => state = 3,
                 (1 | 2, _) => {
@@ -443,31 +460,31 @@ impl<'a> Parser<'a> {
     fn check_func(
         &mut self,
         inner: &Vec<AstNode>,
-        ret_type: VarType,
+        annot: TypeAnnot,
         fn_pos: Position,
-    ) -> Result<VarType> {
+    ) -> Result<TypeAnnot> {
         for node in inner {
             if let AstNode::Ret(expr) = node {
-                if expr.expr_type() == ret_type {
-                    return Ok(ret_type);
+                if expr.get_annot() == annot {
+                    return Ok(annot);
                 } else {
                     return Error::syntatic("return type does not match declaration", fn_pos);
                 }
             }
 
             let block_type = match node {
-                AstNode::If(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
-                AstNode::While(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
-                AstNode::For(.., nodes) => self.check_func(nodes, ret_type, fn_pos)?,
+                AstNode::If(.., nodes) => self.check_func(nodes, annot, fn_pos)?,
+                AstNode::While(.., nodes) => self.check_func(nodes, annot, fn_pos)?,
+                AstNode::For(.., nodes) => self.check_func(nodes, annot, fn_pos)?,
                 _ => continue,
             };
 
-            if block_type != VarType::Void && block_type != ret_type {
+            if !block_type.is_void() && block_type != annot {
                 return Error::syntatic("return type does not match declaration", fn_pos);
             }
         }
 
-        Ok(VarType::Void)
+        Ok(TypeAnnot::VOID)
     }
 
     fn consume_func(&mut self) -> Result<AstNode> {
@@ -480,27 +497,26 @@ impl<'a> Parser<'a> {
         self.symbols.enter_scope(); // args
         let args = self.parse_args()?;
 
-        let ret_type = match self.next_or_err()? {
+        let annot = match self.next_or_err()? {
             Token::Colon => {
-                let ret_type = self.parse_type()?;
+                let ret_type = self.parse_annot()?;
                 let Token::Do = self.next_or_err()? else {
                     Error::syntatic("expected `do`", self.pos)?
                 };
                 ret_type
             }
-            Token::Do => VarType::Void,
+            Token::Do => TypeAnnot::VOID,
             _ => Error::syntatic("expected type annotation or `do`", self.pos)?,
         };
 
-        self.symbols
-            .set_global(&name, Symbol::new(fn_pos, ret_type));
+        self.symbols.set_global(&name, Symbol::new(fn_pos, annot));
 
         let inner = self.consume_inner()?;
         self.symbols.exit_scope(); // args
 
-        self.check_func(&inner, ret_type, fn_pos)?;
+        self.check_func(&inner, annot, fn_pos)?;
 
-        AstNode::Func((*name).into(), args, ret_type, inner).ok()
+        AstNode::Func((*name).into(), args, annot, inner).ok()
     }
 
     fn consume_ret(&mut self) -> Result<AstNode> {

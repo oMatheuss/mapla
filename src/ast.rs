@@ -45,6 +45,100 @@ impl std::fmt::Display for VarType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Annotation {
+    Value,
+    Pointer,
+    Array(u32),
+}
+
+impl std::fmt::Display for Annotation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Annotation::Value => Ok(()),
+            Annotation::Pointer => write!(f, "*"),
+            Annotation::Array(size) => write!(f, "[{size}]"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TypeAnnot {
+    inner: VarType,
+    annot: Annotation,
+}
+
+impl std::fmt::Display for TypeAnnot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.inner, self.annot)
+    }
+}
+
+impl TypeAnnot {
+    pub const INT: Self = TypeAnnot::new(VarType::Int);
+    pub const REAL: Self = TypeAnnot::new(VarType::Real);
+    pub const CHAR: Self = TypeAnnot::new(VarType::Char);
+    pub const BOOL: Self = TypeAnnot::new(VarType::Bool);
+    pub const VOID: Self = TypeAnnot::new(VarType::Void);
+
+    pub const fn new(inner: VarType) -> Self {
+        TypeAnnot {
+            inner,
+            annot: Annotation::Value,
+        }
+    }
+
+    pub const fn new_ptr(inner: VarType) -> Self {
+        TypeAnnot {
+            inner,
+            annot: Annotation::Pointer,
+        }
+    }
+
+    pub const fn new_array(inner: VarType, size: u32) -> Self {
+        TypeAnnot {
+            inner,
+            annot: Annotation::Array(size),
+        }
+    }
+
+    pub fn is_bool(self) -> bool {
+        self == TypeAnnot::BOOL
+    }
+
+    pub fn is_char(self) -> bool {
+        self == TypeAnnot::CHAR
+    }
+
+    pub fn is_number(self) -> bool {
+        self == TypeAnnot::INT || self == TypeAnnot::REAL
+    }
+
+    pub fn is_int(self) -> bool {
+        self == TypeAnnot::INT
+    }
+
+    pub fn is_float(self) -> bool {
+        self == TypeAnnot::REAL
+    }
+
+    pub fn is_void(self) -> bool {
+        self == TypeAnnot::VOID
+    }
+
+    pub fn inner_type(&self) -> VarType {
+        self.inner
+    }
+
+    pub fn annotation(&self) -> Annotation {
+        self.annot
+    }
+}
+
+pub trait Annotated {
+    fn get_annot(&self) -> TypeAnnot;
+}
+
 #[derive(Debug)]
 pub struct Identifier(String);
 
@@ -80,17 +174,17 @@ pub enum ValueExpr {
     Int(i32),
     Float(f32),
     Bool(bool),
-    Identifier(Identifier, VarType),
+    Identifier(TypeAnnot, Identifier),
 }
 
-impl ValueExpr {
-    fn value_type(&self) -> VarType {
+impl Annotated for ValueExpr {
+    fn get_annot(&self) -> TypeAnnot {
         match self {
-            ValueExpr::String(..) => todo!(),
-            ValueExpr::Int(..) => VarType::Int,
-            ValueExpr::Float(..) => VarType::Real,
-            ValueExpr::Bool(..) => VarType::Bool,
-            ValueExpr::Identifier(.., var_type) => *var_type,
+            ValueExpr::String(s) => TypeAnnot::new_array(VarType::Char, s.len() as u32),
+            ValueExpr::Int(..) => TypeAnnot::new(VarType::Int),
+            ValueExpr::Float(..) => TypeAnnot::new(VarType::Real),
+            ValueExpr::Bool(..) => TypeAnnot::new(VarType::Bool),
+            ValueExpr::Identifier(annot, ..) => *annot,
         }
     }
 }
@@ -100,7 +194,7 @@ pub struct BinaryOp {
     operator: Operator,
     lhs: Box<Expression>,
     rhs: Box<Expression>,
-    result: VarType,
+    annot: TypeAnnot,
 }
 
 impl BinaryOp {
@@ -118,14 +212,11 @@ impl BinaryOp {
     pub fn operator(&self) -> Operator {
         self.operator
     }
+}
 
-    #[inline]
-    pub fn result_type(&self) -> VarType {
-        self.result
-    }
-
-    pub fn is_float_expr(&self) -> bool {
-        self.lhs.expr_type() == VarType::Real || self.rhs.expr_type() == VarType::Real
+impl Annotated for BinaryOp {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot
     }
 }
 
@@ -133,7 +224,7 @@ impl BinaryOp {
 pub struct FunctionCall {
     name: Identifier,
     args: Vec<Expression>,
-    ret: VarType,
+    annot: TypeAnnot,
 }
 
 impl FunctionCall {
@@ -146,10 +237,11 @@ impl FunctionCall {
     pub fn args(&self) -> &[Expression] {
         &self.args
     }
+}
 
-    #[inline]
-    pub fn return_type(&self) -> VarType {
-        self.ret
+impl Annotated for FunctionCall {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot
     }
 }
 
@@ -157,7 +249,7 @@ impl FunctionCall {
 pub struct UnaryOp {
     operator: UnaryOperator,
     operand: Box<Expression>,
-    result: VarType,
+    annot: TypeAnnot,
 }
 
 impl UnaryOp {
@@ -170,10 +262,11 @@ impl UnaryOp {
     pub fn operator(&self) -> UnaryOperator {
         self.operator
     }
+}
 
-    #[inline]
-    pub fn result_type(&self) -> VarType {
-        self.result
+impl Annotated for UnaryOp {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot
     }
 }
 
@@ -224,8 +317,8 @@ impl Expression {
     }
 
     #[inline]
-    pub fn identifier(id: &str, var_type: VarType) -> Self {
-        Self::Value(ValueExpr::Identifier(id.into(), var_type))
+    pub fn identifier(annot: TypeAnnot, id: &str) -> Self {
+        Self::Value(ValueExpr::Identifier(annot, id.into()))
     }
 
     #[inline]
@@ -234,35 +327,37 @@ impl Expression {
     }
 
     #[inline]
-    pub fn bin_op(op: Operator, lhs: Expression, rhs: Expression, result: VarType) -> Self {
+    pub fn bin_op(op: Operator, lhs: Expression, rhs: Expression, annot: TypeAnnot) -> Self {
         Self::BinOp(BinaryOp {
             operator: op,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
-            result,
+            annot,
         })
     }
 
     #[inline]
-    pub fn func(name: Identifier, args: Vec<Expression>, ret: VarType) -> Self {
-        Self::Func(FunctionCall { name, args, ret })
+    pub fn func(name: Identifier, args: Vec<Expression>, annot: TypeAnnot) -> Self {
+        Self::Func(FunctionCall { name, args, annot })
     }
 
     #[inline]
-    pub fn una_op(op: UnaryOperator, operand: Expression, result: VarType) -> Self {
+    pub fn una_op(op: UnaryOperator, operand: Expression, annot: TypeAnnot) -> Self {
         Self::UnaOp(UnaryOp {
             operator: op,
             operand: Box::new(operand),
-            result,
+            annot,
         })
     }
+}
 
-    pub fn expr_type(&self) -> VarType {
+impl Annotated for Expression {
+    fn get_annot(&self) -> TypeAnnot {
         match self {
-            Expression::Value(value) => value.value_type(),
-            Expression::BinOp(bin_op) => bin_op.result_type(),
-            Expression::Func(func) => func.return_type(),
-            Expression::UnaOp(una_op) => una_op.result_type(),
+            Expression::Value(value) => value.get_annot(),
+            Expression::UnaOp(unoop) => unoop.get_annot(),
+            Expression::BinOp(binop) => binop.get_annot(),
+            Expression::Func(func) => func.get_annot(),
         }
     }
 }
@@ -270,27 +365,33 @@ impl Expression {
 #[derive(Debug)]
 pub struct Argument {
     pub name: Identifier,
-    pub arg_type: VarType,
+    pub annot: TypeAnnot,
 }
 
 impl Argument {
-    pub fn new(name: &str, arg_type: VarType) -> Self {
+    pub fn new(name: &str, annot: TypeAnnot) -> Self {
         Self {
             name: name.into(),
-            arg_type,
+            annot,
         }
+    }
+}
+
+impl Annotated for Argument {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot
     }
 }
 
 #[derive(Debug)]
 pub enum AstNode {
     Use(Identifier),
-    Var(VarType, Option<u32>, Identifier, Option<Expression>),
+    Var(TypeAnnot, Identifier, Option<Expression>),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),
     For(Identifier, Option<ValueExpr>, ValueExpr, Vec<AstNode>),
     Expr(Expression),
-    Func(Identifier, Vec<Argument>, VarType, Vec<AstNode>),
+    Func(Identifier, Vec<Argument>, TypeAnnot, Vec<AstNode>),
     Ret(Expression),
 }
 
