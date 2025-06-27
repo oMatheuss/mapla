@@ -456,7 +456,7 @@ impl Compiler {
         Operand::Reg(Reg::Eax)
     }
 
-    fn compile_unaop(code: &mut AsmBuilder, scope: &mut Scope, una_op: &UnaryOp) -> Operand {
+    fn compile_unaop(code: &mut AsmBuilder, scope: &mut Scope, data: &mut AsmData, una_op: &UnaryOp) -> Operand {
         let operand = una_op.operand();
         match una_op.operator() {
             UnaryOperator::AddressOf => {
@@ -476,9 +476,69 @@ impl Compiler {
                 code.mov(temp, Mem::reg(Reg::Rax, size));
                 temp
             }
-            UnaryOperator::Minus => todo!(),
+            UnaryOperator::Minus => {
+                let expr_ty = operand.get_annot();
+                let operand = Self::compile_expr(code, scope, data, operand);
+                if expr_ty.is_int() {
+                    match operand {
+                        Operand::Reg(..) | Operand::Mem(..) => {
+                            code.neg(operand);
+                            operand
+                        }
+                        Operand::Imm(imm) => {
+                            let reg = Reg::get_a(imm.mem_size());
+                            code.mov(reg, imm);
+                            code.neg(reg);
+                            Operand::Reg(reg)
+                        }
+                        _ => panic!("operator minus could not be applied"),
+                    }
+                } else {
+                    const MINUS_BIT: u32 = 1 << 31;
+                    match operand {
+                        Operand::Reg(..) | Operand::Mem(..) => {
+                            code.xor(operand, Imm::Int32(MINUS_BIT as i32));
+                            operand
+                        }
+                        Operand::Imm(imm) => {
+                            let reg = Reg::get_a(imm.mem_size());
+                            code.mov(reg, imm);
+                            code.xor(reg, Imm::Int32(MINUS_BIT as i32));
+                            Operand::Reg(reg)
+                        },
+                        Operand::Xmm(xmm) => {
+                            let tmp = scope.new_temp(xmm.mem_size());
+                            code.movss(tmp, xmm);
+                            code.xor(tmp, Imm::Int32(MINUS_BIT as i32));
+                            tmp
+                        }
+                        _ => panic!("operator minus could not be applied"),
+                    }
+                }
+            }
             UnaryOperator::Not => todo!(),
-            UnaryOperator::BitwiseNot => todo!(),
+            UnaryOperator::BitwiseNot => {
+                let operand = Self::compile_expr(code, scope, data, operand);
+                match operand {
+                    Operand::Reg(..) | Operand::Mem(..) => {
+                        code.not(operand);
+                        operand
+                    },
+                    Operand::Imm(imm) => {
+                        let reg = Reg::get_a(imm.mem_size());
+                        code.mov(reg, imm);
+                        code.not(reg);
+                        Operand::Reg(reg)
+                    },
+                    Operand::Xmm(xmm) => {
+                        let tmp = scope.new_temp(xmm.mem_size());
+                        code.movss(tmp, xmm);
+                        code.not(tmp);
+                        tmp
+                    },
+                    _ => panic!("operator minus could not be applied"),
+                }
+            }
         }
     }
 
@@ -490,7 +550,7 @@ impl Compiler {
     ) -> Operand {
         match expr {
             Expression::Value(value) => Self::compile_value(code, scope, data, value),
-            Expression::UnaOp(una_op) => Self::compile_unaop(code, scope, una_op),
+            Expression::UnaOp(una_op) => Self::compile_unaop(code, scope, data, una_op),
             Expression::BinOp(bin_op) => Self::compile_binop(code, scope, data, bin_op),
             Expression::Func(func) => Self::compile_call(code, scope, data, func),
         }

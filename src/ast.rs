@@ -126,6 +126,10 @@ impl TypeAnnot {
         self == TypeAnnot::VOID
     }
 
+    pub fn is_ref(self) -> bool {
+        matches!(self.annot, Annotation::Array(..) | Annotation::Pointer)
+    }
+
     pub fn inner_type(&self) -> VarType {
         self.inner
     }

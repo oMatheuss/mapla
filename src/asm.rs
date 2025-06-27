@@ -60,15 +60,6 @@ pub enum OpCode {
     Mulss,
     Divss,
 
-    Movsd,  // mov f64
-    Comisd, // compares f64 and set eflags (branchfull)
-    Cmpsd,  // xmm1, xmm2/mem, imm (branchless)
-
-    Addsd,
-    Subsd,
-    Mulsd,
-    Divsd,
-
     Syscall,
     Nop,
 }
@@ -124,13 +115,6 @@ impl Display for OpCode {
             OpCode::Subss => write!(f, "subss"),
             OpCode::Mulss => write!(f, "mulss"),
             OpCode::Divss => write!(f, "divss"),
-            OpCode::Movsd => write!(f, "movsd"),
-            OpCode::Comisd => write!(f, "comisd"),
-            OpCode::Cmpsd => write!(f, "cmpsd"),
-            OpCode::Addsd => write!(f, "addsd"),
-            OpCode::Subsd => write!(f, "subsd"),
-            OpCode::Mulsd => write!(f, "mulsd"),
-            OpCode::Divsd => write!(f, "divsd"),
             OpCode::Syscall => write!(f, "syscall"),
             OpCode::Nop => write!(f, "nop"),
         }
@@ -904,7 +888,9 @@ impl AsmBuilder {
         writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Or);
     }
 
-    // Not,
+    pub fn not<T: Into<Operand> + Display>(&mut self, value: T) {
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Not);
+    }
 
     pub fn xor<T1, T2>(&mut self, value1: T1, value2: T2)
     where
@@ -932,7 +918,9 @@ impl AsmBuilder {
         writeln!(self, "  {opcode} {value}, {reg}", opcode = OpCode::Shr);
     }
 
-    // Neg, // Negate
+    pub fn neg<T: Into<Operand> + Display>(&mut self, value: T) {
+        writeln!(self, "  {opcode} {value}", opcode = OpCode::Neg);
+    }
 
     pub fn movss<T1, T2>(&mut self, value1: T1, value2: T2)
     where
@@ -1005,12 +993,6 @@ impl AsmBuilder {
             opcode = OpCode::Divss
         );
     }
-
-    // Movsd, // mov f64
-    // Addsd,
-    // Subsd,
-    // Mulsd,
-    // Divsd,
 
     pub fn syscall(&mut self) {
         writeln!(self, "  {opcode}", opcode = OpCode::Syscall);

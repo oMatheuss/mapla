@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::slice::Iter;
 
 use crate::ast::{
-    Annotated, Annotation, Argument, Ast, AstNode, Expression, Operator, TypeAnnot, UnaryOperator,
+    Annotated, Argument, Ast, AstNode, Expression, Operator, TypeAnnot, UnaryOperator,
     ValueExpr, VarType,
 };
 use crate::error::{Error, Result};
@@ -184,16 +184,18 @@ impl<'a> Parser<'a> {
             Token::Sub => {
                 let operand = self.parse_atom()?;
                 let annot = operand.get_annot();
-                if matches!(
-                    annot.annotation(),
-                    Annotation::Array(..) | Annotation::Pointer
-                ) {
-                    Error::syntatic("can only apply unary operator minus to numbers", self.pos)?
-                }
-                if !matches!(annot.inner_type(), VarType::Int | VarType::Real) {
+                if !annot.is_number() {
                     Error::syntatic("can only apply unary operator minus to numbers", self.pos)?
                 }
                 Expression::una_op(UnaryOperator::Minus, operand, annot)
+            }
+            Token::Mul => {
+                let operand = self.parse_atom()?;
+                let annot = operand.get_annot();
+                if !annot.is_ref() || !annot.is_int() {
+                    Error::syntatic("can only dereference addresses", self.pos)?
+                }
+                Expression::una_op(UnaryOperator::Dereference, operand, annot)
             }
             _ => Error::syntatic("unexpected token", self.pos)?,
         };
