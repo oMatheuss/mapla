@@ -3,8 +3,8 @@ use std::iter::Peekable;
 use std::slice::Iter;
 
 use crate::ast::{
-    Annotated, Argument, Ast, AstNode, Expression, Operator, TypeAnnot, UnaryOperator,
-    ValueExpr, VarType,
+    Annotated, Argument, Ast, AstNode, Expression, Operator, TypeAnnot, UnaryOperator, ValueExpr,
+    VarType,
 };
 use crate::error::{Error, Result};
 use crate::lexer::LexItem;

@@ -456,7 +456,12 @@ impl Compiler {
         Operand::Reg(Reg::Eax)
     }
 
-    fn compile_unaop(code: &mut AsmBuilder, scope: &mut Scope, data: &mut AsmData, una_op: &UnaryOp) -> Operand {
+    fn compile_unaop(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        data: &mut AsmData,
+        una_op: &UnaryOp,
+    ) -> Operand {
         let operand = una_op.operand();
         match una_op.operator() {
             UnaryOperator::AddressOf => {
@@ -505,7 +510,7 @@ impl Compiler {
                             code.mov(reg, imm);
                             code.xor(reg, Imm::Int32(MINUS_BIT as i32));
                             Operand::Reg(reg)
-                        },
+                        }
                         Operand::Xmm(xmm) => {
                             let tmp = scope.new_temp(xmm.mem_size());
                             code.movss(tmp, xmm);
@@ -523,19 +528,19 @@ impl Compiler {
                     Operand::Reg(..) | Operand::Mem(..) => {
                         code.not(operand);
                         operand
-                    },
+                    }
                     Operand::Imm(imm) => {
                         let reg = Reg::get_a(imm.mem_size());
                         code.mov(reg, imm);
                         code.not(reg);
                         Operand::Reg(reg)
-                    },
+                    }
                     Operand::Xmm(xmm) => {
                         let tmp = scope.new_temp(xmm.mem_size());
                         code.movss(tmp, xmm);
                         code.not(tmp);
                         tmp
-                    },
+                    }
                     _ => panic!("operator minus could not be applied"),
                 }
             }
