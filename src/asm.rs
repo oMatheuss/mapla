@@ -291,7 +291,27 @@ impl Display for Reg {
 }
 
 impl Reg {
-    pub fn mem_size(&self) -> MemSize {
+    pub fn acc(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::Al,
+            MemSize::Word => Reg::Ax,
+            MemSize::DWord => Reg::Eax,
+            MemSize::QWord => Reg::Rax,
+        }
+    }
+
+    pub fn cnt(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::Cl,
+            MemSize::Word => Reg::Cx,
+            MemSize::DWord => Reg::Ecx,
+            MemSize::QWord => Reg::Rcx,
+        }
+    }
+}
+
+impl MemSized for Reg {
+    fn mem_size(&self) -> MemSize {
         match self {
             Reg::Rax
             | Reg::Rcx
@@ -358,24 +378,6 @@ impl Reg {
             | Reg::Dil => MemSize::Byte,
         }
     }
-
-    pub fn acc(mem_size: MemSize) -> Self {
-        match mem_size {
-            MemSize::Byte => Reg::Al,
-            MemSize::Word => Reg::Ax,
-            MemSize::DWord => Reg::Eax,
-            MemSize::QWord => Reg::Rax,
-        }
-    }
-
-    pub fn cnt(mem_size: MemSize) -> Self {
-        match mem_size {
-            MemSize::Byte => Reg::Cl,
-            MemSize::Word => Reg::Cx,
-            MemSize::DWord => Reg::Ecx,
-            MemSize::QWord => Reg::Rcx,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -384,6 +386,10 @@ pub enum MemSize {
     Word = 2,
     DWord = 4,
     QWord = 8,
+}
+
+pub trait MemSized {
+    fn mem_size(&self) -> MemSize;
 }
 
 impl Display for MemSize {
@@ -489,8 +495,10 @@ impl Mem {
             scale: MemScale::Uni,
         }
     }
+}
 
-    pub fn mem_size(&self) -> MemSize {
+impl MemSized for Mem {
+    fn mem_size(&self) -> MemSize {
         self.size
     }
 }
@@ -534,8 +542,10 @@ impl Display for Imm {
 impl Imm {
     pub const TRUE: Self = Self::Byte(1);
     pub const FALSE: Self = Self::Byte(0);
+}
 
-    pub fn mem_size(&self) -> MemSize {
+impl MemSized for Imm {
+    fn mem_size(&self) -> MemSize {
         match self {
             Imm::Byte(..) | Imm::Char(..) => MemSize::Byte,
             Imm::Int32(..) | Imm::Float32(..) => MemSize::DWord,
@@ -572,11 +582,13 @@ impl Xmm {
         }
     }
 
-    pub fn get_0(mem_size: MemSize) -> Self {
+    pub fn xmm0(mem_size: MemSize) -> Self {
         Self::new(XmmReg::Xmm0, mem_size)
     }
+}
 
-    pub fn mem_size(&self) -> MemSize {
+impl MemSized for Xmm {
+    fn mem_size(&self) -> MemSize {
         self.size
     }
 }
@@ -605,8 +617,10 @@ impl Lbl {
         std::hash::Hash::hash_slice(slice.as_bytes(), &mut state);
         Self(state.finish())
     }
+}
 
-    pub fn mem_size() -> MemSize {
+impl MemSized for Lbl {
+    fn mem_size(&self) -> MemSize {
         MemSize::QWord
     }
 }
@@ -663,16 +677,6 @@ impl From<Xmm> for Operand {
 }
 
 impl Operand {
-    pub fn mem_size(&self) -> MemSize {
-        match self {
-            Operand::Reg(reg) => reg.mem_size(),
-            Operand::Mem(mem) => mem.mem_size(),
-            Operand::Imm(imm) => imm.mem_size(),
-            Operand::Xmm(xmm) => xmm.mem_size(),
-            Operand::Lbl(..) => Lbl::mem_size(),
-        }
-    }
-
     pub fn is_reg(&self) -> bool {
         match self {
             Operand::Reg(..) => true,
@@ -698,6 +702,18 @@ impl Operand {
         match self {
             Operand::Xmm(..) => true,
             _ => false,
+        }
+    }
+}
+
+impl MemSized for Operand {
+    fn mem_size(&self) -> MemSize {
+        match self {
+            Operand::Reg(reg) => reg.mem_size(),
+            Operand::Mem(mem) => mem.mem_size(),
+            Operand::Imm(imm) => imm.mem_size(),
+            Operand::Xmm(xmm) => xmm.mem_size(),
+            Operand::Lbl(lbl) => lbl.mem_size(),
         }
     }
 }
