@@ -152,6 +152,29 @@ impl<'a> Parser<'a> {
                 let args = self.parse_callargs()?;
                 Expression::func(id.into(), args, symbol.annot)
             }
+            Token::Identifier(id) if matches!(self.peek(), Some(Token::OpenBracket)) => {
+                self.next_or_err()?; // discard open bracket
+                let Some(symbol) = self.symbols.find(id).cloned() else {
+                    Error::syntatic("symbol not found in scope", self.pos)?
+                };
+                let symbol_pos = self.pos;
+                let index = self.parse_expr(1)?;
+                if !index.get_annot().is_int() {
+                    Error::syntatic("array index should be int", self.pos)?
+                }
+                let Token::CloseBracket = self.next_or_err()? else {
+                    Error::syntatic("expected close bracket", self.pos)?
+                };
+                if !symbol.annot.is_ref() {
+                    Error::syntatic(
+                        "indexing can only be applied to arrays and pointers",
+                        symbol_pos,
+                    )?
+                }
+                let array = ValueExpr::Identifier(symbol.annot, id.into());
+                let annot = TypeAnnot::new(symbol.annot.inner_type());
+                Expression::index(array, index, annot)
+            }
             Token::Identifier(id) => {
                 let Some(symbol) = self.symbols.find(id) else {
                     Error::syntatic("symbol not found in scope", self.pos)?
@@ -177,6 +200,9 @@ impl<'a> Parser<'a> {
                 let Some(symbol) = self.symbols.find(id).cloned() else {
                     Error::syntatic("symbol not found in scope", self.pos)?
                 };
+                if symbol.annot.is_ref() {
+                    Error::syntatic("double references are not supported", self.pos)?
+                }
                 let operand = ValueExpr::Identifier(symbol.annot, id.into());
                 let annot = TypeAnnot::new_ptr(symbol.annot.inner_type());
                 Expression::una_op(UnaryOperator::AddressOf, operand.into(), annot)
@@ -250,11 +276,12 @@ impl<'a> Parser<'a> {
 
             Operator::And | Operator::Or if lhs == rhs && lhs.is_bool() => Ok(TypeAnnot::BOOL),
 
+            Operator::Assign if lhs == rhs => Ok(lhs),
+
             Operator::Add
             | Operator::Sub
             | Operator::Mul
             | Operator::Div
-            | Operator::Assign
             | Operator::AddAssign
             | Operator::SubAssign
             | Operator::MulAssign

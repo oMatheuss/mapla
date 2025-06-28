@@ -275,11 +275,37 @@ impl Annotated for UnaryOp {
 }
 
 #[derive(Debug)]
+pub struct Indexing {
+    array: ValueExpr,
+    index: Box<Expression>,
+    annot: TypeAnnot,
+}
+
+impl Indexing {
+    #[inline]
+    pub fn array(&self) -> &ValueExpr {
+        &self.array
+    }
+
+    #[inline]
+    pub fn index(&self) -> &Expression {
+        &self.index
+    }
+}
+
+impl Annotated for Indexing {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Value(ValueExpr),
     UnaOp(UnaryOp),
     BinOp(BinaryOp),
     Func(FunctionCall),
+    Index(Indexing),
 }
 
 impl From<ValueExpr> for Expression {
@@ -303,6 +329,12 @@ impl From<FunctionCall> for Expression {
 impl From<UnaryOp> for Expression {
     fn from(value: UnaryOp) -> Self {
         Self::UnaOp(value)
+    }
+}
+
+impl From<Indexing> for Expression {
+    fn from(value: Indexing) -> Self {
+        Self::Index(value)
     }
 }
 
@@ -353,6 +385,15 @@ impl Expression {
             annot,
         })
     }
+
+    #[inline]
+    pub fn index(array: ValueExpr, index: Expression, annot: TypeAnnot) -> Self {
+        Self::Index(Indexing {
+            array,
+            index: Box::new(index),
+            annot,
+        })
+    }
 }
 
 impl Annotated for Expression {
@@ -362,6 +403,7 @@ impl Annotated for Expression {
             Expression::UnaOp(unoop) => unoop.get_annot(),
             Expression::BinOp(binop) => binop.get_annot(),
             Expression::Func(func) => func.get_annot(),
+            Expression::Index(index) => index.get_annot(),
         }
     }
 }

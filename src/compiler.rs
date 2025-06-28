@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, Operand, Reg, Xmm};
 use crate::ast::{
     Annotated, Annotation, Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier,
-    Operator, UnaryOp, UnaryOperator, ValueExpr, VarType,
+    Indexing, Operator, TypeAnnot, UnaryOp, UnaryOperator, ValueExpr, VarType,
 };
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
@@ -95,7 +95,7 @@ impl<'a> Scope<'a> {
     fn new_array(&mut self, ident: &str, size: u32, mem_size: MemSize) -> Operand {
         let mut mem = self.mem.borrow_mut();
         mem.local_off -= mem_size as isize * size as isize;
-        let mem = Mem::offset(Reg::Rbp, mem.local_off, mem_size);
+        let mem = Mem::offset(Reg::Rbp, mem.local_off, MemSize::QWord);
         self.var.insert(String::from(ident), mem);
         Operand::Mem(mem)
     }
@@ -128,11 +128,18 @@ type AsmData = HashMap<Lbl, Vec<u8>>;
 pub struct Compiler;
 
 impl Compiler {
-    fn get_var_size(var_type: VarType) -> MemSize {
-        match var_type {
+    fn get_type_size(ty: VarType) -> MemSize {
+        match ty {
             VarType::Int | VarType::Real => MemSize::DWord,
             VarType::Bool | VarType::Char => MemSize::Byte,
             VarType::Void => panic!("void does not have a known size"),
+        }
+    }
+
+    fn get_mem_size(annot: &TypeAnnot) -> MemSize {
+        match annot.annotation() {
+            Annotation::Value => Self::get_type_size(annot.inner_type()),
+            Annotation::Pointer | Annotation::Array(..) => MemSize::QWord,
         }
     }
 
@@ -155,7 +162,14 @@ impl Compiler {
                 true => Operand::Imm(Imm::TRUE),
                 false => Operand::Imm(Imm::FALSE),
             },
-            ValueExpr::Identifier(.., id) => Operand::Mem(*scope.get(id)),
+            ValueExpr::Identifier(annot, id) => match annot.annotation() {
+                Annotation::Value | Annotation::Pointer => Operand::Mem(*scope.get(id)),
+                Annotation::Array(..) => {
+                    let mem = *scope.get(id);
+                    code.lea(Reg::Rax, mem);
+                    Operand::Reg(Reg::Rax)
+                }
+            },
         }
     }
 
@@ -202,7 +216,7 @@ impl Compiler {
     ) -> Operand {
         // prepare for operation
         if !(lhs.is_reg() || operator.is_assign()) {
-            let a_reg = Reg::get_a(lhs.mem_size());
+            let a_reg = Reg::acc(lhs.mem_size());
             code.mov(a_reg, lhs);
             lhs = Operand::Reg(a_reg);
         }
@@ -287,8 +301,9 @@ impl Compiler {
             }
             Operator::Assign => {
                 if let Operand::Mem(mem) = rhs {
-                    code.mov(Reg::Eax, mem);
-                    rhs = Operand::Reg(Reg::Eax)
+                    let reg = Reg::acc(mem.mem_size());
+                    code.mov(reg, mem);
+                    rhs = Operand::Reg(reg)
                 }
                 code.mov(lhs, rhs);
                 lhs
@@ -445,7 +460,7 @@ impl Compiler {
             if arg.is_xmm() {
                 code.movss(mem, arg);
             } else if arg.is_mem() {
-                let a_reg = Reg::get_a(mem_size);
+                let a_reg = Reg::acc(mem_size);
                 code.mov(a_reg, arg);
                 code.mov(mem, a_reg);
             } else {
@@ -453,7 +468,12 @@ impl Compiler {
             }
         }
         code.call(func.name());
-        Operand::Reg(Reg::Eax)
+        if !func.get_annot().is_void() {
+            let ret_size = Self::get_mem_size(&func.get_annot());
+            Operand::Reg(Reg::acc(ret_size))
+        } else {
+            Operand::Imm(Imm::Int32(0))
+        }
     }
 
     fn compile_unaop(
@@ -472,11 +492,11 @@ impl Compiler {
                 Operand::Reg(Reg::Rax)
             }
             UnaryOperator::Dereference => {
-                let Expression::Value(ValueExpr::Identifier(ty, id)) = operand else {
+                let Expression::Value(ValueExpr::Identifier(annot, id)) = operand else {
                     panic!("operator Dereference can only be used on vars");
                 };
                 code.mov(Reg::Rax, *scope.get(id));
-                let size = Self::get_var_size(ty.inner_type());
+                let size = Self::get_mem_size(annot);
                 let temp = scope.new_temp(size);
                 code.mov(temp, Mem::reg(Reg::Rax, size));
                 temp
@@ -491,7 +511,7 @@ impl Compiler {
                             operand
                         }
                         Operand::Imm(..) | Operand::Mem(..) => {
-                            let reg = Reg::get_a(operand.mem_size());
+                            let reg = Reg::acc(operand.mem_size());
                             code.mov(reg, operand);
                             code.neg(reg);
                             Operand::Reg(reg)
@@ -506,7 +526,7 @@ impl Compiler {
                             operand
                         }
                         Operand::Imm(..) | Operand::Mem(..) => {
-                            let reg = Reg::get_a(operand.mem_size());
+                            let reg = Reg::acc(operand.mem_size());
                             code.mov(reg, operand);
                             code.xor(reg, Imm::Int32(MINUS_BIT as i32));
                             Operand::Reg(reg)
@@ -530,7 +550,7 @@ impl Compiler {
                         operand
                     }
                     Operand::Imm(imm) => {
-                        let reg = Reg::get_a(imm.mem_size());
+                        let reg = Reg::acc(imm.mem_size());
                         code.mov(reg, imm);
                         code.not(reg);
                         Operand::Reg(reg)
@@ -547,6 +567,24 @@ impl Compiler {
         }
     }
 
+    fn compile_index(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        data: &mut AsmData,
+        index: &Indexing,
+    ) -> Operand {
+        let size = Self::get_mem_size(&index.get_annot());
+
+        let offset = Self::compile_expr_rec(code, scope, data, index.index());
+        code.mov(Reg::cnt(offset.mem_size()), offset);
+        code.imul(Reg::Rcx, Imm::Int64(size as i64));
+
+        let array = Self::compile_value(code, scope, data, index.array());
+        code.add(Reg::Rcx, array);
+
+        Operand::Mem(Mem::reg(Reg::Rcx, size))
+    }
+
     fn compile_expr_rec(
         code: &mut AsmBuilder,
         scope: &mut Scope,
@@ -558,6 +596,7 @@ impl Compiler {
             Expression::UnaOp(una_op) => Self::compile_unaop(code, scope, data, una_op),
             Expression::BinOp(bin_op) => Self::compile_binop(code, scope, data, bin_op),
             Expression::Func(func) => Self::compile_call(code, scope, data, func),
+            Expression::Index(index) => Self::compile_index(code, scope, data, index),
         }
     }
 
@@ -574,11 +613,12 @@ impl Compiler {
 
     fn compile_node(code: &mut AsmBuilder, scope: &mut Scope, data: &mut AsmData, node: &AstNode) {
         match node {
-            AstNode::Var(ty, ident, expr) => {
-                let mem_size = Self::get_var_size(ty.inner_type());
-                let local = if let Annotation::Array(size) = ty.annotation() {
+            AstNode::Var(annot, ident, expr) => {
+                let local = if let Annotation::Array(size) = annot.annotation() {
+                    let mem_size = Self::get_type_size(annot.inner_type());
                     scope.new_array(ident, size, mem_size)
                 } else {
+                    let mem_size = Self::get_mem_size(annot);
                     scope.new_local(ident, mem_size)
                 };
                 if let Some(expr) = expr {
@@ -586,7 +626,7 @@ impl Compiler {
                     if result.is_xmm() {
                         code.movss(local, result);
                     } else if result.is_mem() {
-                        let reg_a = Reg::get_a(result.mem_size());
+                        let reg_a = Reg::acc(result.mem_size());
                         code.mov(reg_a, result);
                         code.mov(local, reg_a);
                     } else {
@@ -614,7 +654,11 @@ impl Compiler {
 
                 code.label(&startwhile_lbl);
 
-                let result = Self::compile_expr(code, scope, data, expr);
+                let mut result = Self::compile_expr(code, scope, data, expr);
+                if let Operand::Imm(imm) = result {
+                    result = scope.new_temp(imm.mem_size());
+                    code.mov(result, imm);
+                }
                 code.cmp(result, Imm::FALSE);
                 code.je(&endwhile_lbl);
 
@@ -667,7 +711,7 @@ impl Compiler {
                 let result = Self::compile_expr(code, scope, data, expr);
                 if !result.is_reg() {
                     let mem_size = result.mem_size();
-                    let reg = Reg::get_a(mem_size);
+                    let reg = Reg::acc(mem_size);
                     code.mov(reg, result);
                 }
                 code.jmp(".R");
@@ -680,7 +724,7 @@ impl Compiler {
         let mem_offset = 16; // rip + rbp
         let mut args_size = 0;
         for Argument { name, annot } in args {
-            let mem_size = Self::get_var_size(annot.inner_type());
+            let mem_size = Self::get_mem_size(annot);
             let offset = mem_offset + args_size as isize;
             let addr = Mem::offset(Reg::Rbp, offset, mem_size);
             args_size += mem_size as usize;

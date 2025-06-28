@@ -359,12 +359,21 @@ impl Reg {
         }
     }
 
-    pub fn get_a(mem_size: MemSize) -> Self {
+    pub fn acc(mem_size: MemSize) -> Self {
         match mem_size {
             MemSize::Byte => Reg::Al,
             MemSize::Word => Reg::Ax,
             MemSize::DWord => Reg::Eax,
             MemSize::QWord => Reg::Rax,
+        }
+    }
+
+    pub fn cnt(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::Cl,
+            MemSize::Word => Reg::Cx,
+            MemSize::DWord => Reg::Ecx,
+            MemSize::QWord => Reg::Rcx,
         }
     }
 }
