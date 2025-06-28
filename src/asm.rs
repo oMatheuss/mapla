@@ -721,7 +721,7 @@ impl AsmBuilder {
         writeln!(self, "global {symbols}", symbols = symbols.join(", "));
     }
 
-    pub fn _extern(&mut self, symbols: &[&str]) {
+    pub fn extrn(&mut self, symbols: &[&str]) {
         writeln!(self, "extern {symbols}", symbols = symbols.join(", "));
     }
 

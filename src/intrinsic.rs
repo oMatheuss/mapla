@@ -4,107 +4,55 @@ use crate::target::CompilerTarget;
 pub fn intrisic(name: &str, code: &mut AsmBuilder, target: CompilerTarget) {
     match name {
         "io" => {
-            match target {
-                CompilerTarget::Linux => {
-                    linux::read(code);
-                    linux::write(code);
-                }
-                CompilerTarget::Windows => {
-                    code._extern(&["_read", "_write"]);
-                    windows::read(code);
-                    windows::write(code);
-                }
-            };
-            print_int(code);
-            print_char(code);
-            print_string(code);
+            if let CompilerTarget::Windows = target {
+                code.extrn(&["_read", "_write"]);
+            }
 
-            read_string(code);
+            print_int(code, target);
+            print_char(code, target);
+            print_string(code, target);
+            read_string(code, target);
         }
         _ => todo!(),
     }
 }
 
-// func write(int fd, char* buffer, int count);
-// func read(int fd, char* buffer, int buffer_size): int;
-
-mod windows {
-    use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Reg};
-
-    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170
-    // The caller must always allocate sufficient space to store four register parameters, even if the callee doesn't take that many parameters
-    // Any parameters beyond the first four must be stored on the stack after the shadow store before the call.
-
-    pub fn read(code: &mut AsmBuilder) {
-        code.label("read");
-        code.push_sf();
-        code.sub(Reg::Rsp, Imm::Int64(32));
-        code.mov(Reg::Ecx, Mem::offset(Reg::Rbp, 16, MemSize::DWord)); // file descriptor
-        code.mov(Reg::Rdx, Mem::offset(Reg::Rbp, 20, MemSize::QWord)); // *buffer
-        code.mov(Reg::R8D, Mem::offset(Reg::Rbp, 28, MemSize::DWord)); // buffer_size
-        code.call("_read"); // return is already on rax
-        code.pop_sf();
-        code.ret(16);
-    }
-    pub fn write(code: &mut AsmBuilder) {
-        code.label("write");
-        code.push_sf();
-        code.sub(Reg::Rsp, Imm::Int64(32));
-        code.mov(Reg::Ecx, Mem::offset(Reg::Rbp, 16, MemSize::DWord)); // file descriptor
-        code.mov(Reg::Rdx, Mem::offset(Reg::Rbp, 20, MemSize::QWord)); // *buffer
-        code.mov(Reg::R8D, Mem::offset(Reg::Rbp, 28, MemSize::DWord)); // count
-        code.call("_write");
-        code.pop_sf();
-        code.ret(16);
-    }
-}
-
-mod linux {
-    use crate::asm::{AsmBuilder, Imm, Mem, MemSize, Reg};
-
-    pub fn read(code: &mut AsmBuilder) {
-        code.label("read");
-        code.mov(Reg::Eax, Imm::Int32(0)); // sys_read call
-        code.mov(Reg::Edi, Mem::offset(Reg::Rsp, 8, MemSize::DWord)); // file descriptor
-        code.mov(Reg::Rsi, Mem::offset(Reg::Rsp, 12, MemSize::QWord)); // *buffer
-        code.mov(Reg::Edx, Mem::offset(Reg::Rsp, 20, MemSize::DWord)); // count
-        code.syscall();
-        code.ret(16);
-    }
-    pub fn write(code: &mut AsmBuilder) {
-        code.label("write");
-        code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
-        code.mov(Reg::Edi, Mem::offset(Reg::Rsp, 8, MemSize::DWord)); // file descriptor
-        code.mov(Reg::Rsi, Mem::offset(Reg::Rsp, 12, MemSize::QWord)); // *buffer
-        code.mov(Reg::Edx, Mem::offset(Reg::Rsp, 20, MemSize::DWord)); // count
-        code.syscall();
-        code.ret(16);
-    }
-}
-
-fn print_char(code: &mut AsmBuilder) {
+fn print_char(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("printChar");
+    code.push_sf();
 
-    code.lea(Reg::Rax, Mem::offset(Reg::Rsp, 8, MemSize::DWord)); // save start of int -> char*
+    let p_01 = Mem::offset(Reg::Rsp, 16, MemSize::DWord);
 
-    code.sub(Reg::Rsp, Imm::Int64(16));
-    code.mov(Mem::reg(Reg::Rsp, MemSize::DWord), Imm::Int32(1)); // int fd
-    code.mov(Mem::offset(Reg::Rsp, 4, MemSize::QWord), Reg::Rax); // char* buffer
-    code.mov(Mem::offset(Reg::Rsp, 12, MemSize::DWord), Imm::Int32(4)); // int count
-    code.call("write");
+    match target {
+        CompilerTarget::Linux => {
+            code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
+            code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
+            code.lea(Reg::Rsi, p_01); // *buffer
+            code.mov(Reg::Edx, Imm::Int32(4)); // count
+            code.syscall();
+        }
+        CompilerTarget::Windows => {
+            code.mov(Reg::Ecx, Imm::Int32(1)); // file descriptor
+            code.lea(Reg::Rdx, p_01); // *buffer
+            code.mov(Reg::R8D, Imm::Int32(4)); // count
+            code.sub(Reg::Rsp, Imm::Int64(32)); // shadow space
+            code.call("_write");
+        }
+    }
 
+    code.pop_sf();
     code.ret(4);
 }
 
-fn print_int(code: &mut AsmBuilder) {
+fn print_int(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("printInt");
     code.push_sf();
 
-    let param = Mem::offset(Reg::Rbp, 16, MemSize::DWord);
+    let p_01 = Mem::offset(Reg::Rbp, 16, MemSize::DWord);
 
     code.mov(Reg::Rcx, Imm::Int64(0)); // counter
 
-    code.mov(Reg::Eax, param); // quotient
+    code.mov(Reg::Eax, p_01); // quotient
     code.mov(Reg::Ebx, Imm::Int32(10)); // divisor
     code.mov(Reg::Edx, Imm::Int32(0)); // remainder
 
@@ -122,42 +70,79 @@ fn print_int(code: &mut AsmBuilder) {
     code.cmp(Reg::Eax, Imm::Int32(0));
     code.jg(".L1");
 
-    code.lea(Reg::Rax, Mem::reg(Reg::Rsp, MemSize::QWord)); // save start of char*
-
-    code.sub(Reg::Rsp, Imm::Int64(16));
-    code.mov(Mem::reg(Reg::Rsp, MemSize::DWord), Imm::Int32(1)); // int fd
-    code.mov(Mem::offset(Reg::Rsp, 4, MemSize::QWord), Reg::Rax); // char* buffer
-    code.mov(Mem::offset(Reg::Rsp, 12, MemSize::DWord), Reg::Ecx); // int count
-    code.call("write");
+    match target {
+        CompilerTarget::Linux => {
+            code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
+            code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
+            code.lea(Reg::Rsi, Mem::reg(Reg::Rsp, MemSize::QWord)); // *buffer
+            code.mov(Reg::Edx, Reg::Ecx); // count
+            code.syscall();
+        }
+        CompilerTarget::Windows => {
+            code.mov(Reg::R8D, Reg::Ecx); // count
+            code.mov(Reg::Ecx, Imm::Int32(1)); // file descriptor
+            code.lea(Reg::Rdx, Mem::reg(Reg::Rsp, MemSize::QWord)); // *buffer
+            code.sub(Reg::Rsp, Imm::Int64(32)); // shadow space
+            code.call("_write");
+        }
+    }
 
     code.pop_sf();
     code.ret(4);
 }
 
-fn print_string(code: &mut AsmBuilder) {
+fn print_string(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("printString");
+    code.push_sf();
 
-    code.sub(Reg::Rsp, Imm::Int64(16));
-    code.mov(Mem::reg(Reg::Rsp, MemSize::DWord), Imm::Int32(1)); // int fd
-    code.mov(Reg::Rax, Mem::offset(Reg::Rsp, 24, MemSize::QWord));
-    code.mov(Mem::offset(Reg::Rsp, 4, MemSize::QWord), Reg::Rax); // char* buffer
-    code.mov(Reg::Eax, Mem::offset(Reg::Rsp, 32, MemSize::DWord));
-    code.mov(Mem::offset(Reg::Rsp, 12, MemSize::DWord), Reg::Eax); // int count
-    code.call("write");
+    let p_01 = Mem::offset(Reg::Rsp, 16, MemSize::QWord);
+    let p_02 = Mem::offset(Reg::Rsp, 24, MemSize::DWord);
 
+    match target {
+        CompilerTarget::Linux => {
+            code.mov(Reg::Eax, Imm::Int32(1)); // sys_write call
+            code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
+            code.mov(Reg::Rsi, p_01); // *buffer
+            code.mov(Reg::Edx, p_02); // count
+            code.syscall();
+        }
+        CompilerTarget::Windows => {
+            code.mov(Reg::Ecx, Imm::Int32(1)); // file descriptor
+            code.mov(Reg::Rdx, p_01); // *buffer
+            code.mov(Reg::R8D, p_02); // count
+            code.sub(Reg::Rsp, Imm::Int64(32)); // shadow space
+            code.call("_write");
+        }
+    }
+
+    code.pop_sf();
     code.ret(12);
 }
 
-fn read_string(code: &mut AsmBuilder) {
+fn read_string(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("readString");
+    code.push_sf();
 
-    code.sub(Reg::Rsp, Imm::Int64(16));
-    code.mov(Mem::reg(Reg::Rsp, MemSize::DWord), Imm::Int32(0)); // int fd
-    code.mov(Reg::Rax, Mem::offset(Reg::Rsp, 24, MemSize::QWord));
-    code.mov(Mem::offset(Reg::Rsp, 4, MemSize::QWord), Reg::Rax); // char* buffer
-    code.mov(Reg::Eax, Mem::offset(Reg::Rsp, 32, MemSize::DWord));
-    code.mov(Mem::offset(Reg::Rsp, 12, MemSize::DWord), Reg::Eax); // int buffer_size
-    code.call("read");
+    let p_01 = Mem::offset(Reg::Rbp, 16, MemSize::QWord);
+    let p_02 = Mem::offset(Reg::Rbp, 24, MemSize::DWord);
 
+    match target {
+        CompilerTarget::Linux => {
+            code.mov(Reg::Eax, Imm::Int32(0)); // sys_read call
+            code.mov(Reg::Edi, Imm::Int32(1)); // file descriptor
+            code.mov(Reg::Rsi, p_01); // *buffer
+            code.mov(Reg::Edx, p_02); // count
+            code.syscall();
+        }
+        CompilerTarget::Windows => {
+            code.mov(Reg::Ecx, Imm::Int32(0)); // file descriptor
+            code.mov(Reg::Rdx, p_01); // *buffer
+            code.mov(Reg::R8D, p_02); // buffer_size
+            code.sub(Reg::Rsp, Imm::Int64(32));
+            code.call("_read"); // return is already on rax
+        }
+    }
+
+    code.pop_sf();
     code.ret(12);
 }

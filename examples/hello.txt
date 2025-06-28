@@ -4,11 +4,9 @@ func main(): int do
     char[124] buffer;
 
     printString("What's your name?", 17);
-    
-    int size = readString(&buffer, 124);
-    
+    int size = readString(buffer, 124);
     printString("Hello, ", 7);
-    printString(&buffer, size);
+    printString(buffer, size);
 
     return 0;
 end
