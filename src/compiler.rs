@@ -147,6 +147,73 @@ impl MemSized for TypeAnnot {
 pub struct Compiler;
 
 impl Compiler {
+    /// This function will always tries to move any type of operand to the default operation registers (Rax and Xmm0)
+    fn move_operand_to_reg(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        annot: TypeAnnot,
+        operand: Operand
+    ) -> Operand {
+        match operand {
+            Operand::Xmm(xmm) if !xmm.is_xmm0() => {
+                let xmm0 = Xmm::xmm0(xmm.mem_size());
+                code.movss(xmm0, xmm);
+                Operand::Xmm(xmm0)
+            }
+            Operand::Mem(mem) if annot.is_float() => {
+                let xmm = Xmm::xmm0(mem.mem_size());
+                code.movss(xmm, mem);
+                Operand::Xmm(xmm)
+            }
+            Operand::Reg(reg) if annot.is_float() => {
+                let mem = scope.new_temp(reg.mem_size());
+                let xmm = Xmm::xmm0(mem.mem_size());
+                code.mov(mem, reg);
+                code.movss(xmm, mem);
+                Operand::Xmm(xmm)
+            }
+            Operand::Imm(imm) if annot.is_float() => {
+                let xmm = Xmm::xmm0(imm.mem_size());
+                let tmp = scope.new_temp(imm.mem_size());
+                code.mov(tmp, imm);
+                code.movss(xmm, tmp);
+                Operand::Xmm(xmm)
+            }
+            Operand::Reg(reg) if !reg.is_acc() => {
+                let acc = Reg::acc(reg.mem_size());
+                code.mov(acc, reg);
+                Operand::Reg(acc)
+            }
+            Operand::Mem(..) | Operand::Imm(..) => {
+                let reg = Reg::acc(operand.mem_size());
+                code.mov(reg, operand);
+                Operand::Reg(reg)
+            }
+            _ => operand
+        }
+    }
+
+    /// This function will try to clear the default operation registers (Rax and Xmm0)
+    fn move_reg_to_mem(
+        code: &mut AsmBuilder,
+        scope: &mut Scope,
+        operand: Operand
+    ) -> Operand {
+        match operand {
+            Operand::Xmm(xmm) => {
+                let tmp = scope.new_temp(xmm.mem_size());
+                code.movss(tmp, xmm);
+                tmp
+            }
+            Operand::Reg(..) => {
+                let tmp = scope.new_temp(operand.mem_size());
+                code.mov(tmp, operand);
+                tmp
+            }
+            _ => operand
+        }
+    }
+
     fn compile_value(
         code: &mut AsmBuilder,
         scope: &mut Scope,
@@ -157,8 +224,8 @@ impl Compiler {
             ValueExpr::String(string) => {
                 let label = Lbl::from_str(&string);
                 data.insert(label, string.as_bytes().to_vec());
-                code.lea(Reg::Rax, Mem::lbl(label, MemSize::QWord));
-                Operand::Reg(Reg::Rax)
+                code.lea(Reg::Rdx, Mem::lbl(label, MemSize::QWord));
+                Operand::Reg(Reg::Rdx)
             }
             ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
             ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
@@ -170,8 +237,8 @@ impl Compiler {
                 Annotation::Value | Annotation::Pointer => Operand::Mem(*scope.get(id)),
                 Annotation::Array(..) => {
                     let mem = *scope.get(id);
-                    code.lea(Reg::Rax, mem);
-                    Operand::Reg(Reg::Rax)
+                    code.lea(Reg::Rdx, mem);
+                    Operand::Reg(Reg::Rdx)
                 }
             },
         }
@@ -183,48 +250,47 @@ impl Compiler {
         data: &mut AsmData,
         bin_op: &BinaryOp,
     ) -> Operand {
-        // depth-first search
-        let mut lhs = Self::compile_expr_rec(code, scope, data, bin_op.lhs());
+        let operator = bin_op.operator();
+        let annot = bin_op.get_annot();
 
-        // clear register
-        if let Operand::Reg(reg) = lhs {
-            lhs = scope.new_temp(reg.mem_size());
-            code.mov(lhs, reg);
-        } else if let Operand::Xmm(xmm) = lhs {
-            lhs = scope.new_temp(xmm.mem_size());
-            code.movss(lhs, xmm);
-        }
+        let (lhs, rhs) = if operator.is_assign() {
+            let rhs = Self::compile_expr_rec(code, scope, data, bin_op.rhs());
+            let rhs = Self::move_operand_to_reg(code, scope, annot, rhs);
 
-        let mut rhs = Self::compile_expr_rec(code, scope, data, bin_op.rhs());
+            let lhs = Self::compile_expr_rec(code, scope, data, bin_op.lhs());
+            assert!(lhs.is_mem());
 
-        // clear register
-        if let Operand::Reg(reg) = rhs {
-            rhs = scope.new_temp(reg.mem_size());
-            code.mov(rhs, reg);
-        } else if let Operand::Xmm(xmm) = rhs {
-            rhs = scope.new_temp(xmm.mem_size());
-            code.movss(rhs, xmm);
-        }
+            (lhs, rhs)
+        } else {
+            let mut lhs = Self::compile_expr_rec(code, scope, data, bin_op.lhs());
+        
+            if !bin_op.rhs().is_value() {
+                if bin_op.lhs().is_index() {
+                    lhs = Self::move_operand_to_reg(code, scope, annot, lhs);
+                }
+                lhs = Self::move_reg_to_mem(code, scope, lhs);
+            }
+            
+            let rhs = Self::compile_expr_rec(code, scope, data, bin_op.rhs());
+            let rhs = Self::move_reg_to_mem(code, scope, rhs);
+            
+            let lhs = Self::move_operand_to_reg(code, scope, annot, lhs);
 
-        match bin_op.get_annot().is_float() {
-            true => Self::compile_fop(code, scope, bin_op.operator(), lhs, rhs),
-            false => Self::compile_iop(code, bin_op.operator(), lhs, rhs),
+            (lhs, rhs)
+        };
+
+        match annot.is_float() {
+            true => Self::compile_fop(code, scope, operator, lhs, rhs),
+            false => Self::compile_iop(code, operator, lhs, rhs),
         }
     }
 
     fn compile_iop(
         code: &mut AsmBuilder,
         operator: Operator,
-        mut lhs: Operand,
+        lhs: Operand,
         mut rhs: Operand,
     ) -> Operand {
-        // prepare for operation
-        if !(lhs.is_reg() || operator.is_assign()) {
-            let a_reg = Reg::acc(lhs.mem_size());
-            code.mov(a_reg, lhs);
-            lhs = Operand::Reg(a_reg);
-        }
-
         assert!(operator.is_assign() == lhs.is_mem());
         assert!(lhs.mem_size() == rhs.mem_size());
 
@@ -280,71 +346,51 @@ impl Compiler {
                 lhs
             }
             Operator::Div => {
-                if !matches!(lhs, Operand::Reg(Reg::Eax)) {
-                    code.mov(Reg::Eax, lhs); // quotient (lhs)
-                }
-                code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+                assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
                 if rhs.is_imm() {
                     code.mov(Reg::Ebx, rhs);
                     rhs = Operand::Reg(Reg::Ebx);
                 }
+                code.mov(Reg::Edx, Imm::Int32(0)); // remainder
                 code.idiv(rhs); // divisor (rhs)
                 lhs
             }
             Operator::Mod => {
-                if !matches!(lhs, Operand::Reg(Reg::Eax)) {
-                    code.mov(Reg::Eax, lhs); // quotient (lhs)
-                }
-                code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+                assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
                 if rhs.is_imm() {
                     code.mov(Reg::Ebx, rhs);
                     rhs = Operand::Reg(Reg::Ebx);
                 }
+                code.mov(Reg::Edx, Imm::Int32(0)); // remainder
                 code.idiv(rhs); // divisor (rhs)
-                Operand::Reg(Reg::Edx)
+                code.mov(lhs, Reg::Edx);
+                lhs
             }
             Operator::Assign => {
-                if let Operand::Mem(mem) = rhs {
-                    let reg = Reg::acc(mem.mem_size());
-                    code.mov(reg, mem);
-                    rhs = Operand::Reg(reg)
-                }
                 code.mov(lhs, rhs);
                 lhs
             }
             Operator::AddAssign => {
-                if let Operand::Mem(mem) = rhs {
-                    code.mov(Reg::Eax, mem);
-                    rhs = Operand::Reg(Reg::Eax)
-                }
                 code.add(lhs, rhs);
                 lhs
             }
             Operator::SubAssign => {
-                if let Operand::Mem(mem) = rhs {
-                    code.mov(Reg::Eax, mem);
-                    rhs = Operand::Reg(Reg::Eax)
-                }
                 code.sub(lhs, rhs);
                 lhs
             }
             Operator::MulAssign => {
-                if let Operand::Mem(mem) = lhs {
-                    code.mov(Reg::Eax, mem);
-                    code.imul(Reg::Eax, rhs);
-                    code.mov(mem, Reg::Eax);
-                } else {
-                    // in other case, it is already eax
-                    code.imul(lhs, rhs);
-                }
+                let reg = Reg::cnt(lhs.mem_size());
+                code.mov(reg, lhs);
+                code.imul(reg, rhs);
+                code.mov(lhs, reg);
                 lhs
             }
             Operator::DivAssign => {
-                // lhs must be a memory
-                code.mov(Reg::Eax, lhs); // quotient (lhs)
+                let reg = Reg::cnt(lhs.mem_size());
+                code.mov(reg, lhs); // quotient (lhs)
                 code.mov(Reg::Edx, Imm::Int32(0)); // remainder
                 code.idiv(rhs); // divisor (rhs)
-                code.mov(lhs, Reg::Eax);
+                code.mov(lhs, reg);
                 lhs
             }
         }
@@ -354,26 +400,9 @@ impl Compiler {
         code: &mut AsmBuilder,
         scope: &mut Scope,
         operator: Operator,
-        mut lhs: Operand,
+        lhs: Operand,
         mut rhs: Operand,
     ) -> Operand {
-        let old_lhs = lhs.clone();
-
-        match lhs {
-            Operand::Mem(mem) if !matches!(operator, Operator::Assign) => {
-                let xmm0 = Xmm::xmm0(mem.mem_size());
-                code.movss(xmm0, mem);
-                lhs = Operand::Xmm(xmm0);
-            }
-            Operand::Imm(imm) => {
-                lhs = scope.new_temp(imm.mem_size());
-                code.mov(lhs, imm);
-                let xmm0 = Xmm::xmm0(lhs.mem_size());
-                code.movss(xmm0, lhs);
-                lhs = Operand::Xmm(xmm0);
-            }
-            _ => {}
-        }
 
         if let Operand::Imm(imm) = rhs {
             rhs = scope.new_temp(imm.mem_size());
@@ -417,33 +446,41 @@ impl Compiler {
             }
             Operator::Mod => todo!(),
             Operator::Assign => {
-                if let Operand::Mem(mem) = rhs {
-                    let xmm0 = Xmm::xmm0(mem.mem_size());
-                    code.movss(xmm0, mem);
-                    rhs = Operand::Xmm(xmm0);
-                }
-                code.movss(old_lhs, rhs);
+                assert!(lhs.is_mem() && rhs.is_xmm());
+                code.movss(lhs, rhs);
                 lhs
             }
             Operator::AddAssign => {
-                code.addss(lhs, rhs);
-                code.movss(old_lhs, lhs);
-                old_lhs
+                assert!(lhs.is_mem() && rhs.is_xmm());
+                let xmm = Xmm::xmm1(lhs.mem_size());
+                code.movss(xmm, lhs);
+                code.addss(xmm, rhs);
+                code.movss(lhs, xmm);
+                lhs
             }
             Operator::SubAssign => {
-                code.subss(lhs, rhs);
-                code.movss(old_lhs, lhs);
-                old_lhs
+                assert!(lhs.is_mem() && rhs.is_xmm());
+                let xmm = Xmm::xmm1(lhs.mem_size());
+                code.movss(xmm, lhs);
+                code.subss(xmm, rhs);
+                code.movss(lhs, xmm);
+                lhs
             }
             Operator::MulAssign => {
-                code.mulss(lhs, rhs);
-                code.movss(old_lhs, lhs);
-                old_lhs
+                assert!(lhs.is_mem() && rhs.is_xmm());
+                let xmm = Xmm::xmm1(lhs.mem_size());
+                code.movss(xmm, lhs);
+                code.mulss(xmm, rhs);
+                code.movss(lhs, xmm);
+                lhs
             }
             Operator::DivAssign => {
-                code.divss(lhs, rhs);
-                code.movss(old_lhs, lhs);
-                old_lhs
+                assert!(lhs.is_mem() && rhs.is_xmm());
+                let xmm = Xmm::xmm1(lhs.mem_size());
+                code.divss(xmm, lhs);
+                code.addss(xmm, rhs);
+                code.movss(lhs, xmm);
+                lhs
             }
         }
     }
