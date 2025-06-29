@@ -394,6 +394,16 @@ impl Expression {
             annot,
         })
     }
+
+    #[inline]
+    pub fn is_value(&self) -> bool {
+        matches!(self, Self::Value(..))
+    }
+
+    #[inline]
+    pub fn is_index(&self) -> bool {
+        matches!(self, Self::Index(..))
+    }
 }
 
 impl Annotated for Expression {

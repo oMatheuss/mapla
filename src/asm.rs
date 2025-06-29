@@ -308,6 +308,10 @@ impl Reg {
             MemSize::QWord => Reg::Rcx,
         }
     }
+
+    pub fn is_acc(&self) -> bool {
+        matches!(self, Self::Rax | Self::Eax | Self::Ax | Self::Al)
+    }
 }
 
 impl MemSized for Reg {
@@ -584,6 +588,14 @@ impl Xmm {
 
     pub fn xmm0(mem_size: MemSize) -> Self {
         Self::new(XmmReg::Xmm0, mem_size)
+    }
+
+    pub fn xmm1(mem_size: MemSize) -> Self {
+        Self::new(XmmReg::Xmm1, mem_size)
+    }
+
+    pub fn is_xmm0(&self) -> bool {
+        matches!(self, Self { reg: XmmReg::Xmm0, .. })
     }
 }
 
