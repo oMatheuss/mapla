@@ -215,7 +215,7 @@ impl<'a> Lexer<'a> {
             }
 
             let token = match ch {
-                'a'..'z' | 'A'..'Z' => self.next_ident(),
+                'a'..='z' | 'A'..='Z' => self.next_ident(),
                 '0'..='9' | '.' => self.next_number(),
                 '"' => self.next_string(),
                 _ => self.next_symbol(),
