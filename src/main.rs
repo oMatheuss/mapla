@@ -85,7 +85,11 @@ fn run() -> Result<()> {
         .parse()
         .map_err(|err| err.with_source(source))?;
 
-    let assembly = Compiler::compile(ast, args.target);
+    let assembly = Compiler::new(args.target)
+        .prologue()
+        .compile(ast)
+        .epilogue()
+        .assembly();
 
     std::fs::write(out_file, assembly)?;
 

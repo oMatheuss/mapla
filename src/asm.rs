@@ -595,7 +595,13 @@ impl Xmm {
     }
 
     pub fn is_xmm0(&self) -> bool {
-        matches!(self, Self { reg: XmmReg::Xmm0, .. })
+        matches!(
+            self,
+            Self {
+                reg: XmmReg::Xmm0,
+                ..
+            }
+        )
     }
 }
 
@@ -730,6 +736,7 @@ impl MemSized for Operand {
     }
 }
 
+#[derive(Debug, Default)]
 pub struct AsmBuilder(String);
 
 impl AsmBuilder {

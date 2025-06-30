@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use crate::ast::{
@@ -9,6 +10,7 @@ use crate::ast::{
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
 
+#[derive(Debug, Clone, Copy, Default)]
 struct MemAlloc {
     local_off: isize,
     temp_off: isize,
@@ -16,62 +18,52 @@ struct MemAlloc {
 }
 
 impl MemAlloc {
-    pub fn new() -> Self {
-        Self {
-            local_off: 0,
-            temp_off: 0,
-            max_temp_off: 0,
-        }
-    }
-
-    pub fn new_ref_cell() -> RefCell<Self> {
-        RefCell::new(Self::new())
-    }
-
     pub fn get_total(&self) -> i64 {
         let total = self.local_off.abs() + self.max_temp_off.abs();
         return total as i64;
     }
 }
 
-struct Scope<'a> {
+#[derive(Debug, Default)]
+struct Scope {
     var: HashMap<String, Mem>,
-    mem: &'a RefCell<MemAlloc>,
+    mem: Rc<RefCell<MemAlloc>>,
     lbl: usize,
-    sup: Option<&'a Scope<'a>>,
+    sup: Option<Box<Scope>>,
 }
 
-impl<'a> Scope<'a> {
-    fn new(mem: &'a RefCell<MemAlloc>) -> Self {
-        Self {
-            var: HashMap::new(),
-            mem,
-            lbl: 0,
-            sup: None,
-        }
+impl Scope {
+    fn new() -> Self {
+        Self::default()
     }
 
-    fn new_inner(outer: &'a Self, mem: &'a RefCell<MemAlloc>) -> Self {
-        Self {
-            var: HashMap::new(),
-            mem,
-            lbl: 0,
-            sup: Some(outer),
-        }
+    fn new_inner(&mut self) {
+        let cur = std::mem::take(self);
+        let mut src = Self::new();
+        src.sup = Some(Box::new(cur));
+        let _ = std::mem::replace(self, src);
     }
 
-    fn continue_on(outer: &'a Self) -> Self {
-        Self {
+    fn continue_on(&mut self) {
+        let cur = std::mem::take(self);
+        let src = Self {
             var: HashMap::new(),
-            mem: outer.mem,
-            lbl: outer.lbl,
-            sup: Some(outer),
-        }
+            mem: cur.mem.clone(),
+            lbl: cur.lbl,
+            sup: Some(Box::new(cur)),
+        };
+        let _ = std::mem::replace(self, src);
     }
 
-    fn get(&self, ident: &str) -> &Mem {
+    fn exit(&mut self) {
+        let cur = std::mem::take(self);
+        let outer = cur.sup.expect("at least global scope should exist");
+        let _ = std::mem::replace(self, *outer);
+    }
+
+    fn get(&self, ident: &str) -> Mem {
         if let Some(local) = self.var.get(ident) {
-            local
+            *local
         } else if let Some(sup) = &self.sup {
             sup.get(ident)
         } else {
@@ -112,8 +104,7 @@ impl<'a> Scope<'a> {
 
     #[inline]
     fn reset_temps(&mut self) {
-        let mut mem = self.mem.borrow_mut();
-        mem.temp_off = 0;
+        self.mem.borrow_mut().temp_off = 0;
     }
 
     #[inline]
@@ -144,696 +135,667 @@ impl MemSized for TypeAnnot {
     }
 }
 
-pub struct Compiler;
+pub struct Compiler {
+    code: AsmBuilder,
+    scope: Scope,
+    data: AsmData,
+    target: CompilerTarget,
+}
 
 impl Compiler {
-    /// This function will always tries to move any type of operand to the default operation registers (Rax and Xmm0)
-    fn move_operand_to_reg(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        annot: TypeAnnot,
-        operand: Operand
-    ) -> Operand {
-        match operand {
-            Operand::Xmm(xmm) if !xmm.is_xmm0() => {
-                let xmm0 = Xmm::xmm0(xmm.mem_size());
-                code.movss(xmm0, xmm);
-                Operand::Xmm(xmm0)
-            }
-            Operand::Mem(mem) if annot.is_float() => {
-                let xmm = Xmm::xmm0(mem.mem_size());
-                code.movss(xmm, mem);
-                Operand::Xmm(xmm)
-            }
-            Operand::Reg(reg) if annot.is_float() => {
-                let mem = scope.new_temp(reg.mem_size());
-                let xmm = Xmm::xmm0(mem.mem_size());
-                code.mov(mem, reg);
-                code.movss(xmm, mem);
-                Operand::Xmm(xmm)
-            }
-            Operand::Imm(imm) if annot.is_float() => {
-                let xmm = Xmm::xmm0(imm.mem_size());
-                let tmp = scope.new_temp(imm.mem_size());
-                code.mov(tmp, imm);
-                code.movss(xmm, tmp);
-                Operand::Xmm(xmm)
-            }
-            Operand::Reg(reg) if !reg.is_acc() => {
-                let acc = Reg::acc(reg.mem_size());
-                code.mov(acc, reg);
-                Operand::Reg(acc)
-            }
-            Operand::Mem(..) | Operand::Imm(..) => {
-                let reg = Reg::acc(operand.mem_size());
-                code.mov(reg, operand);
-                Operand::Reg(reg)
-            }
-            _ => operand
+    pub fn new(target: CompilerTarget) -> Self {
+        Compiler {
+            code: AsmBuilder::new(),
+            scope: Scope::new(),
+            data: AsmData::new(),
+            target,
         }
     }
 
-    /// This function will try to clear the default operation registers (Rax and Xmm0)
-    fn move_reg_to_mem(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        operand: Operand
-    ) -> Operand {
-        match operand {
-            Operand::Xmm(xmm) => {
-                let tmp = scope.new_temp(xmm.mem_size());
-                code.movss(tmp, xmm);
-                tmp
-            }
-            Operand::Reg(..) => {
-                let tmp = scope.new_temp(operand.mem_size());
-                code.mov(tmp, operand);
-                tmp
-            }
-            _ => operand
-        }
+    pub fn prologue(mut self) -> Self {
+        self.code.bits(64);
+        self.code.section("text");
+        self.code.global(&["main"]);
+        self
     }
 
-    fn compile_value(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        data: &mut AsmData,
-        value: &ValueExpr,
-    ) -> Operand {
-        match value {
-            ValueExpr::String(string) => {
-                let label = Lbl::from_str(&string);
-                data.insert(label, string.as_bytes().to_vec());
-                code.lea(Reg::Rdx, Mem::lbl(label, MemSize::QWord));
+    pub fn compile(mut self, ast: Ast) -> Self {
+        for node in ast.iter() {
+            match node {
+                AstNode::Use(ident) => intrisic(&ident, &mut self.code, self.target),
+                AstNode::Func(ident, args, _, ast_nodes) => {
+                    compile_func(&mut self, ident, args, ast_nodes);
+                }
+                _ => {}
+            }
+        }
+        self
+    }
+
+    pub fn epilogue(mut self) -> Self {
+        if !self.data.is_empty() {
+            self.code.section("data");
+
+            for (label, val) in self.data.iter() {
+                self.code.db(&label.to_string(), val);
+            }
+        }
+        self
+    }
+
+    pub fn assembly(self) -> String {
+        self.code.to_string()
+    }
+}
+
+/// This function will always tries to move any type of operand to the default operation registers (Rax and Xmm0)
+fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
+    match operand {
+        Operand::Xmm(xmm) if !xmm.is_xmm0() => {
+            let xmm0 = Xmm::xmm0(xmm.mem_size());
+            c.code.movss(xmm0, xmm);
+            Operand::Xmm(xmm0)
+        }
+        Operand::Mem(mem) if annot.is_float() => {
+            let xmm = Xmm::xmm0(mem.mem_size());
+            c.code.movss(xmm, mem);
+            Operand::Xmm(xmm)
+        }
+        Operand::Reg(reg) if annot.is_float() => {
+            let mem = c.scope.new_temp(reg.mem_size());
+            let xmm = Xmm::xmm0(mem.mem_size());
+            c.code.mov(mem, reg);
+            c.code.movss(xmm, mem);
+            Operand::Xmm(xmm)
+        }
+        Operand::Imm(imm) if annot.is_float() => {
+            let xmm = Xmm::xmm0(imm.mem_size());
+            let tmp = c.scope.new_temp(imm.mem_size());
+            c.code.mov(tmp, imm);
+            c.code.movss(xmm, tmp);
+            Operand::Xmm(xmm)
+        }
+        Operand::Reg(reg) if !reg.is_acc() => {
+            let acc = Reg::acc(reg.mem_size());
+            c.code.mov(acc, reg);
+            Operand::Reg(acc)
+        }
+        Operand::Mem(..) | Operand::Imm(..) => {
+            let reg = Reg::acc(operand.mem_size());
+            c.code.mov(reg, operand);
+            Operand::Reg(reg)
+        }
+        _ => operand,
+    }
+}
+
+/// This function will try to clear the default operation registers (Rax and Xmm0)
+fn move_reg_to_mem(c: &mut Compiler, operand: Operand) -> Operand {
+    match operand {
+        Operand::Xmm(xmm) => {
+            let tmp = c.scope.new_temp(xmm.mem_size());
+            c.code.movss(tmp, xmm);
+            tmp
+        }
+        Operand::Reg(..) => {
+            let tmp = c.scope.new_temp(operand.mem_size());
+            c.code.mov(tmp, operand);
+            tmp
+        }
+        _ => operand,
+    }
+}
+
+fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
+    match value {
+        ValueExpr::String(string) => {
+            let label = Lbl::from_str(&string);
+            c.data.insert(label, string.as_bytes().to_vec());
+            c.code.lea(Reg::Rdx, Mem::lbl(label, MemSize::QWord));
+            Operand::Reg(Reg::Rdx)
+        }
+        ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
+        ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
+        ValueExpr::Bool(value) => match value {
+            true => Operand::Imm(Imm::TRUE),
+            false => Operand::Imm(Imm::FALSE),
+        },
+        ValueExpr::Identifier(annot, id) => match annot.annotation() {
+            Annotation::Value | Annotation::Pointer => Operand::Mem(c.scope.get(id)),
+            Annotation::Array(..) => {
+                let mem = c.scope.get(id);
+                c.code.lea(Reg::Rdx, mem);
                 Operand::Reg(Reg::Rdx)
             }
-            ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
-            ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
-            ValueExpr::Bool(value) => match value {
-                true => Operand::Imm(Imm::TRUE),
-                false => Operand::Imm(Imm::FALSE),
-            },
-            ValueExpr::Identifier(annot, id) => match annot.annotation() {
-                Annotation::Value | Annotation::Pointer => Operand::Mem(*scope.get(id)),
-                Annotation::Array(..) => {
-                    let mem = *scope.get(id);
-                    code.lea(Reg::Rdx, mem);
-                    Operand::Reg(Reg::Rdx)
-                }
-            },
+        },
+    }
+}
+
+fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
+    let operator = bin_op.operator();
+    let annot = bin_op.get_annot();
+
+    let (lhs, rhs) = if operator.is_assign() {
+        let rhs = compile_expr_rec(c, bin_op.rhs());
+        let rhs = move_operand_to_reg(c, annot, rhs);
+
+        let lhs = compile_expr_rec(c, bin_op.lhs());
+        assert!(lhs.is_mem());
+
+        (lhs, rhs)
+    } else {
+        let mut lhs = compile_expr_rec(c, bin_op.lhs());
+
+        if !bin_op.rhs().is_value() {
+            if bin_op.lhs().is_index() {
+                lhs = move_operand_to_reg(c, annot, lhs);
+            }
+            lhs = move_reg_to_mem(c, lhs);
+        }
+
+        let rhs = compile_expr_rec(c, bin_op.rhs());
+        let rhs = move_reg_to_mem(c, rhs);
+
+        let lhs = move_operand_to_reg(c, annot, lhs);
+
+        (lhs, rhs)
+    };
+
+    match annot.is_float() {
+        true => compile_fop(c, operator, lhs, rhs),
+        false => compile_iop(c, operator, lhs, rhs),
+    }
+}
+
+fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
+    assert!(ope.is_assign() == lhs.is_mem());
+    assert!(lhs.mem_size() == rhs.mem_size());
+
+    match ope {
+        Operator::Equal => {
+            c.code.cmp(lhs, rhs);
+            c.code.sete(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::NotEqual => {
+            c.code.cmp(lhs, rhs);
+            c.code.setne(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::Greater => {
+            c.code.cmp(lhs, rhs);
+            c.code.setg(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::GreaterEqual => {
+            c.code.cmp(lhs, rhs);
+            c.code.setge(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::Less => {
+            c.code.cmp(lhs, rhs);
+            c.code.setl(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::LessEqual => {
+            c.code.cmp(lhs, rhs);
+            c.code.setle(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::And => {
+            c.code.and(lhs, rhs);
+            lhs
+        }
+        Operator::Or => {
+            c.code.or(lhs, rhs);
+            lhs
+        }
+        Operator::Add => {
+            c.code.add(lhs, rhs);
+            lhs
+        }
+        Operator::Sub => {
+            c.code.sub(lhs, rhs);
+            lhs
+        }
+        Operator::Mul => {
+            c.code.imul(lhs, rhs);
+            lhs
+        }
+        Operator::Div => {
+            assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
+            if rhs.is_imm() {
+                c.code.mov(Reg::Ebx, rhs);
+                rhs = Operand::Reg(Reg::Ebx);
+            }
+            c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+            c.code.idiv(rhs); // divisor (rhs)
+            lhs
+        }
+        Operator::Mod => {
+            assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
+            if rhs.is_imm() {
+                c.code.mov(Reg::Ebx, rhs);
+                rhs = Operand::Reg(Reg::Ebx);
+            }
+            c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+            c.code.idiv(rhs); // divisor (rhs)
+            c.code.mov(lhs, Reg::Edx);
+            lhs
+        }
+        Operator::Assign => {
+            c.code.mov(lhs, rhs);
+            lhs
+        }
+        Operator::AddAssign => {
+            c.code.add(lhs, rhs);
+            lhs
+        }
+        Operator::SubAssign => {
+            c.code.sub(lhs, rhs);
+            lhs
+        }
+        Operator::MulAssign => {
+            let reg = Reg::cnt(lhs.mem_size());
+            c.code.mov(reg, lhs);
+            c.code.imul(reg, rhs);
+            c.code.mov(lhs, reg);
+            lhs
+        }
+        Operator::DivAssign => {
+            let reg = Reg::cnt(lhs.mem_size());
+            c.code.mov(reg, lhs); // quotient (lhs)
+            c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+            c.code.idiv(rhs); // divisor (rhs)
+            c.code.mov(lhs, reg);
+            lhs
         }
     }
+}
 
-    fn compile_binop(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        data: &mut AsmData,
-        bin_op: &BinaryOp,
-    ) -> Operand {
-        let operator = bin_op.operator();
-        let annot = bin_op.get_annot();
+fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
+    if let Operand::Imm(imm) = rhs {
+        rhs = c.scope.new_temp(imm.mem_size());
+        c.code.mov(rhs, imm);
+    }
 
-        let (lhs, rhs) = if operator.is_assign() {
-            let rhs = Self::compile_expr_rec(code, scope, data, bin_op.rhs());
-            let rhs = Self::move_operand_to_reg(code, scope, annot, rhs);
+    assert!(lhs.mem_size() == rhs.mem_size());
 
-            let lhs = Self::compile_expr_rec(code, scope, data, bin_op.lhs());
-            assert!(lhs.is_mem());
+    match operator {
+        Operator::Equal => todo!(),
+        Operator::NotEqual => todo!(),
+        Operator::Greater => {
+            c.code.comiss(lhs, rhs);
+            c.code.setg(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::GreaterEqual => todo!(),
+        Operator::Less => {
+            c.code.comiss(lhs, rhs);
+            c.code.setl(Reg::Al);
+            Operand::Reg(Reg::Al)
+        }
+        Operator::LessEqual => todo!(),
+        Operator::And => todo!(),
+        Operator::Or => todo!(),
+        Operator::Add => {
+            c.code.addss(lhs, rhs);
+            lhs
+        }
+        Operator::Sub => {
+            c.code.subss(lhs, rhs);
+            lhs
+        }
+        Operator::Mul => {
+            c.code.mulss(lhs, rhs);
+            lhs
+        }
+        Operator::Div => {
+            c.code.divss(lhs, rhs);
+            lhs
+        }
+        Operator::Mod => todo!(),
+        Operator::Assign => {
+            assert!(lhs.is_mem() && rhs.is_xmm());
+            c.code.movss(lhs, rhs);
+            lhs
+        }
+        Operator::AddAssign => {
+            assert!(lhs.is_mem() && rhs.is_xmm());
+            let xmm = Xmm::xmm1(lhs.mem_size());
+            c.code.movss(xmm, lhs);
+            c.code.addss(xmm, rhs);
+            c.code.movss(lhs, xmm);
+            lhs
+        }
+        Operator::SubAssign => {
+            assert!(lhs.is_mem() && rhs.is_xmm());
+            let xmm = Xmm::xmm1(lhs.mem_size());
+            c.code.movss(xmm, lhs);
+            c.code.subss(xmm, rhs);
+            c.code.movss(lhs, xmm);
+            lhs
+        }
+        Operator::MulAssign => {
+            assert!(lhs.is_mem() && rhs.is_xmm());
+            let xmm = Xmm::xmm1(lhs.mem_size());
+            c.code.movss(xmm, lhs);
+            c.code.mulss(xmm, rhs);
+            c.code.movss(lhs, xmm);
+            lhs
+        }
+        Operator::DivAssign => {
+            assert!(lhs.is_mem() && rhs.is_xmm());
+            let xmm = Xmm::xmm1(lhs.mem_size());
+            c.code.divss(xmm, lhs);
+            c.code.addss(xmm, rhs);
+            c.code.movss(lhs, xmm);
+            lhs
+        }
+    }
+}
 
-            (lhs, rhs)
+fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
+    for arg in func.args().iter().rev() {
+        let arg = compile_expr_rec(c, arg);
+        let mem_size = arg.mem_size();
+        let mem = Mem::reg(Reg::Rsp, mem_size);
+        // TODO: allocate space for parameters all at once
+        c.code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
+
+        if arg.is_xmm() {
+            c.code.movss(mem, arg);
+        } else if arg.is_mem() {
+            let a_reg = Reg::acc(mem_size);
+            c.code.mov(a_reg, arg);
+            c.code.mov(mem, a_reg);
         } else {
-            let mut lhs = Self::compile_expr_rec(code, scope, data, bin_op.lhs());
-        
-            if !bin_op.rhs().is_value() {
-                if bin_op.lhs().is_index() {
-                    lhs = Self::move_operand_to_reg(code, scope, annot, lhs);
-                }
-                lhs = Self::move_reg_to_mem(code, scope, lhs);
-            }
-            
-            let rhs = Self::compile_expr_rec(code, scope, data, bin_op.rhs());
-            let rhs = Self::move_reg_to_mem(code, scope, rhs);
-            
-            let lhs = Self::move_operand_to_reg(code, scope, annot, lhs);
-
-            (lhs, rhs)
-        };
-
-        match annot.is_float() {
-            true => Self::compile_fop(code, scope, operator, lhs, rhs),
-            false => Self::compile_iop(code, operator, lhs, rhs),
+            c.code.mov(mem, arg);
         }
     }
-
-    fn compile_iop(
-        code: &mut AsmBuilder,
-        operator: Operator,
-        lhs: Operand,
-        mut rhs: Operand,
-    ) -> Operand {
-        assert!(operator.is_assign() == lhs.is_mem());
-        assert!(lhs.mem_size() == rhs.mem_size());
-
-        match operator {
-            Operator::Equal => {
-                code.cmp(lhs, rhs);
-                code.sete(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::NotEqual => {
-                code.cmp(lhs, rhs);
-                code.setne(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::Greater => {
-                code.cmp(lhs, rhs);
-                code.setg(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::GreaterEqual => {
-                code.cmp(lhs, rhs);
-                code.setge(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::Less => {
-                code.cmp(lhs, rhs);
-                code.setl(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::LessEqual => {
-                code.cmp(lhs, rhs);
-                code.setle(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::And => {
-                code.and(lhs, rhs);
-                lhs
-            }
-            Operator::Or => {
-                code.or(lhs, rhs);
-                lhs
-            }
-            Operator::Add => {
-                code.add(lhs, rhs);
-                lhs
-            }
-            Operator::Sub => {
-                code.sub(lhs, rhs);
-                lhs
-            }
-            Operator::Mul => {
-                code.imul(lhs, rhs);
-                lhs
-            }
-            Operator::Div => {
-                assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
-                if rhs.is_imm() {
-                    code.mov(Reg::Ebx, rhs);
-                    rhs = Operand::Reg(Reg::Ebx);
-                }
-                code.mov(Reg::Edx, Imm::Int32(0)); // remainder
-                code.idiv(rhs); // divisor (rhs)
-                lhs
-            }
-            Operator::Mod => {
-                assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
-                if rhs.is_imm() {
-                    code.mov(Reg::Ebx, rhs);
-                    rhs = Operand::Reg(Reg::Ebx);
-                }
-                code.mov(Reg::Edx, Imm::Int32(0)); // remainder
-                code.idiv(rhs); // divisor (rhs)
-                code.mov(lhs, Reg::Edx);
-                lhs
-            }
-            Operator::Assign => {
-                code.mov(lhs, rhs);
-                lhs
-            }
-            Operator::AddAssign => {
-                code.add(lhs, rhs);
-                lhs
-            }
-            Operator::SubAssign => {
-                code.sub(lhs, rhs);
-                lhs
-            }
-            Operator::MulAssign => {
-                let reg = Reg::cnt(lhs.mem_size());
-                code.mov(reg, lhs);
-                code.imul(reg, rhs);
-                code.mov(lhs, reg);
-                lhs
-            }
-            Operator::DivAssign => {
-                let reg = Reg::cnt(lhs.mem_size());
-                code.mov(reg, lhs); // quotient (lhs)
-                code.mov(Reg::Edx, Imm::Int32(0)); // remainder
-                code.idiv(rhs); // divisor (rhs)
-                code.mov(lhs, reg);
-                lhs
-            }
-        }
+    c.code.call(func.name());
+    if !func.get_annot().is_void() {
+        let ret_size = func.get_annot().mem_size();
+        Operand::Reg(Reg::acc(ret_size))
+    } else {
+        Operand::Imm(Imm::Int32(0))
     }
+}
 
-    fn compile_fop(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        operator: Operator,
-        lhs: Operand,
-        mut rhs: Operand,
-    ) -> Operand {
-
-        if let Operand::Imm(imm) = rhs {
-            rhs = scope.new_temp(imm.mem_size());
-            code.mov(rhs, imm);
+fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
+    let operand = una_op.operand();
+    match una_op.operator() {
+        UnaryOperator::AddressOf => {
+            let Expression::Value(ValueExpr::Identifier(.., id)) = operand else {
+                panic!("operator AddressOf can only be used on vars");
+            };
+            let mem = c.scope.get(id);
+            c.code.lea(Reg::Rax, mem);
+            Operand::Reg(Reg::Rax)
         }
-
-        assert!(lhs.mem_size() == rhs.mem_size());
-
-        match operator {
-            Operator::Equal => todo!(),
-            Operator::NotEqual => todo!(),
-            Operator::Greater => {
-                code.comiss(lhs, rhs);
-                code.setg(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::GreaterEqual => todo!(),
-            Operator::Less => {
-                code.comiss(lhs, rhs);
-                code.setl(Reg::Al);
-                Operand::Reg(Reg::Al)
-            }
-            Operator::LessEqual => todo!(),
-            Operator::And => todo!(),
-            Operator::Or => todo!(),
-            Operator::Add => {
-                code.addss(lhs, rhs);
-                lhs
-            }
-            Operator::Sub => {
-                code.subss(lhs, rhs);
-                lhs
-            }
-            Operator::Mul => {
-                code.mulss(lhs, rhs);
-                lhs
-            }
-            Operator::Div => {
-                code.divss(lhs, rhs);
-                lhs
-            }
-            Operator::Mod => todo!(),
-            Operator::Assign => {
-                assert!(lhs.is_mem() && rhs.is_xmm());
-                code.movss(lhs, rhs);
-                lhs
-            }
-            Operator::AddAssign => {
-                assert!(lhs.is_mem() && rhs.is_xmm());
-                let xmm = Xmm::xmm1(lhs.mem_size());
-                code.movss(xmm, lhs);
-                code.addss(xmm, rhs);
-                code.movss(lhs, xmm);
-                lhs
-            }
-            Operator::SubAssign => {
-                assert!(lhs.is_mem() && rhs.is_xmm());
-                let xmm = Xmm::xmm1(lhs.mem_size());
-                code.movss(xmm, lhs);
-                code.subss(xmm, rhs);
-                code.movss(lhs, xmm);
-                lhs
-            }
-            Operator::MulAssign => {
-                assert!(lhs.is_mem() && rhs.is_xmm());
-                let xmm = Xmm::xmm1(lhs.mem_size());
-                code.movss(xmm, lhs);
-                code.mulss(xmm, rhs);
-                code.movss(lhs, xmm);
-                lhs
-            }
-            Operator::DivAssign => {
-                assert!(lhs.is_mem() && rhs.is_xmm());
-                let xmm = Xmm::xmm1(lhs.mem_size());
-                code.divss(xmm, lhs);
-                code.addss(xmm, rhs);
-                code.movss(lhs, xmm);
-                lhs
-            }
+        UnaryOperator::Dereference => {
+            let Expression::Value(ValueExpr::Identifier(annot, id)) = operand else {
+                panic!("operator Dereference can only be used on vars");
+            };
+            let mem = c.scope.get(id);
+            c.code.mov(Reg::Rax, mem);
+            let size = annot.mem_size();
+            let temp = c.scope.new_temp(size);
+            c.code.mov(temp, Mem::reg(Reg::Rax, size));
+            temp
         }
-    }
-
-    fn compile_call(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        data: &mut AsmData,
-        func: &FunctionCall,
-    ) -> Operand {
-        for arg in func.args().iter().rev() {
-            let arg = Self::compile_expr_rec(code, scope, data, arg);
-            let mem_size = arg.mem_size();
-            let mem = Mem::reg(Reg::Rsp, mem_size);
-            // TODO: allocate space for parameters all at once
-            code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
-
-            if arg.is_xmm() {
-                code.movss(mem, arg);
-            } else if arg.is_mem() {
-                let a_reg = Reg::acc(mem_size);
-                code.mov(a_reg, arg);
-                code.mov(mem, a_reg);
-            } else {
-                code.mov(mem, arg);
-            }
-        }
-        code.call(func.name());
-        if !func.get_annot().is_void() {
-            let ret_size = func.get_annot().mem_size();
-            Operand::Reg(Reg::acc(ret_size))
-        } else {
-            Operand::Imm(Imm::Int32(0))
-        }
-    }
-
-    fn compile_unaop(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        data: &mut AsmData,
-        una_op: &UnaryOp,
-    ) -> Operand {
-        let operand = una_op.operand();
-        match una_op.operator() {
-            UnaryOperator::AddressOf => {
-                let Expression::Value(ValueExpr::Identifier(.., id)) = operand else {
-                    panic!("operator AddressOf can only be used on vars");
-                };
-                code.lea(Reg::Rax, *scope.get(id));
-                Operand::Reg(Reg::Rax)
-            }
-            UnaryOperator::Dereference => {
-                let Expression::Value(ValueExpr::Identifier(annot, id)) = operand else {
-                    panic!("operator Dereference can only be used on vars");
-                };
-                code.mov(Reg::Rax, *scope.get(id));
-                let size = annot.mem_size();
-                let temp = scope.new_temp(size);
-                code.mov(temp, Mem::reg(Reg::Rax, size));
-                temp
-            }
-            UnaryOperator::Minus => {
-                let expr_ty = operand.get_annot();
-                let operand = Self::compile_expr_rec(code, scope, data, operand);
-                if expr_ty.is_int() {
-                    match operand {
-                        Operand::Reg(..) => {
-                            code.neg(operand);
-                            operand
-                        }
-                        Operand::Imm(..) | Operand::Mem(..) => {
-                            let reg = Reg::acc(operand.mem_size());
-                            code.mov(reg, operand);
-                            code.neg(reg);
-                            Operand::Reg(reg)
-                        }
-                        _ => panic!("operator minus could not be applied"),
-                    }
-                } else {
-                    const MINUS_BIT: u32 = 1 << 31;
-                    match operand {
-                        Operand::Reg(..) => {
-                            code.xor(operand, Imm::Int32(MINUS_BIT as i32));
-                            operand
-                        }
-                        Operand::Imm(..) | Operand::Mem(..) => {
-                            let reg = Reg::acc(operand.mem_size());
-                            code.mov(reg, operand);
-                            code.xor(reg, Imm::Int32(MINUS_BIT as i32));
-                            Operand::Reg(reg)
-                        }
-                        Operand::Xmm(xmm) => {
-                            let tmp = scope.new_temp(xmm.mem_size());
-                            code.movss(tmp, xmm);
-                            code.xor(tmp, Imm::Int32(MINUS_BIT as i32));
-                            tmp
-                        }
-                        _ => panic!("operator minus could not be applied"),
-                    }
-                }
-            }
-            UnaryOperator::Not => todo!(),
-            UnaryOperator::BitwiseNot => {
-                let operand = Self::compile_expr_rec(code, scope, data, operand);
+        UnaryOperator::Minus => {
+            let expr_ty = operand.get_annot();
+            let operand = compile_expr_rec(c, operand);
+            if expr_ty.is_int() {
                 match operand {
-                    Operand::Reg(..) | Operand::Mem(..) => {
-                        code.not(operand);
+                    Operand::Reg(..) => {
+                        c.code.neg(operand);
                         operand
                     }
-                    Operand::Imm(imm) => {
-                        let reg = Reg::acc(imm.mem_size());
-                        code.mov(reg, imm);
-                        code.not(reg);
+                    Operand::Imm(..) | Operand::Mem(..) => {
+                        let reg = Reg::acc(operand.mem_size());
+                        c.code.mov(reg, operand);
+                        c.code.neg(reg);
+                        Operand::Reg(reg)
+                    }
+                    _ => panic!("operator minus could not be applied"),
+                }
+            } else {
+                const MINUS_BIT: u32 = 1 << 31;
+                match operand {
+                    Operand::Reg(..) => {
+                        c.code.xor(operand, Imm::Int32(MINUS_BIT as i32));
+                        operand
+                    }
+                    Operand::Imm(..) | Operand::Mem(..) => {
+                        let reg = Reg::acc(operand.mem_size());
+                        c.code.mov(reg, operand);
+                        c.code.xor(reg, Imm::Int32(MINUS_BIT as i32));
                         Operand::Reg(reg)
                     }
                     Operand::Xmm(xmm) => {
-                        let tmp = scope.new_temp(xmm.mem_size());
-                        code.movss(tmp, xmm);
-                        code.not(tmp);
+                        let tmp = c.scope.new_temp(xmm.mem_size());
+                        c.code.movss(tmp, xmm);
+                        c.code.xor(tmp, Imm::Int32(MINUS_BIT as i32));
                         tmp
                     }
                     _ => panic!("operator minus could not be applied"),
                 }
             }
         }
-    }
-
-    fn compile_index(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        data: &mut AsmData,
-        index: &Indexing,
-    ) -> Operand {
-        let size = index.get_annot().mem_size();
-
-        let offset = Self::compile_expr_rec(code, scope, data, index.index());
-        code.mov(Reg::cnt(offset.mem_size()), offset);
-        code.imul(Reg::Rcx, Imm::Int64(size as i64));
-
-        let array = Self::compile_value(code, scope, data, index.array());
-        code.add(Reg::Rcx, array);
-
-        Operand::Mem(Mem::reg(Reg::Rcx, size))
-    }
-
-    fn compile_expr_rec(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        data: &mut AsmData,
-        expr: &Expression,
-    ) -> Operand {
-        match expr {
-            Expression::Value(value) => Self::compile_value(code, scope, data, value),
-            Expression::UnaOp(una_op) => Self::compile_unaop(code, scope, data, una_op),
-            Expression::BinOp(bin_op) => Self::compile_binop(code, scope, data, bin_op),
-            Expression::Func(func) => Self::compile_call(code, scope, data, func),
-            Expression::Index(index) => Self::compile_index(code, scope, data, index),
+        UnaryOperator::Not => todo!(),
+        UnaryOperator::BitwiseNot => {
+            let operand = compile_expr_rec(c, operand);
+            match operand {
+                Operand::Reg(..) | Operand::Mem(..) => {
+                    c.code.not(operand);
+                    operand
+                }
+                Operand::Imm(imm) => {
+                    let reg = Reg::acc(imm.mem_size());
+                    c.code.mov(reg, imm);
+                    c.code.not(reg);
+                    Operand::Reg(reg)
+                }
+                Operand::Xmm(xmm) => {
+                    let tmp = c.scope.new_temp(xmm.mem_size());
+                    c.code.movss(tmp, xmm);
+                    c.code.not(tmp);
+                    tmp
+                }
+                _ => panic!("operator minus could not be applied"),
+            }
         }
     }
+}
 
-    fn compile_expr(
-        code: &mut AsmBuilder,
-        scope: &mut Scope,
-        data: &mut AsmData,
-        expr: &Expression,
-    ) -> Operand {
-        let operand = Self::compile_expr_rec(code, scope, data, expr);
-        scope.reset_temps();
-        return operand;
+fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
+    let size = index.get_annot().mem_size();
+
+    let offset = compile_expr_rec(c, index.index());
+    c.code.mov(Reg::cnt(offset.mem_size()), offset);
+    c.code.imul(Reg::Rcx, Imm::Int64(size as i64));
+
+    let array = compile_value(c, index.array());
+    c.code.add(Reg::Rcx, array);
+
+    Operand::Mem(Mem::reg(Reg::Rcx, size))
+}
+
+fn compile_expr_rec(c: &mut Compiler, expr: &Expression) -> Operand {
+    match expr {
+        Expression::Value(value) => compile_value(c, value),
+        Expression::UnaOp(una_op) => compile_unaop(c, una_op),
+        Expression::BinOp(bin_op) => compile_binop(c, bin_op),
+        Expression::Func(func) => compile_call(c, func),
+        Expression::Index(index) => compile_index(c, index),
     }
+}
 
-    fn compile_node(code: &mut AsmBuilder, scope: &mut Scope, data: &mut AsmData, node: &AstNode) {
-        match node {
-            AstNode::Var(annot, ident, expr) => {
-                let local = if let Annotation::Array(size) = annot.annotation() {
-                    let mem_size = annot.inner_type().mem_size();
-                    scope.new_array(ident, size, mem_size)
+fn compile_expr(c: &mut Compiler, expr: &Expression) -> Operand {
+    let operand = compile_expr_rec(c, expr);
+    c.scope.reset_temps();
+    return operand;
+}
+
+fn compile_node(c: &mut Compiler, node: &AstNode) {
+    match node {
+        AstNode::Var(annot, ident, expr) => {
+            let local = if let Annotation::Array(size) = annot.annotation() {
+                let mem_size = annot.inner_type().mem_size();
+                c.scope.new_array(ident, size, mem_size)
+            } else {
+                let mem_size = annot.mem_size();
+                c.scope.new_local(ident, mem_size)
+            };
+            if let Some(expr) = expr {
+                let result = compile_expr(c, expr);
+                if result.is_xmm() {
+                    c.code.movss(local, result);
+                } else if result.is_mem() {
+                    let reg_a = Reg::acc(result.mem_size());
+                    c.code.mov(reg_a, result);
+                    c.code.mov(local, reg_a);
                 } else {
-                    let mem_size = annot.mem_size();
-                    scope.new_local(ident, mem_size)
-                };
-                if let Some(expr) = expr {
-                    let result = Self::compile_expr(code, scope, data, expr);
-                    if result.is_xmm() {
-                        code.movss(local, result);
-                    } else if result.is_mem() {
-                        let reg_a = Reg::acc(result.mem_size());
-                        code.mov(reg_a, result);
-                        code.mov(local, reg_a);
-                    } else {
-                        code.mov(local, result);
-                    }
+                    c.code.mov(local, result);
                 }
             }
-            AstNode::If(expr, nodes) => {
-                let endif_lbl = scope.new_label();
-
-                let result = Self::compile_expr(code, scope, data, expr);
-                code.cmp(result, Imm::FALSE);
-                code.je(&endif_lbl);
-
-                let scope = &mut Scope::continue_on(&scope);
-                for inner in nodes {
-                    Self::compile_node(code, scope, data, inner);
-                }
-
-                code.label(&endif_lbl);
-            }
-            AstNode::While(expr, nodes) => {
-                let startwhile_lbl = scope.new_label();
-                let endwhile_lbl = scope.new_label();
-
-                code.label(&startwhile_lbl);
-
-                let mut result = Self::compile_expr(code, scope, data, expr);
-                if let Operand::Imm(imm) = result {
-                    result = scope.new_temp(imm.mem_size());
-                    code.mov(result, imm);
-                }
-                code.cmp(result, Imm::FALSE);
-                code.je(&endwhile_lbl);
-
-                let scope = &mut Scope::continue_on(&scope);
-                for inner in nodes {
-                    Self::compile_node(code, scope, data, inner);
-                }
-
-                code.jmp(&startwhile_lbl);
-                code.label(&endwhile_lbl);
-            }
-            AstNode::For(ident, init, limit, nodes) => {
-                let startfor_lbl = scope.new_label();
-                let endfor_lbl = scope.new_label();
-
-                let scope = &mut Scope::continue_on(&scope);
-                let counter = scope.new_local(ident, MemSize::DWord);
-                let init = match init {
-                    Some(expr) => Self::compile_value(code, scope, data, expr),
-                    None => Imm::Int32(0).into(),
-                };
-                code.mov(counter, init);
-                code.label(&startfor_lbl);
-
-                match limit {
-                    ValueExpr::Int(value) => {
-                        code.cmp(counter, Imm::Int32(*value));
-                    }
-                    ValueExpr::Identifier(.., id) => {
-                        code.mov(Reg::Eax, *scope.get(id));
-                        code.cmp(counter, Reg::Eax);
-                    }
-                    _ => unreachable!(),
-                };
-
-                code.jg(&endfor_lbl);
-
-                for inner in nodes {
-                    Self::compile_node(code, scope, data, inner);
-                }
-
-                code.inc(counter);
-                code.jmp(&startfor_lbl);
-                code.label(&endfor_lbl);
-            }
-            AstNode::Expr(expr) => {
-                let _ = Self::compile_expr(code, scope, data, expr);
-            }
-            AstNode::Ret(expr) => {
-                let result = Self::compile_expr(code, scope, data, expr);
-                if !result.is_reg() {
-                    let mem_size = result.mem_size();
-                    let reg = Reg::acc(mem_size);
-                    code.mov(reg, result);
-                }
-                code.jmp(".R");
-            }
-            _ => {}
         }
+        AstNode::If(expr, nodes) => {
+            let endif_lbl = c.scope.new_label();
+
+            let result = compile_expr(c, expr);
+            c.code.cmp(result, Imm::FALSE);
+            c.code.je(&endif_lbl);
+
+            c.scope.continue_on();
+
+            for inner in nodes {
+                compile_node(c, inner);
+            }
+
+            c.scope.exit();
+
+            c.code.label(&endif_lbl);
+        }
+        AstNode::While(expr, nodes) => {
+            let startwhile_lbl = c.scope.new_label();
+            let endwhile_lbl = c.scope.new_label();
+
+            c.code.label(&startwhile_lbl);
+
+            let mut result = compile_expr(c, expr);
+            if let Operand::Imm(imm) = result {
+                result = c.scope.new_temp(imm.mem_size());
+                c.code.mov(result, imm);
+            }
+            c.code.cmp(result, Imm::FALSE);
+            c.code.je(&endwhile_lbl);
+
+            c.scope.continue_on();
+
+            for inner in nodes {
+                compile_node(c, inner);
+            }
+
+            c.scope.exit();
+
+            c.code.jmp(&startwhile_lbl);
+            c.code.label(&endwhile_lbl);
+        }
+        AstNode::For(ident, init, limit, nodes) => {
+            let startfor_lbl = c.scope.new_label();
+            let endfor_lbl = c.scope.new_label();
+
+            c.scope.continue_on();
+
+            let counter = c.scope.new_local(ident, MemSize::DWord);
+            let init = match init {
+                Some(expr) => compile_value(c, expr),
+                None => Imm::Int32(0).into(),
+            };
+
+            c.code.mov(counter, init);
+            c.code.label(&startfor_lbl);
+
+            match limit {
+                ValueExpr::Int(value) => {
+                    c.code.cmp(counter, Imm::Int32(*value));
+                }
+                ValueExpr::Identifier(.., id) => {
+                    c.code.mov(Reg::Eax, c.scope.get(id));
+                    c.code.cmp(counter, Reg::Eax);
+                }
+                _ => unreachable!(),
+            };
+
+            c.code.jg(&endfor_lbl);
+
+            for inner in nodes {
+                compile_node(c, inner);
+            }
+
+            c.scope.exit();
+
+            c.code.inc(counter);
+            c.code.jmp(&startfor_lbl);
+            c.code.label(&endfor_lbl);
+        }
+        AstNode::Expr(expr) => {
+            let _ = compile_expr(c, expr);
+        }
+        AstNode::Ret(expr) => {
+            let result = compile_expr(c, expr);
+            if !result.is_reg() {
+                let mem_size = result.mem_size();
+                let reg = Reg::acc(mem_size);
+                c.code.mov(reg, result);
+            }
+            c.code.jmp(".R");
+        }
+        _ => {}
+    }
+}
+
+fn set_args(c: &mut Compiler, args: &[Argument]) -> usize {
+    let mem_offset = 16; // rip + rbp
+    let mut args_size = 0;
+    for Argument { name, annot } in args {
+        let mem_size = annot.mem_size();
+        let offset = mem_offset + args_size as isize;
+        let addr = Mem::offset(Reg::Rbp, offset, mem_size);
+        args_size += mem_size as usize;
+        c.scope.set(name, addr.into());
+    }
+    return args_size;
+}
+
+fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
+    c.code.label(ident);
+    c.code.push_sf();
+
+    c.scope.new_inner();
+
+    let args_size = set_args(c, args);
+
+    let mut code = std::mem::take(&mut c.code);
+
+    for inner in nodes {
+        compile_node(c, inner);
     }
 
-    fn compile_args(scope: &mut Scope, args: &[Argument]) -> usize {
-        let mem_offset = 16; // rip + rbp
-        let mut args_size = 0;
-        for Argument { name, annot } in args {
-            let mem_size = annot.mem_size();
-            let offset = mem_offset + args_size as isize;
-            let addr = Mem::offset(Reg::Rbp, offset, mem_size);
-            args_size += mem_size as usize;
-            scope.set(name, addr.into());
-        }
-        return args_size;
+    let total_mem = c.scope.mem.borrow().get_total();
+    if total_mem > 0 {
+        code.sub(Reg::Rsp, Imm::Int64(total_mem));
     }
 
-    fn compile_func(
-        code: &mut AsmBuilder,
-        global: &Scope,
-        data: &mut AsmData,
-        ident: &Identifier,
-        args: &Vec<Argument>,
-        nodes: &Vec<AstNode>,
-    ) {
-        code.label(ident);
-        code.push_sf();
+    let inner_code = std::mem::replace(&mut c.code, code);
+    c.code.append(inner_code);
 
-        let mut inner_code = AsmBuilder::new();
-        let mem = MemAlloc::new_ref_cell();
-        let mut scope = Scope::new_inner(global, &mem);
+    c.scope.exit();
 
-        let args_size = Self::compile_args(&mut scope, args);
-
-        for inner in nodes {
-            Self::compile_node(&mut inner_code, &mut scope, data, inner);
-        }
-
-        let mem = mem.borrow();
-        if mem.get_total() > 0 {
-            code.sub(Reg::Rsp, Imm::Int64(mem.get_total()));
-        }
-        code.append(inner_code);
-
-        code.label(".R");
-        code.pop_sf();
-        code.ret(args_size);
-    }
-
-    pub fn compile(ast: Ast, target: CompilerTarget) -> String {
-        let mut code = AsmBuilder::new();
-        let mem = MemAlloc::new_ref_cell();
-        let global = Scope::new(&mem);
-        let mut data = AsmData::new();
-
-        code.bits(64);
-        code.section("text");
-        code.global(&["main"]);
-
-        for node in ast.iter() {
-            match node {
-                AstNode::Use(ident) => intrisic(&ident, &mut code, target),
-                AstNode::Func(ident, args, _, ast_nodes) => {
-                    Self::compile_func(&mut code, &global, &mut data, ident, args, ast_nodes);
-                }
-                _ => {}
-            }
-        }
-
-        if !data.is_empty() {
-            code.section("data");
-
-            for (label, val) in data.iter() {
-                code.db(&label.to_string(), val);
-            }
-        }
-
-        code.to_string()
-    }
+    c.code.label(".R");
+    c.code.pop_sf();
+    c.code.ret(args_size);
 }
