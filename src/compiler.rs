@@ -28,7 +28,7 @@ impl MemAlloc {
 struct Scope {
     var: HashMap<String, Mem>,
     mem: Rc<RefCell<MemAlloc>>,
-    lbl: usize,
+    lbl: Rc<RefCell<usize>>,
     sup: Option<Box<Scope>>,
 }
 
@@ -49,7 +49,7 @@ impl Scope {
         let src = Self {
             var: HashMap::new(),
             mem: cur.mem.clone(),
-            lbl: cur.lbl,
+            lbl: cur.lbl.clone(),
             sup: Some(Box::new(cur)),
         };
         let _ = std::mem::replace(self, src);
@@ -109,8 +109,9 @@ impl Scope {
 
     #[inline]
     fn new_label(&mut self) -> String {
-        self.lbl += 1;
-        format!(".L{lbl}", lbl = self.lbl)
+        let mut lbl = self.lbl.borrow_mut();
+        *lbl += 1;
+        format!(".L{lbl}", lbl = *lbl)
     }
 }
 
