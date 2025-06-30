@@ -665,7 +665,11 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
         AstNode::If(expr, nodes) => {
             let endif_lbl = c.scope.new_label();
 
-            let result = compile_expr(c, expr);
+            let mut result = compile_expr(c, expr);
+            if let Operand::Imm(imm) = result {
+                result = Operand::Reg(Reg::acc(imm.mem_size()));
+                c.code.mov(result, imm);
+            }
             c.code.cmp(result, Imm::FALSE);
             c.code.je(&endif_lbl);
 
@@ -687,7 +691,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             let mut result = compile_expr(c, expr);
             if let Operand::Imm(imm) = result {
-                result = c.scope.new_temp(imm.mem_size());
+                result = Operand::Reg(Reg::acc(imm.mem_size()));
                 c.code.mov(result, imm);
             }
             c.code.cmp(result, Imm::FALSE);
