@@ -21,7 +21,14 @@ fn print_char(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("printChar");
     code.push_sf();
 
-    let p_01 = Mem::offset(Reg::Rsp, 16, MemSize::DWord);
+    let r_01 = match target {
+        CompilerTarget::Linux => Reg::Edi,
+        CompilerTarget::Windows => Reg::Ecx,
+    };
+    let p_01 = Mem::offset(Reg::Rbp, -4, MemSize::DWord);
+
+    code.sub(Reg::Rsp, Imm::Int64(4));
+    code.mov(p_01, r_01);
 
     match target {
         CompilerTarget::Linux => {
@@ -41,20 +48,23 @@ fn print_char(code: &mut AsmBuilder, target: CompilerTarget) {
     }
 
     code.pop_sf();
-    code.ret(4);
+    code.ret(0);
 }
 
 fn print_int(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("printInt");
     code.push_sf();
 
-    let p_01 = Mem::offset(Reg::Rbp, 16, MemSize::DWord);
-
-    code.mov(Reg::Rcx, Imm::Int64(0)); // counter
+    let p_01 = match target {
+        CompilerTarget::Linux => Reg::Edi,
+        CompilerTarget::Windows => Reg::Ecx,
+    };
 
     code.mov(Reg::Eax, p_01); // quotient
     code.mov(Reg::Ebx, Imm::Int32(10)); // divisor
     code.mov(Reg::Edx, Imm::Int32(0)); // remainder
+    
+    code.mov(Reg::Rcx, Imm::Int64(0)); // counter
 
     code.label(".L1");
 
@@ -88,15 +98,28 @@ fn print_int(code: &mut AsmBuilder, target: CompilerTarget) {
     }
 
     code.pop_sf();
-    code.ret(4);
+    code.ret(0);
 }
 
 fn print_string(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("printString");
     code.push_sf();
 
-    let p_01 = Mem::offset(Reg::Rsp, 16, MemSize::QWord);
-    let p_02 = Mem::offset(Reg::Rsp, 24, MemSize::DWord);
+    let r_01 = match target {
+        CompilerTarget::Linux => Reg::Rdi,
+        CompilerTarget::Windows => Reg::Rcx,
+    };
+    let p_01 = Mem::offset(Reg::Rbp, -8, MemSize::QWord);
+
+    let r_02 = match target {
+        CompilerTarget::Linux => Reg::Esi,
+        CompilerTarget::Windows => Reg::Edx,
+    };
+    let p_02 = Mem::offset(Reg::Rbp, -12, MemSize::DWord);
+
+    code.sub(Reg::Rsp, Imm::Int64(12));
+    code.mov(p_01, r_01);
+    code.mov(p_02, r_02);
 
     match target {
         CompilerTarget::Linux => {
@@ -116,15 +139,28 @@ fn print_string(code: &mut AsmBuilder, target: CompilerTarget) {
     }
 
     code.pop_sf();
-    code.ret(12);
+    code.ret(0);
 }
 
 fn read_string(code: &mut AsmBuilder, target: CompilerTarget) {
     code.label("readString");
     code.push_sf();
 
-    let p_01 = Mem::offset(Reg::Rbp, 16, MemSize::QWord);
-    let p_02 = Mem::offset(Reg::Rbp, 24, MemSize::DWord);
+    let r_01 = match target {
+        CompilerTarget::Linux => Reg::Rdi,
+        CompilerTarget::Windows => Reg::Rcx,
+    };
+    let p_01 = Mem::offset(Reg::Rbp, -8, MemSize::QWord);
+
+    let r_02 = match target {
+        CompilerTarget::Linux => Reg::Esi,
+        CompilerTarget::Windows => Reg::Edx,
+    };
+    let p_02 = Mem::offset(Reg::Rbp, -12, MemSize::DWord);
+
+    code.sub(Reg::Rsp, Imm::Int64(12));
+    code.mov(p_01, r_01);
+    code.mov(p_02, r_02);
 
     match target {
         CompilerTarget::Linux => {
@@ -144,5 +180,5 @@ fn read_string(code: &mut AsmBuilder, target: CompilerTarget) {
     }
 
     code.pop_sf();
-    code.ret(12);
+    code.ret(0);
 }

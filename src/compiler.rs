@@ -189,6 +189,25 @@ impl Compiler {
     }
 }
 
+fn cdecl(c: &Compiler, arg_num: usize, mem_size: MemSize) -> Option<Reg> {
+    let r = match (c.target, arg_num) {
+        (CompilerTarget::Linux, 0) => Reg::dst(mem_size),
+        (CompilerTarget::Linux, 1) => Reg::src(mem_size),
+        (CompilerTarget::Linux, 2) => Reg::dta(mem_size),
+        (CompilerTarget::Linux, 3) => Reg::cnt(mem_size),
+        (CompilerTarget::Linux, 4) => Reg::r8(mem_size),
+        (CompilerTarget::Linux, 5) => Reg::r9(mem_size),
+
+        (CompilerTarget::Windows, 0) => Reg::cnt(mem_size),
+        (CompilerTarget::Windows, 1) => Reg::dta(mem_size),
+        (CompilerTarget::Windows, 2) => Reg::r8(mem_size),
+        (CompilerTarget::Windows, 3) => Reg::r9(mem_size),
+
+        (_, _) => return None,
+    };
+    Some(r)
+}
+
 /// This function will always tries to move any type of operand to the default operation registers (Rax and Xmm0)
 fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
     match operand {
@@ -238,9 +257,9 @@ fn move_reg_to_mem(c: &mut Compiler, operand: Operand) -> Operand {
             c.code.movss(tmp, xmm);
             tmp
         }
-        Operand::Reg(..) => {
-            let tmp = c.scope.new_temp(operand.mem_size());
-            c.code.mov(tmp, operand);
+        Operand::Reg(reg) => {
+            let tmp = c.scope.new_temp(reg.mem_size());
+            c.code.mov(tmp, reg);
             tmp
         }
         _ => operand,
@@ -497,21 +516,30 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
 }
 
 fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
-    for arg in func.args().iter().rev() {
+    for (arg_num, arg) in func.args().iter().enumerate().rev() {
         let arg = compile_expr_rec(c, arg);
         let mem_size = arg.mem_size();
-        let mem = Mem::reg(Reg::Rsp, mem_size);
-        // TODO: allocate space for parameters all at once
-        c.code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
 
-        if arg.is_xmm() {
-            c.code.movss(mem, arg);
-        } else if arg.is_mem() {
-            let a_reg = Reg::acc(mem_size);
-            c.code.mov(a_reg, arg);
-            c.code.mov(mem, a_reg);
+        if let Some(reg) = cdecl(c, arg_num, mem_size) {
+            if arg.is_xmm() {
+                todo!("implement float registers");
+            } else {
+                c.code.mov(reg, arg);
+            }
         } else {
-            c.code.mov(mem, arg);
+            let mem = Mem::reg(Reg::Rsp, mem_size);
+            // TODO: allocate space for parameters all at once
+            c.code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
+    
+            if arg.is_xmm() {
+                c.code.movss(mem, arg);
+            } else if arg.is_mem() {
+                let a_reg = Reg::acc(mem_size);
+                c.code.mov(a_reg, arg);
+                c.code.mov(mem, a_reg);
+            } else {
+                c.code.mov(mem, arg);
+            }
         }
     }
     c.code.call(func.name());
@@ -766,12 +794,18 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 fn set_args(c: &mut Compiler, args: &[Argument]) -> usize {
     let mem_offset = 16; // rip + rbp
     let mut args_size = 0;
-    for Argument { name, annot } in args {
+    for (arg_num, arg) in args.iter().enumerate() {
+        let Argument { name, annot } = arg;
         let mem_size = annot.mem_size();
-        let offset = mem_offset + args_size as isize;
-        let addr = Mem::offset(Reg::Rbp, offset, mem_size);
-        args_size += mem_size as usize;
-        c.scope.set(name, addr.into());
+        if let Some(reg) = cdecl(c, arg_num, mem_size) {
+            let addr = c.scope.new_local(name, mem_size);
+            c.code.mov(addr, reg);
+        } else {
+            let offset = mem_offset + args_size as isize;
+            args_size += mem_size as usize;
+            let addr = Mem::offset(Reg::Rbp, offset, mem_size);
+            c.scope.set(name, addr);
+        }
     }
     return args_size;
 }

@@ -291,6 +291,7 @@ impl Display for Reg {
 }
 
 impl Reg {
+    #[inline]
     pub fn acc(mem_size: MemSize) -> Self {
         match mem_size {
             MemSize::Byte => Reg::Al,
@@ -300,12 +301,83 @@ impl Reg {
         }
     }
 
+    #[inline]
     pub fn cnt(mem_size: MemSize) -> Self {
         match mem_size {
             MemSize::Byte => Reg::Cl,
             MemSize::Word => Reg::Cx,
             MemSize::DWord => Reg::Ecx,
             MemSize::QWord => Reg::Rcx,
+        }
+    }
+
+    #[inline]
+    pub fn dta(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::Dl,
+            MemSize::Word => Reg::Dx,
+            MemSize::DWord => Reg::Edx,
+            MemSize::QWord => Reg::Rdx,
+        }
+    }
+
+    #[inline]
+    pub fn bse(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::Bl,
+            MemSize::Word => Reg::Bx,
+            MemSize::DWord => Reg::Ebx,
+            MemSize::QWord => Reg::Rbx,
+        }
+    }
+
+    #[inline]
+    pub fn src(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::Sil,
+            MemSize::Word => Reg::Si,
+            MemSize::DWord => Reg::Esi,
+            MemSize::QWord => Reg::Rsi,
+        }
+    }
+
+    #[inline]
+    pub fn dst(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::Dil,
+            MemSize::Word => Reg::Di,
+            MemSize::DWord => Reg::Edi,
+            MemSize::QWord => Reg::Rdi,
+        }
+    }
+
+    #[inline]
+    pub fn r8(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => todo!(),
+            MemSize::Word => Reg::R8W,
+            MemSize::DWord => Reg::R8D,
+            MemSize::QWord => Reg::R8,
+        }
+    }
+
+    #[inline]
+    pub fn r9(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => todo!(),
+            MemSize::Word => Reg::R9W,
+            MemSize::DWord => Reg::R9D,
+            MemSize::QWord => Reg::R9,
+        }
+    }
+
+    #[inline]
+    pub fn r10(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => todo!(),
+            MemSize::Word => Reg::R10W,
+            MemSize::DWord => Reg::R10D,
+            MemSize::QWord => Reg::R10,
         }
     }
 
