@@ -384,6 +384,10 @@ impl Reg {
     pub fn is_acc(&self) -> bool {
         matches!(self, Self::Rax | Self::Eax | Self::Ax | Self::Al)
     }
+
+    pub fn is_cnt(&self) -> bool {
+        matches!(self, Self::Rcx | Self::Ecx | Self::Cx | Self::Cl)
+    }
 }
 
 impl MemSized for Reg {

@@ -209,7 +209,7 @@ fn cdecl(c: &Compiler, arg_num: usize, mem_size: MemSize) -> Option<Reg> {
 }
 
 /// This function will always tries to move any type of operand to the default operation registers (Rax and Xmm0)
-fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
+fn move_operand_to_reg_1(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
     match operand {
         Operand::Xmm(xmm) if !xmm.is_xmm0() => {
             let xmm0 = Xmm::xmm0(xmm.mem_size());
@@ -249,6 +249,47 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
     }
 }
 
+/// This function will always tries to move any type of operand to the second default operation registers (Rcx and Xmm1)
+fn move_operand_to_reg_2(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
+    match operand {
+        Operand::Xmm(xmm) if !xmm.is_xmm0() => {
+            let xmm1 = Xmm::xmm1(xmm.mem_size());
+            c.code.movss(xmm1, xmm);
+            Operand::Xmm(xmm1)
+        }
+        Operand::Mem(mem) if annot.is_float() => {
+            let xmm = Xmm::xmm1(mem.mem_size());
+            c.code.movss(xmm, mem);
+            Operand::Xmm(xmm)
+        }
+        Operand::Reg(reg) if annot.is_float() => {
+            let mem = c.scope.new_temp(reg.mem_size());
+            let xmm = Xmm::xmm1(mem.mem_size());
+            c.code.mov(mem, reg);
+            c.code.movss(xmm, mem);
+            Operand::Xmm(xmm)
+        }
+        Operand::Imm(imm) if annot.is_float() => {
+            let xmm = Xmm::xmm1(imm.mem_size());
+            let tmp = c.scope.new_temp(imm.mem_size());
+            c.code.mov(tmp, imm);
+            c.code.movss(xmm, tmp);
+            Operand::Xmm(xmm)
+        }
+        Operand::Reg(reg) if !reg.is_cnt() => {
+            let cnt = Reg::cnt(reg.mem_size());
+            c.code.mov(cnt, reg);
+            Operand::Reg(cnt)
+        }
+        Operand::Mem(..) | Operand::Imm(..) => {
+            let reg = Reg::cnt(operand.mem_size());
+            c.code.mov(reg, operand);
+            Operand::Reg(reg)
+        }
+        _ => operand,
+    }
+}
+
 /// This function will try to clear the default operation registers (Rax and Xmm0)
 fn move_reg_to_mem(c: &mut Compiler, operand: Operand) -> Operand {
     match operand {
@@ -271,8 +312,8 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
         ValueExpr::String(string) => {
             let label = Lbl::from_str(&string);
             c.data.insert(label, string.as_bytes().to_vec());
-            c.code.lea(Reg::Rdx, Mem::lbl(label, MemSize::QWord));
-            Operand::Reg(Reg::Rdx)
+            c.code.lea(Reg::Rax, Mem::lbl(label, MemSize::QWord));
+            Operand::Reg(Reg::Rax)
         }
         ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
         ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
@@ -284,8 +325,8 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
             Annotation::Value | Annotation::Pointer => Operand::Mem(c.scope.get(id)),
             Annotation::Array(..) => {
                 let mem = c.scope.get(id);
-                c.code.lea(Reg::Rdx, mem);
-                Operand::Reg(Reg::Rdx)
+                c.code.lea(Reg::Rax, mem);
+                Operand::Reg(Reg::Rax)
             }
         },
     }
@@ -297,7 +338,7 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
 
     let (lhs, rhs) = if operator.is_assign() {
         let rhs = compile_expr_rec(c, bin_op.rhs());
-        let rhs = move_operand_to_reg(c, annot, rhs);
+        let rhs = move_operand_to_reg_2(c, annot, rhs);
 
         let lhs = compile_expr_rec(c, bin_op.lhs());
         assert!(lhs.is_mem());
@@ -308,7 +349,7 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
 
         if !bin_op.rhs().is_value() {
             if bin_op.lhs().is_index() {
-                lhs = move_operand_to_reg(c, annot, lhs);
+                lhs = move_operand_to_reg_1(c, annot, lhs);
             }
             lhs = move_reg_to_mem(c, lhs);
         }
@@ -316,7 +357,7 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
         let rhs = compile_expr_rec(c, bin_op.rhs());
         let rhs = move_reg_to_mem(c, rhs);
 
-        let lhs = move_operand_to_reg(c, annot, lhs);
+        let lhs = move_operand_to_reg_1(c, annot, lhs);
 
         (lhs, rhs)
     };
@@ -642,14 +683,16 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
 fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     let size = index.get_annot().mem_size();
 
-    let offset = compile_expr_rec(c, index.index());
-    c.code.mov(Reg::cnt(offset.mem_size()), offset);
-    c.code.imul(Reg::Rcx, Imm::Int64(size as i64));
-
     let array = compile_value(c, index.array());
-    c.code.add(Reg::Rcx, array);
+    let array = move_reg_to_mem(c, array);
 
-    Operand::Mem(Mem::reg(Reg::Rcx, size))
+    let offset = compile_expr_rec(c, index.index());
+    c.code.mov(Reg::r10(offset.mem_size()), offset);
+    c.code.imul(Reg::R10, Imm::Int64(size as i64));
+
+    c.code.add(Reg::R10, array);
+
+    Operand::Mem(Mem::reg(Reg::R10, size))
 }
 
 fn compile_expr_rec(c: &mut Compiler, expr: &Expression) -> Operand {
