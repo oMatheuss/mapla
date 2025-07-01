@@ -646,6 +646,12 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
 
 fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
     c.regs.reserve_cdecl(c.target);
+
+    if c.target.is_windows() {
+        // allocate shadow space
+        c.code.sub(Reg::Rsp, Imm::Int64(32));
+    }
+
     for (arg_num, arg) in func.args().iter().enumerate().rev() {
         let arg = compile_expr_rec(c, arg);
         let mem_size = arg.mem_size();
@@ -677,10 +683,18 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
         }
         c.regs.try_push(arg);
     }
+
     c.code.call(func.name());
     c.regs.release_cdecl(c.target);
-    if !func.get_annot().is_void() {
-        let reg = Reg::acc(func.get_annot().mem_size());
+
+    if c.target.is_windows() {
+        // deallocate shadow space
+        c.code.add(Reg::Rsp, Imm::Int64(32));
+    }
+
+    let func_annot = func.get_annot();
+    if !func_annot.is_void() {
+        let reg = Reg::acc(func_annot.mem_size());
         c.regs.take(reg);
         Operand::Reg(reg)
     } else {
