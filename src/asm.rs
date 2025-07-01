@@ -121,7 +121,7 @@ impl Display for OpCode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Reg {
     // accumulator
     Rax,
@@ -574,6 +574,10 @@ impl Mem {
             index: MemIndex::Offset(offset),
             scale: MemScale::Uni,
         }
+    }
+
+    pub fn base(&self) -> MemBase {
+        self.base
     }
 }
 

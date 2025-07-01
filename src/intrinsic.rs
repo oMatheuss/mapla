@@ -63,7 +63,7 @@ fn print_int(code: &mut AsmBuilder, target: CompilerTarget) {
     code.mov(Reg::Eax, p_01); // quotient
     code.mov(Reg::Ebx, Imm::Int32(10)); // divisor
     code.mov(Reg::Edx, Imm::Int32(0)); // remainder
-    
+
     code.mov(Reg::Rcx, Imm::Int64(0)); // counter
 
     code.label(".L1");
