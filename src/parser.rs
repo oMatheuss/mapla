@@ -556,6 +556,34 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
+    fn consume_extern(&mut self) -> Result<AstNode> {
+        self.next_or_err()?; // discard extern token
+        let Token::Function = self.next_or_err()? else {
+            return Error::syntatic("expected `func` keyword", self.pos);
+        };
+        let Token::Identifier(name) = *self.next_or_err()? else {
+            return Error::syntatic("expected name of the function", self.pos);
+        };
+        let fn_pos = self.pos;
+
+        self.symbols.enter_scope();
+        let args = self.parse_args()?;
+
+        let annot = if let Some(Token::Colon) = self.peek() {
+            self.next_or_err()?;
+            self.parse_annot()?
+        } else {
+            TypeAnnot::VOID
+        };
+
+        self.consume_semi()?;
+        self.symbols.exit_scope();
+
+        self.symbols.set_global(&name, Symbol::new(fn_pos, annot));
+
+        AstNode::ExternFunc(name.into(), args, annot).ok()
+    }
+
     fn consume_use(&mut self) -> Result<AstNode> {
         self.next(); // discard use token
         let Token::Identifier(ident) = self.next_or_err()? else {
@@ -581,6 +609,7 @@ impl<'a> Parser<'a> {
 
             Token::Function => self.consume_func(),
             Token::Return => self.consume_ret(),
+            Token::Extern => self.consume_extern(),
 
             Token::OpenParen
             | Token::True

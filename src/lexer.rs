@@ -85,7 +85,7 @@ impl<'a> Lexer<'a> {
     fn next_ident(&mut self) -> Result<Token<'a>> {
         let start = self.index();
         while let Some(ch) = self.peek() {
-            if !ch.is_alphanumeric() {
+            if !ch.is_alphanumeric() && *ch != '_' {
                 break;
             }
             self.next();
@@ -215,7 +215,7 @@ impl<'a> Lexer<'a> {
             }
 
             let token = match ch {
-                'a'..='z' | 'A'..='Z' => self.next_ident(),
+                'a'..='z' | 'A'..='Z' | '_' => self.next_ident(),
                 '0'..='9' | '.' => self.next_number(),
                 '"' => self.next_string(),
                 _ => self.next_symbol(),

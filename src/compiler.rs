@@ -18,8 +18,13 @@ struct MemAlloc {
 }
 
 impl MemAlloc {
-    pub fn get_total(&self) -> i64 {
+    pub fn get_max(&self) -> i64 {
         let total = self.local_off.abs() + self.max_temp_off.abs();
+        return total as i64;
+    }
+
+    pub fn get_allocated(&self) -> i64 {
+        let total = self.local_off.abs() + self.local_off.abs();
         return total as i64;
     }
 }
@@ -288,6 +293,9 @@ impl Compiler {
                 AstNode::Use(ident) => intrisic(&ident, &mut self.code, self.target),
                 AstNode::Func(ident, args, _, ast_nodes) => {
                     compile_func(&mut self, ident, args, ast_nodes);
+                }
+                AstNode::ExternFunc(name, ..) => {
+                    self.code.extrn(&[name]);
                 }
                 _ => {}
             }
@@ -647,10 +655,16 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
 fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
     c.regs.reserve_cdecl(c.target);
 
+    let stack_size = c.scope.mem.borrow().get_allocated();
+    let mut allocation = 0;
+
     if c.target.is_windows() {
         // allocate shadow space
-        c.code.sub(Reg::Rsp, Imm::Int64(32));
+        allocation += 32;
     }
+
+    allocation += (stack_size + allocation + 8) % 16;
+    c.code.sub(Reg::Rsp, Imm::Int64(allocation));
 
     for (arg_num, arg) in func.args().iter().enumerate().rev() {
         let arg = compile_expr_rec(c, arg);
@@ -687,10 +701,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
     c.code.call(func.name());
     c.regs.release_cdecl(c.target);
 
-    if c.target.is_windows() {
-        // deallocate shadow space
-        c.code.add(Reg::Rsp, Imm::Int64(32));
-    }
+    c.code.add(Reg::Rsp, Imm::Int64(allocation));
 
     let func_annot = func.get_annot();
     if !func_annot.is_void() {
@@ -1003,7 +1014,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
         compile_node(c, inner);
     }
 
-    let total_mem = c.scope.mem.borrow().get_total();
+    let total_mem = c.scope.mem.borrow().get_max();
     if total_mem > 0 {
         code.sub(Reg::Rsp, Imm::Int64(total_mem));
     }

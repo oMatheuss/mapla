@@ -448,6 +448,7 @@ pub enum AstNode {
     For(Identifier, Option<ValueExpr>, ValueExpr, Vec<AstNode>),
     Expr(Expression),
     Func(Identifier, Vec<Argument>, TypeAnnot, Vec<AstNode>),
+    ExternFunc(Identifier, Vec<Argument>, TypeAnnot),
     Ret(Expression),
 }
 
