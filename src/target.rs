@@ -19,9 +19,3 @@ impl FromStr for CompilerTarget {
         }
     }
 }
-
-impl CompilerTarget {
-    pub fn is_windows(self) -> bool {
-        matches!(self, CompilerTarget::Windows)
-    }
-}

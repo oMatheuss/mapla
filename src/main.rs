@@ -86,9 +86,9 @@ fn run() -> Result<()> {
         .map_err(|err| err.with_source(source))?;
 
     let assembly = Compiler::new(args.target)
-        .prologue()
+        .prolog()
         .compile(ast)
-        .epilogue()
+        .epilog()
         .assembly();
 
     std::fs::write(out_file, assembly)?;

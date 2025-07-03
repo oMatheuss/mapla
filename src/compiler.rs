@@ -2,7 +2,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::asm::{AsmBuilder, Imm, Lbl, Mem, MemBase, MemSize, MemSized, Operand, Reg, Xmm};
+use crate::asm::{
+    AsmBuilder, BaseOperandManager, Imm, Lbl, Mem, MemSize, MemSized, Operand, OperandManager, Reg,
+    RegManager, Xmm,
+};
 use crate::ast::{
     Annotated, Annotation, Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier,
     Indexing, Operator, TypeAnnot, UnaryOp, UnaryOperator, ValueExpr, VarType,
@@ -12,20 +15,22 @@ use crate::target::CompilerTarget;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct MemAlloc {
+    // actual stack offset of local variables
     local_off: isize,
+
+    // actual stack offset of temp variables
     temp_off: isize,
+
+    // max stack size needed for a function call
+    max_func: usize,
+
+    // max stack offset needed temp variables
     max_temp_off: isize,
 }
 
 impl MemAlloc {
     pub fn get_max(&self) -> i64 {
-        let total = self.local_off.abs() + self.max_temp_off.abs();
-        return total as i64;
-    }
-
-    pub fn get_allocated(&self) -> i64 {
-        let total = self.local_off.abs() + self.local_off.abs();
-        return total as i64;
+        self.local_off.abs() as i64 + self.max_temp_off.abs() as i64 + self.max_func as i64
     }
 }
 
@@ -107,6 +112,13 @@ impl Scope {
         Operand::Mem(Mem::offset(Reg::Rbp, offset, mem_size))
     }
 
+    fn new_call(&mut self, call_size: usize) {
+        let mut mem = self.mem.borrow_mut();
+        if call_size > mem.max_func {
+            mem.max_func = call_size;
+        }
+    }
+
     #[inline]
     fn reset_temps(&mut self) {
         self.mem.borrow_mut().temp_off = 0;
@@ -141,132 +153,13 @@ impl MemSized for TypeAnnot {
     }
 }
 
-struct RegManager {
-    registers: HashMap<&'static str, bool>,
-}
-
-impl RegManager {
-    const NAMES: &[&str] = &["acc", "cnt", "dta", "bse", "src", "dst", "r8", "r9", "r10"];
-
-    fn name(reg: Reg) -> &'static str {
-        match reg {
-            Reg::Rax | Reg::Eax | Reg::Ax | Reg::Ah | Reg::Al => Self::NAMES[0],
-            Reg::Rcx | Reg::Ecx | Reg::Cx | Reg::Ch | Reg::Cl => Self::NAMES[1],
-            Reg::Rdx | Reg::Edx | Reg::Dx | Reg::Dh | Reg::Dl => Self::NAMES[2],
-            Reg::Rbx | Reg::Ebx | Reg::Bx | Reg::Bh | Reg::Bl => Self::NAMES[3],
-            Reg::Rsp | Reg::Esp | Reg::Sp | Reg::Spl => todo!(),
-            Reg::Rbp | Reg::Ebp | Reg::Bp | Reg::Bpl => todo!(),
-            Reg::Rsi | Reg::Esi | Reg::Si | Reg::Sil => Self::NAMES[4],
-            Reg::Rdi | Reg::Edi | Reg::Di | Reg::Dil => Self::NAMES[5],
-            Reg::R8 | Reg::R8D | Reg::R8W => Self::NAMES[6],
-            Reg::R9 | Reg::R9D | Reg::R9W => Self::NAMES[7],
-            Reg::R10 | Reg::R10D | Reg::R10W => Self::NAMES[8],
-            Reg::R11 | Reg::R11D | Reg::R11W => todo!(),
-            Reg::R12 | Reg::R12D | Reg::R12W => todo!(),
-            Reg::R13 | Reg::R13D | Reg::R13W => todo!(),
-            Reg::R14 | Reg::R14D | Reg::R14W => todo!(),
-            Reg::R15 | Reg::R15D | Reg::R15W => todo!(),
-        }
-    }
-
-    fn new() -> Self {
-        let mut registers = HashMap::with_capacity(Self::NAMES.len());
-        Self::NAMES
-            .iter()
-            .for_each(|name| _ = registers.insert(*name, false));
-        Self { registers }
-    }
-
-    fn get_reg(name: &str, mem_size: MemSize) -> Reg {
-        match name {
-            "acc" => Reg::acc(mem_size),
-            "cnt" => Reg::cnt(mem_size),
-            "dta" => Reg::dta(mem_size),
-            "bse" => Reg::bse(mem_size),
-            "src" => Reg::src(mem_size),
-            "dst" => Reg::dst(mem_size),
-            "r8" => Reg::r8(mem_size),
-            "r9" => Reg::r9(mem_size),
-            "r10" => Reg::r10(mem_size),
-            _ => panic!("register does not exists"),
-        }
-    }
-
-    fn push(&mut self, reg: Reg) {
-        match self.registers.get_mut(Self::name(reg)) {
-            Some(false) => {}
-            Some(in_use) => *in_use = false,
-            None => panic!("register does not exists"),
-        };
-    }
-
-    fn take(&mut self, reg: Reg) {
-        match self.registers.get_mut(Self::name(reg)) {
-            Some(true) => panic!("register is already in use"),
-            Some(in_use) => *in_use = true,
-            None => panic!("register does not exists"),
-        };
-    }
-
-    fn take_any(&mut self, mem_size: MemSize) -> Reg {
-        let reg = self
-            .registers
-            .iter_mut()
-            .find(|r| !*r.1)
-            .expect("any register available");
-
-        *reg.1 = true;
-        Self::get_reg(reg.0, mem_size)
-    }
-
-    fn switch_size(&mut self, reg: Reg, mem_size: MemSize) -> Reg {
-        Self::get_reg(Self::name(reg), mem_size)
-    }
-
-    fn cdecl(target: CompilerTarget) -> &'static [&'static str] {
-        match target {
-            CompilerTarget::Linux => &["dst", "src", "dta", "cnt", "r8", "r9"],
-            CompilerTarget::Windows => &["cnt", "dta", "r8", "r9"],
-        }
-    }
-
-    fn reserve_cdecl(&mut self, target: CompilerTarget) {
-        for reg in Self::cdecl(target) {
-            if let Some(in_use) = self.registers.get_mut(reg) {
-                *in_use = true;
-            }
-        }
-    }
-
-    fn release_cdecl(&mut self, target: CompilerTarget) {
-        for reg in Self::cdecl(target) {
-            if let Some(in_use) = self.registers.get_mut(reg) {
-                *in_use = false;
-            }
-        }
-    }
-
-    fn try_push(&mut self, operand: Operand) {
-        match operand {
-            Operand::Reg(reg) => self.push(reg),
-            Operand::Mem(mem) => match mem.base() {
-                MemBase::Reg(reg) => match reg {
-                    Reg::Rbp | Reg::Rsp => {}
-                    _ => self.push(reg),
-                },
-                MemBase::Lbl(..) => {}
-            },
-            _ => {}
-        }
-    }
-}
-
 pub struct Compiler {
     code: AsmBuilder,
     scope: Scope,
     data: AsmData,
     target: CompilerTarget,
-    regs: RegManager,
+    regs: RegManager<Reg>,
+    xmms: RegManager<Xmm>,
 }
 
 impl Compiler {
@@ -277,10 +170,11 @@ impl Compiler {
             data: AsmData::new(),
             target,
             regs: RegManager::new(),
+            xmms: RegManager::new(),
         }
     }
 
-    pub fn prologue(mut self) -> Self {
+    pub fn prolog(mut self) -> Self {
         self.code.bits(64);
         self.code.section("text");
         self.code.global(&["main"]);
@@ -303,7 +197,7 @@ impl Compiler {
         self
     }
 
-    pub fn epilogue(mut self) -> Self {
+    pub fn epilog(mut self) -> Self {
         if !self.data.is_empty() {
             self.code.section("data");
 
@@ -338,27 +232,57 @@ fn cdecl(c: &mut Compiler, arg_num: usize, mem_size: MemSize) -> Option<Reg> {
     Some(reg)
 }
 
+fn cdecl_f(c: &mut Compiler, arg_num: usize, mem_size: MemSize) -> Option<Xmm> {
+    let xmm = match (c.target, arg_num) {
+        (CompilerTarget::Linux | CompilerTarget::Windows, 0) => Xmm::xmm(0, mem_size),
+        (CompilerTarget::Linux | CompilerTarget::Windows, 1) => Xmm::xmm(1, mem_size),
+        (CompilerTarget::Linux | CompilerTarget::Windows, 2) => Xmm::xmm(2, mem_size),
+        (CompilerTarget::Linux | CompilerTarget::Windows, 3) => Xmm::xmm(3, mem_size),
+        (CompilerTarget::Linux, 4) => Xmm::xmm(4, mem_size),
+        (CompilerTarget::Linux, 5) => Xmm::xmm(5, mem_size),
+        (CompilerTarget::Linux, 6) => Xmm::xmm(6, mem_size),
+        (CompilerTarget::Linux, 7) => Xmm::xmm(7, mem_size),
+
+        (_, _) => return None,
+    };
+    Some(xmm)
+}
+
+fn reserve_cdecl(c: &mut Compiler) {
+    let regs: &[Reg] = match c.target {
+        CompilerTarget::Linux => &[Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9],
+        CompilerTarget::Windows => &[Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9],
+    };
+    for reg in regs {
+        c.regs.take(*reg);
+    }
+}
+
+fn release_cdecl(c: &mut Compiler) {
+    let regs: &[Reg] = match c.target {
+        CompilerTarget::Linux => &[Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9],
+        CompilerTarget::Windows => &[Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9],
+    };
+    for reg in regs {
+        c.regs.push(*reg);
+    }
+}
+
 fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
     match operand {
-        Operand::Xmm(xmm) if !xmm.is_xmm0() => {
-            let xmm0 = Xmm::xmm0(xmm.mem_size());
-            c.code.movss(xmm0, xmm);
-            Operand::Xmm(xmm0)
-        }
         Operand::Mem(mem) if annot.is_float() => {
-            let xmm = Xmm::xmm0(mem.mem_size());
+            let xmm = c.xmms.take_any(mem.mem_size());
             c.code.movss(xmm, mem);
             Operand::Xmm(xmm)
         }
         Operand::Reg(reg) if annot.is_float() => {
-            let mem = c.scope.new_temp(reg.mem_size());
-            let xmm = Xmm::xmm0(mem.mem_size());
-            c.code.mov(mem, reg);
-            c.code.movss(xmm, mem);
+            c.regs.push(reg);
+            let xmm = c.xmms.take_any(reg.mem_size());
+            c.code.movd(xmm, reg);
             Operand::Xmm(xmm)
         }
         Operand::Imm(imm) if annot.is_float() => {
-            let xmm = Xmm::xmm0(imm.mem_size());
+            let xmm = c.xmms.take_any(imm.mem_size());
             let tmp = c.scope.new_temp(imm.mem_size());
             c.code.mov(tmp, imm);
             c.code.movss(xmm, tmp);
@@ -367,7 +291,6 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
         Operand::Mem(..) => {
             let reg = c.regs.take_any(operand.mem_size());
             c.code.mov(reg, operand);
-            c.regs.try_push(operand);
             Operand::Reg(reg)
         }
         Operand::Imm(..) => {
@@ -379,10 +302,10 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
     }
 }
 
-/// This function will try to clear the default operation registers (Rax and Xmm0)
 fn move_reg_to_mem(c: &mut Compiler, operand: Operand) -> Operand {
     match operand {
         Operand::Xmm(xmm) => {
+            c.xmms.push(xmm);
             let tmp = c.scope.new_temp(xmm.mem_size());
             c.code.movss(tmp, xmm);
             tmp
@@ -425,10 +348,10 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
 }
 
 fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
-    let operator = bin_op.operator();
+    let ope = bin_op.operator();
     let annot = bin_op.get_annot();
 
-    let (lhs, rhs) = if operator.is_assign() {
+    let (lhs, rhs) = if ope.is_assign() {
         let rhs = compile_expr_rec(c, bin_op.rhs());
         let rhs = move_operand_to_reg(c, annot, rhs);
 
@@ -455,8 +378,8 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
     };
 
     match annot.is_float() {
-        true => compile_fop(c, operator, lhs, rhs),
-        false => compile_iop(c, operator, lhs, rhs),
+        true => compile_fop(c, ope, lhs, rhs),
+        false => compile_iop(c, ope, lhs, rhs),
     }
 }
 
@@ -464,38 +387,48 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
     assert!(ope.is_assign() == lhs.is_mem());
     assert!(lhs.mem_size() == rhs.mem_size());
 
-    c.regs.try_push(rhs);
-
-    match ope {
+    let result = match ope {
         Operator::Equal => {
+            let reg = c.regs.take_any(MemSize::Byte);
+            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.sete(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.sete(reg);
+            Operand::Reg(reg)
         }
         Operator::NotEqual => {
+            let reg = c.regs.take_any(MemSize::Byte);
+            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setne(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.setne(reg);
+            Operand::Reg(reg)
         }
         Operator::Greater => {
+            let reg = c.regs.take_any(MemSize::Byte);
+            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setg(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.setg(reg);
+            Operand::Reg(reg)
         }
         Operator::GreaterEqual => {
+            let reg = c.regs.take_any(MemSize::Byte);
+            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setge(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.setge(reg);
+            Operand::Reg(reg)
         }
         Operator::Less => {
+            let reg = c.regs.take_any(MemSize::Byte);
+            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setl(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.setl(reg);
+            Operand::Reg(reg)
         }
         Operator::LessEqual => {
+            let reg = c.regs.take_any(MemSize::Byte);
+            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setle(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.setle(reg);
+            Operand::Reg(reg)
         }
         Operator::And => {
             c.code.and(lhs, rhs);
@@ -518,24 +451,48 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             lhs
         }
         Operator::Div => {
-            assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
-            if rhs.is_imm() {
-                c.code.mov(Reg::Ebx, rhs);
-                rhs = Operand::Reg(Reg::Ebx);
-            }
+            rhs = move_operand_to_reg(c, TypeAnnot::INT, rhs);
+            let (acc, bkp) = match lhs {
+                Operand::Reg(acc) if acc.is_acc() => (acc, None),
+                _ => {
+                    let bkp = c.regs.take_any(MemSize::QWord);
+                    let acc = Reg::acc(lhs.mem_size());
+                    c.code.mov(bkp, Reg::acc(MemSize::QWord));
+                    c.code.mov(acc, lhs);
+                    (acc, Some(bkp))
+                }
+            };
+            // TODO: also backup Edx
+            c.regs.ensure(Reg::Edx);
             c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
             c.code.idiv(rhs); // divisor (rhs)
+            if let Some(reg) = bkp {
+                c.regs.push(reg);
+                c.code.mov(lhs, acc);
+                c.code.mov(Reg::acc(MemSize::QWord), reg);
+            }
             lhs
         }
         Operator::Mod => {
-            assert!(matches!(lhs, Operand::Reg(Reg::Eax)));
-            if rhs.is_imm() {
-                c.code.mov(Reg::Ebx, rhs);
-                rhs = Operand::Reg(Reg::Ebx);
-            }
+            rhs = move_operand_to_reg(c, TypeAnnot::INT, rhs);
+            let bkp = match lhs {
+                Operand::Reg(acc) if acc.is_acc() => None,
+                _ => {
+                    let bkp = c.regs.take_any(MemSize::QWord);
+                    c.code.mov(bkp, Reg::acc(MemSize::QWord));
+                    c.code.mov(Reg::acc(lhs.mem_size()), lhs);
+                    Some(bkp)
+                }
+            };
+            // TODO: also backup Edx
+            c.regs.ensure(Reg::Edx);
             c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
             c.code.idiv(rhs); // divisor (rhs)
-            c.code.mov(lhs, Reg::Edx);
+            if let Some(reg) = bkp {
+                c.regs.push(reg);
+                c.code.mov(Reg::acc(MemSize::QWord), reg);
+            }
+            c.code.mov(lhs, Reg::dta(lhs.mem_size()));
             lhs
         }
         Operator::Assign => {
@@ -567,10 +524,14 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             c.regs.push(reg);
             lhs
         }
-    }
+    };
+
+    c.regs.try_push(rhs);
+
+    result
 }
 
-fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
+fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
     if let Operand::Imm(imm) = rhs {
         rhs = c.scope.new_temp(imm.mem_size());
         c.code.mov(rhs, imm);
@@ -578,19 +539,21 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
 
     assert!(lhs.mem_size() == rhs.mem_size());
 
-    match operator {
+    let result = match ope {
         Operator::Equal => todo!(),
         Operator::NotEqual => todo!(),
         Operator::Greater => {
+            let reg = c.regs.take_any(MemSize::Byte);
             c.code.comiss(lhs, rhs);
-            c.code.setg(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.setg(reg);
+            Operand::Reg(reg)
         }
         Operator::GreaterEqual => todo!(),
         Operator::Less => {
+            let reg = c.regs.take_any(MemSize::Byte);
             c.code.comiss(lhs, rhs);
-            c.code.setl(Reg::Al);
-            Operand::Reg(Reg::Al)
+            c.code.setl(reg);
+            Operand::Reg(reg)
         }
         Operator::LessEqual => todo!(),
         Operator::And => todo!(),
@@ -619,7 +582,7 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
         }
         Operator::AddAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = Xmm::xmm1(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size());
             c.code.movss(xmm, lhs);
             c.code.addss(xmm, rhs);
             c.code.movss(lhs, xmm);
@@ -627,7 +590,7 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
         }
         Operator::SubAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = Xmm::xmm1(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size());
             c.code.movss(xmm, lhs);
             c.code.subss(xmm, rhs);
             c.code.movss(lhs, xmm);
@@ -635,7 +598,7 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
         }
         Operator::MulAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = Xmm::xmm1(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size());
             c.code.movss(xmm, lhs);
             c.code.mulss(xmm, rhs);
             c.code.movss(lhs, xmm);
@@ -643,42 +606,55 @@ fn compile_fop(c: &mut Compiler, operator: Operator, lhs: Operand, mut rhs: Oper
         }
         Operator::DivAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = Xmm::xmm1(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size());
             c.code.divss(xmm, lhs);
             c.code.addss(xmm, rhs);
             c.code.movss(lhs, xmm);
             lhs
         }
-    }
+    };
+
+    c.xmms.try_push(rhs);
+
+    result
 }
 
 fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
-    c.regs.reserve_cdecl(c.target);
+    reserve_cdecl(c);
 
-    let stack_size = c.scope.mem.borrow().get_allocated();
-    let mut allocation = 0;
-
-    if c.target.is_windows() {
-        // allocate shadow space
-        allocation += 32;
-    }
-
-    allocation += (stack_size + allocation + 8) % 16;
-    c.code.sub(Reg::Rsp, Imm::Int64(allocation));
+    let mut stack_offset = match c.target {
+        CompilerTarget::Linux => 0,
+        CompilerTarget::Windows => 32,
+    };
 
     for (arg_num, arg) in func.args().iter().enumerate().rev() {
+        let annot = arg.get_annot();
         let arg = compile_expr_rec(c, arg);
-        let mem_size = arg.mem_size();
 
-        if let Some(reg) = cdecl(c, arg_num, mem_size) {
+        let reg = cdecl(c, arg_num, annot.mem_size());
+        let xmm = cdecl_f(c, arg_num, annot.mem_size());
+
+        if let Some(reg) = reg {
             match arg {
-                Operand::Xmm(..) => todo!("implement float registers"),
+                Operand::Xmm(xmm) => c.code.movd(reg, xmm),
                 _ => c.code.mov(reg, arg),
             }
-        } else {
-            let mem = Mem::reg(Reg::Rsp, mem_size);
-            // TODO: allocate space for parameters all at once
-            c.code.sub(Reg::Rsp, Imm::Int64(mem_size as i64));
+        }
+
+        if annot.is_float() {
+            // if expression is float also copy to xmm registers
+            let xmm = xmm.unwrap();
+            match arg {
+                Operand::Xmm(arg) if arg == xmm => {}
+                Operand::Xmm(..) | Operand::Mem(..) | Operand::Imm(..) => c.code.movss(xmm, arg),
+                Operand::Reg(reg) => c.code.movd(xmm, reg),
+            }
+        }
+
+        if reg.is_none() {
+            let mem_size = arg.mem_size();
+            let mem = Mem::offset(Reg::Rsp, stack_offset, mem_size);
+            stack_offset += MemSize::QWord as isize;
 
             match arg {
                 Operand::Xmm(..) => c.code.movss(mem, arg),
@@ -695,13 +671,13 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
                 _ => c.code.mov(mem, arg),
             }
         }
+
         c.regs.try_push(arg);
     }
 
     c.code.call(func.name());
-    c.regs.release_cdecl(c.target);
-
-    c.code.add(Reg::Rsp, Imm::Int64(allocation));
+    c.scope.new_call(stack_offset as usize);
+    release_cdecl(c);
 
     let func_annot = func.get_annot();
     if !func_annot.is_void() {
@@ -769,11 +745,11 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     }
                     Operand::Xmm(xmm) => {
                         let tmp = c.scope.new_temp(xmm.mem_size());
+                        c.xmms.push(xmm);
                         c.code.movss(tmp, xmm);
                         c.code.xor(tmp, Imm::Int32(MINUS_BIT as i32));
                         tmp
                     }
-                    _ => panic!("operator minus could not be applied"),
                 }
             }
         }
@@ -797,7 +773,6 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     c.code.not(tmp);
                     tmp
                 }
-                _ => panic!("operator minus could not be applied"),
             }
         }
     }
@@ -860,6 +835,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                         c.regs.push(reg);
                     }
                     Operand::Xmm(xmm) => {
+                        c.xmms.push(xmm);
                         c.code.movss(local, xmm);
                     }
                     Operand::Mem(mem) => {
@@ -868,7 +844,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                         c.code.mov(local, reg);
                         c.regs.push(reg);
                     }
-                    Operand::Imm(..) | Operand::Lbl(..) => {
+                    Operand::Imm(..) => {
                         c.code.mov(local, result);
                     }
                 }
@@ -970,20 +946,65 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
         }
         AstNode::Ret(expr) => {
             let result = compile_expr(c, expr);
-            if !matches!(result, Operand::Reg(reg) if reg.is_acc()) {
-                let reg = Reg::acc(result.mem_size());
-                c.code.mov(reg, result);
+            if expr.get_annot().is_float() {
+                let xmm0 = Xmm::xmm0(result.mem_size());
+                if !matches!(result, Operand::Xmm(xmm) if xmm.is_xmm0()) {
+                    match result {
+                        Operand::Reg(reg) => {
+                            c.regs.push(reg);
+                            c.code.movd(xmm0, reg);
+                        }
+                        Operand::Xmm(xmm) => {
+                            c.xmms.push(xmm);
+                            c.code.movss(xmm0, xmm);
+                        }
+                        Operand::Mem(mem) => {
+                            c.regs.try_push(result);
+                            c.code.movss(xmm0, mem);
+                        }
+                        Operand::Imm(imm) => {
+                            let tmp = c.scope.new_temp(imm.mem_size());
+                            c.code.mov(tmp, imm);
+                            c.code.mov(xmm0, tmp);
+                        }
+                    }
+                } else {
+                    c.xmms.push(xmm0);
+                }
+            } else {
+                let acc = Reg::acc(result.mem_size());
+                if !matches!(result, Operand::Reg(reg) if reg.is_acc()) {
+                    match result {
+                        Operand::Reg(reg) => {
+                            c.regs.push(reg);
+                            c.code.mov(acc, reg);
+                        }
+                        Operand::Mem(..) | Operand::Imm(..) => {
+                            c.regs.try_push(result);
+                            c.code.mov(acc, result);
+                        }
+                        Operand::Xmm(xmm) => {
+                            c.xmms.push(xmm);
+                            let tmp = c.scope.new_temp(xmm.mem_size());
+                            c.code.movss(tmp, xmm);
+                            c.code.mov(acc, tmp);
+                        }
+                    }
+                } else {
+                    c.regs.push(acc);
+                }
             }
-            c.regs.try_push(result);
             c.code.jmp(".R");
         }
         _ => {}
     }
 }
 
-fn set_args(c: &mut Compiler, args: &[Argument]) -> usize {
-    let mem_offset = 16; // rip + rbp
-    let mut args_size = 0;
+fn set_args(c: &mut Compiler, args: &[Argument]) {
+    let mut mem_offset = match c.target {
+        CompilerTarget::Linux => 16, // rip + rbp
+        CompilerTarget::Windows => 48, // rip + rbp + shadow space
+    };
     for (arg_num, arg) in args.iter().enumerate() {
         let Argument { name, annot } = arg;
         let mem_size = annot.mem_size();
@@ -991,13 +1012,11 @@ fn set_args(c: &mut Compiler, args: &[Argument]) -> usize {
             let addr = c.scope.new_local(name, mem_size);
             c.code.mov(addr, reg);
         } else {
-            let offset = mem_offset + args_size as isize;
-            args_size += mem_size as usize;
-            let addr = Mem::offset(Reg::Rbp, offset, mem_size);
+            mem_offset += MemSize::QWord as isize;
+            let addr = Mem::offset(Reg::Rbp, mem_offset, mem_size);
             c.scope.set(name, addr);
         }
     }
-    return args_size;
 }
 
 fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
@@ -1006,7 +1025,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
 
     c.scope.new_inner();
 
-    let args_size = set_args(c, args);
+    set_args(c, args);
 
     let mut code = std::mem::take(&mut c.code);
 
@@ -1016,6 +1035,8 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
 
     let total_mem = c.scope.mem.borrow().get_max();
     if total_mem > 0 {
+        // align by 16
+        let total_mem = total_mem + (16 - total_mem % 16);
         code.sub(Reg::Rsp, Imm::Int64(total_mem));
     }
 
@@ -1026,5 +1047,5 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
 
     c.code.label(".R");
     c.code.pop_sf();
-    c.code.ret(args_size);
+    c.code.ret(0);
 }
