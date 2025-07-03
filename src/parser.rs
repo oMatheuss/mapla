@@ -375,17 +375,22 @@ impl<'a> Parser<'a> {
 
     fn consume_var(&mut self, ty: VarType) -> Result<AstNode> {
         self.next(); // discard var type token
-        let annot = if let Some(Token::OpenBracket) = self.peek() {
-            self.next_or_err()?; // discard open bracket
-            let ValueExpr::Int(size) = self.parse_value()? else {
-                Error::syntatic("expected integer value", self.pos)?
-            };
-            let Token::CloseBracket = self.next_or_err()? else {
-                Error::syntatic("expected close bracket", self.pos)?
-            };
-            TypeAnnot::new_array(ty, size as u32)
-        } else {
-            TypeAnnot::new(ty)
+        let annot = match self.peek() {
+            Some(Token::OpenBracket) => {
+                self.next_or_err()?; // discard open bracket
+                let ValueExpr::Int(size) = self.parse_value()? else {
+                    Error::syntatic("expected integer value", self.pos)?
+                };
+                let Token::CloseBracket = self.next_or_err()? else {
+                    Error::syntatic("expected close bracket", self.pos)?
+                };
+                TypeAnnot::new_array(ty, size as u32)
+            }
+            Some(Token::Mul) => {
+                self.next_or_err()?; // discard asterisk
+                TypeAnnot::new_ptr(ty)
+            }
+            _ => TypeAnnot::new(ty),
         };
         let id_pos = self.pos;
         let Token::Identifier(ident) = *self.next_or_err()? else {
