@@ -1,0 +1,28 @@
+extern func __main();
+
+extern func InitWindow(width: int, height: int, title: char*);
+extern func SetTargetFPS(fps: int);
+extern func WindowShouldClose(): bool;
+extern func BeginDrawing();
+extern func ClearBackground(color: int);
+extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: int);
+extern func EndDrawing();
+
+func main(): int do
+    __main();
+
+    InitWindow(800, 450, "RayLib Example");
+    SetTargetFPS(60);
+
+    int BLACK = 0;
+    int RED = -16776961;
+
+    while WindowShouldClose() == false then
+        BeginDrawing();
+        ClearBackground(BLACK);
+        DrawText("Hello World", 190, 200, 20, RED);
+        EndDrawing();
+    end
+
+    return 0;
+end
