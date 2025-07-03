@@ -849,6 +849,13 @@ impl Operand {
             _ => false,
         }
     }
+
+    pub fn expect_reg(self) -> Reg {
+        match self {
+            Operand::Reg(reg) => reg,
+            _ => panic!("expected that operand was a register"),
+        }
+    }
 }
 
 impl MemSized for Operand {

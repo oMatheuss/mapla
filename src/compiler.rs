@@ -271,6 +271,7 @@ fn release_cdecl(c: &mut Compiler) {
 fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
     match operand {
         Operand::Mem(mem) if annot.is_float() => {
+            c.regs.try_push(operand);
             let xmm = c.xmms.take_any(mem.mem_size());
             c.code.movss(xmm, mem);
             Operand::Xmm(xmm)
@@ -288,33 +289,16 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
             c.code.movss(xmm, tmp);
             Operand::Xmm(xmm)
         }
-        Operand::Mem(..) => {
-            let reg = c.regs.take_any(operand.mem_size());
-            c.code.mov(reg, operand);
+        Operand::Mem(mem) => {
+            c.regs.try_push(operand);
+            let reg = c.regs.take_any(mem.mem_size());
+            c.code.mov(reg, mem);
             Operand::Reg(reg)
         }
-        Operand::Imm(..) => {
-            let reg = c.regs.take_any(operand.mem_size());
-            c.code.mov(reg, operand);
+        Operand::Imm(imm) => {
+            let reg = c.regs.take_any(imm.mem_size());
+            c.code.mov(reg, imm);
             Operand::Reg(reg)
-        }
-        _ => operand,
-    }
-}
-
-fn move_reg_to_mem(c: &mut Compiler, operand: Operand) -> Operand {
-    match operand {
-        Operand::Xmm(xmm) => {
-            c.xmms.push(xmm);
-            let tmp = c.scope.new_temp(xmm.mem_size());
-            c.code.movss(tmp, xmm);
-            tmp
-        }
-        Operand::Reg(reg) => {
-            c.regs.push(reg);
-            let tmp = c.scope.new_temp(reg.mem_size());
-            c.code.mov(tmp, reg);
-            tmp
         }
         _ => operand,
     }
@@ -360,19 +344,10 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
 
         (lhs, rhs)
     } else {
-        let mut lhs = compile_expr_rec(c, bin_op.lhs());
-
-        if !bin_op.rhs().is_value() {
-            if bin_op.lhs().is_index() {
-                lhs = move_operand_to_reg(c, annot, lhs);
-            }
-            lhs = move_reg_to_mem(c, lhs);
-        }
+        let lhs = compile_expr_rec(c, bin_op.lhs());
+        let lhs = move_operand_to_reg(c, annot, lhs);
 
         let rhs = compile_expr_rec(c, bin_op.rhs());
-        let rhs = move_reg_to_mem(c, rhs);
-
-        let lhs = move_operand_to_reg(c, annot, lhs);
 
         (lhs, rhs)
     };
@@ -389,46 +364,40 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
 
     let result = match ope {
         Operator::Equal => {
-            let reg = c.regs.take_any(MemSize::Byte);
-            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.sete(reg);
-            Operand::Reg(reg)
+            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
+            c.code.sete(lhs);
+            lhs
         }
         Operator::NotEqual => {
-            let reg = c.regs.take_any(MemSize::Byte);
-            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setne(reg);
-            Operand::Reg(reg)
+            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
+            c.code.setne(lhs);
+            lhs
         }
         Operator::Greater => {
-            let reg = c.regs.take_any(MemSize::Byte);
-            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setg(reg);
-            Operand::Reg(reg)
+            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
+            c.code.setg(lhs);
+            lhs
         }
         Operator::GreaterEqual => {
-            let reg = c.regs.take_any(MemSize::Byte);
-            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setge(reg);
-            Operand::Reg(reg)
+            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
+            c.code.setge(lhs);
+            lhs
         }
         Operator::Less => {
-            let reg = c.regs.take_any(MemSize::Byte);
-            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setl(reg);
-            Operand::Reg(reg)
+            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
+            c.code.setl(lhs);
+            lhs
         }
         Operator::LessEqual => {
-            let reg = c.regs.take_any(MemSize::Byte);
-            c.regs.try_push(lhs);
             c.code.cmp(lhs, rhs);
-            c.code.setle(reg);
-            Operand::Reg(reg)
+            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
+            c.code.setle(lhs);
+            lhs
         }
         Operator::And => {
             c.code.and(lhs, rhs);
@@ -782,8 +751,6 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     let size = index.get_annot().mem_size();
 
     let array = compile_value(c, index.array());
-    let array = move_reg_to_mem(c, array);
-
     let reg = match compile_expr_rec(c, index.index()) {
         Operand::Reg(reg) => reg,
         offset => {
@@ -797,6 +764,7 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     let reg = c.regs.switch_size(reg, MemSize::QWord);
     c.code.imul(reg, Imm::Int64(size as i64));
     c.code.add(reg, array);
+    c.regs.try_push(array);
 
     Operand::Mem(Mem::reg(reg, size))
 }
@@ -1002,7 +970,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
 fn set_args(c: &mut Compiler, args: &[Argument]) {
     let mut mem_offset = match c.target {
-        CompilerTarget::Linux => 16, // rip + rbp
+        CompilerTarget::Linux => 16,   // rip + rbp
         CompilerTarget::Windows => 48, // rip + rbp + shadow space
     };
     for (arg_num, arg) in args.iter().enumerate() {
