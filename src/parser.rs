@@ -3,8 +3,8 @@ use std::iter::Peekable;
 use std::slice::Iter;
 
 use crate::ast::{
-    Annotated, Argument, Ast, AstNode, Expression, Operator, TypeAnnot, UnaryOperator, ValueExpr,
-    VarType,
+    Annotated, Argument, Ast, AstNode, AstRoot, Expression, Operator, TypeAnnot, UnaryOperator,
+    ValueExpr, VarType,
 };
 use crate::error::{Error, Result};
 use crate::lexer::LexItem;
@@ -373,9 +373,8 @@ impl<'a> Parser<'a> {
         AstNode::If(expr, inner).ok()
     }
 
-    fn consume_var(&mut self, ty: VarType) -> Result<AstNode> {
-        self.next(); // discard var type token
-        let annot = match self.peek() {
+    fn parse_decl(&mut self, ty: VarType) -> Result<TypeAnnot> {
+        match self.peek() {
             Some(Token::OpenBracket) => {
                 self.next_or_err()?; // discard open bracket
                 let ValueExpr::Int(size) = self.parse_value()? else {
@@ -384,18 +383,23 @@ impl<'a> Parser<'a> {
                 let Token::CloseBracket = self.next_or_err()? else {
                     Error::syntatic("expected close bracket", self.pos)?
                 };
-                TypeAnnot::new_array(ty, size as u32)
+                Ok(TypeAnnot::new_array(ty, size as u32))
             }
             Some(Token::Mul) => {
                 self.next_or_err()?; // discard asterisk
-                TypeAnnot::new_ptr(ty)
+                Ok(TypeAnnot::new_ptr(ty))
             }
-            _ => TypeAnnot::new(ty),
-        };
-        let id_pos = self.pos;
+            _ => Ok(TypeAnnot::new(ty)),
+        }
+    }
+
+    fn consume_var(&mut self, ty: VarType) -> Result<AstNode> {
+        self.next(); // discard var type token
+        let annot = self.parse_decl(ty)?;
         let Token::Identifier(ident) = *self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
+        let id_pos = self.pos;
         let expr = if let Some(Token::Assign) = self.peek() {
             self.next_or_err()?; // discard assign signal
             let expr_pos = self.pos;
@@ -411,6 +415,30 @@ impl<'a> Parser<'a> {
         self.consume_semi()?;
         self.symbols.set(&ident, Symbol::new(id_pos, annot));
         AstNode::Var(annot, ident.into(), expr).ok()
+    }
+
+    fn consume_global(&mut self, ty: VarType) -> Result<AstRoot> {
+        self.next(); // discard var type token
+        let annot = self.parse_decl(ty)?;
+        let Token::Identifier(ident) = *self.next_or_err()? else {
+            Error::syntatic("expected identifier", self.pos)?
+        };
+        let id_pos = self.pos;
+        let expr = if let Some(Token::Assign) = self.peek() {
+            self.next_or_err()?; // discard assign signal
+            let expr_pos = self.pos;
+            let expr = self.parse_value()?;
+            let expr_annot = expr.get_annot();
+            if expr_annot != annot {
+                Error::syntatic(&format!("cannot assign {expr_annot} to {annot}"), expr_pos)?
+            }
+            Some(expr)
+        } else {
+            None
+        };
+        self.consume_semi()?;
+        self.symbols.set(&ident, Symbol::new(id_pos, annot));
+        AstRoot::Global(annot, ident.into(), expr).ok()
     }
 
     fn parse_annot(&mut self) -> Result<TypeAnnot> {
@@ -521,9 +549,9 @@ impl<'a> Parser<'a> {
         Ok(TypeAnnot::VOID)
     }
 
-    fn consume_func(&mut self) -> Result<AstNode> {
+    fn consume_func(&mut self) -> Result<AstRoot> {
         self.next(); // discard function token
-        let Token::Identifier(name) = self.next_or_err()? else {
+        let Token::Identifier(name) = *self.next_or_err()? else {
             Error::syntatic("expected name of the function", self.pos)?
         };
         let fn_pos = self.pos;
@@ -550,7 +578,7 @@ impl<'a> Parser<'a> {
 
         self.check_func(&inner, annot, fn_pos)?;
 
-        AstNode::Func((*name).into(), args, annot, inner).ok()
+        AstRoot::Func(name.into(), args, annot, inner).ok()
     }
 
     fn consume_ret(&mut self) -> Result<AstNode> {
@@ -561,7 +589,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn consume_extern(&mut self) -> Result<AstNode> {
+    fn consume_extern(&mut self) -> Result<AstRoot> {
         self.next_or_err()?; // discard extern token
         let Token::Function = self.next_or_err()? else {
             return Error::syntatic("expected `func` keyword", self.pos);
@@ -586,23 +614,21 @@ impl<'a> Parser<'a> {
 
         self.symbols.set_global(&name, Symbol::new(fn_pos, annot));
 
-        AstNode::ExternFunc(name.into(), args, annot).ok()
+        AstRoot::ExternFunc(name.into(), args, annot).ok()
     }
 
-    fn consume_use(&mut self) -> Result<AstNode> {
+    fn consume_use(&mut self) -> Result<AstRoot> {
         self.next(); // discard use token
-        let Token::Identifier(ident) = self.next_or_err()? else {
+        let Token::Identifier(ident) = *self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
         self.consume_semi()?;
-        AstNode::Use((*ident).into()).ok()
+        AstRoot::Use(ident.into()).ok()
     }
 
     #[inline]
-    fn match_token(&mut self, token: &Token<'_>) -> Result<AstNode> {
+    fn match_node(&mut self, token: &Token<'_>) -> Result<AstNode> {
         match token {
-            Token::Use => self.consume_use(),
-
             Token::If => self.consume_if(),
             Token::While => self.consume_while(),
             Token::For => self.consume_for(),
@@ -612,10 +638,6 @@ impl<'a> Parser<'a> {
             Token::Char => self.consume_var(VarType::Char),
             Token::Bool => self.consume_var(VarType::Bool),
 
-            Token::Function => self.consume_func(),
-            Token::Return => self.consume_ret(),
-            Token::Extern => self.consume_extern(),
-
             Token::OpenParen
             | Token::True
             | Token::False
@@ -623,6 +645,8 @@ impl<'a> Parser<'a> {
             | Token::FloatLiteral(..)
             | Token::StrLiteral(..)
             | Token::Identifier(..) => self.consume_expr(),
+
+            Token::Return => self.consume_ret(),
 
             Token::Eof | Token::End => panic!("token not allowed"),
             _ => Error::syntatic("wrong placement for this token", self.pos),
@@ -644,13 +668,31 @@ impl<'a> Parser<'a> {
                 return Error::syntatic("unexpected end of file", self.pos);
             }
 
-            let node = self.match_token(token)?;
+            let node = self.match_node(token)?;
             nodes.push(node);
         }
 
         self.symbols.exit_scope();
 
         Ok(nodes)
+    }
+
+    #[inline]
+    fn match_root(&mut self, token: &Token<'_>) -> Result<AstRoot> {
+        match token {
+            Token::Use => self.consume_use(),
+
+            Token::Int => self.consume_global(VarType::Int),
+            Token::Real => self.consume_global(VarType::Real),
+            Token::Char => self.consume_global(VarType::Char),
+            Token::Bool => self.consume_global(VarType::Bool),
+
+            Token::Function => self.consume_func(),
+            Token::Extern => self.consume_extern(),
+
+            Token::Eof | Token::End => panic!("token not allowed"),
+            _ => Error::syntatic("wrong placement for this token", self.pos),
+        }
     }
 
     pub fn parse(mut self) -> Result<Ast> {
@@ -660,8 +702,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            let node = self.match_token(token)?;
-            nodes.push(node);
+            nodes.push(self.match_root(token)?);
         }
 
         Ast::new(nodes).ok()

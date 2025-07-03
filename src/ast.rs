@@ -1,14 +1,12 @@
 #![allow(dead_code)]
 
-use std::ops::Deref;
-
 use crate::error::Result;
 
 #[derive(Debug)]
-pub struct Ast(Vec<AstNode>);
+pub struct Ast(Vec<AstRoot>);
 
 impl Ast {
-    pub fn new(nodes: Vec<AstNode>) -> Self {
+    pub fn new(nodes: Vec<AstRoot>) -> Self {
         Self(nodes)
     }
 
@@ -19,7 +17,7 @@ impl Ast {
 }
 
 impl std::ops::Deref for Ast {
-    type Target = [AstNode];
+    type Target = [AstRoot];
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -160,7 +158,7 @@ impl PartialEq<str> for Identifier {
     }
 }
 
-impl Deref for Identifier {
+impl std::ops::Deref for Identifier {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -442,15 +440,27 @@ impl Annotated for Argument {
 }
 
 #[derive(Debug)]
-pub enum AstNode {
+pub enum AstRoot {
     Use(Identifier),
+    Global(TypeAnnot, Identifier, Option<ValueExpr>),
+    Func(Identifier, Vec<Argument>, TypeAnnot, Vec<AstNode>),
+    ExternFunc(Identifier, Vec<Argument>, TypeAnnot),
+}
+
+impl AstRoot {
+    #[inline]
+    pub fn ok(self) -> Result<Self> {
+        Ok(self)
+    }
+}
+
+#[derive(Debug)]
+pub enum AstNode {
     Var(TypeAnnot, Identifier, Option<Expression>),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),
     For(Identifier, Option<ValueExpr>, ValueExpr, Vec<AstNode>),
     Expr(Expression),
-    Func(Identifier, Vec<Argument>, TypeAnnot, Vec<AstNode>),
-    ExternFunc(Identifier, Vec<Argument>, TypeAnnot),
     Ret(Expression),
 }
 

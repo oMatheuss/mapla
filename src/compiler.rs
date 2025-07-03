@@ -7,8 +7,8 @@ use crate::asm::{
     RegManager, Xmm,
 };
 use crate::ast::{
-    Annotated, Annotation, Argument, Ast, AstNode, BinaryOp, Expression, FunctionCall, Identifier,
-    Indexing, Operator, TypeAnnot, UnaryOp, UnaryOperator, ValueExpr, VarType,
+    Annotated, Annotation, Argument, Ast, AstNode, AstRoot, BinaryOp, Expression, FunctionCall,
+    Identifier, Indexing, Operator, TypeAnnot, UnaryOp, UnaryOperator, ValueExpr, VarType,
 };
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
@@ -184,14 +184,12 @@ impl Compiler {
     pub fn compile(mut self, ast: Ast) -> Self {
         for node in ast.iter() {
             match node {
-                AstNode::Use(ident) => intrisic(&ident, &mut self.code, self.target),
-                AstNode::Func(ident, args, _, ast_nodes) => {
+                AstRoot::Use(ident) => intrisic(&ident, &mut self.code, self.target),
+                AstRoot::Func(ident, args, _, ast_nodes) => {
                     compile_func(&mut self, ident, args, ast_nodes);
                 }
-                AstNode::ExternFunc(name, ..) => {
-                    self.code.extrn(&[name]);
-                }
-                _ => {}
+                AstRoot::ExternFunc(name, ..) => self.code.extrn(&[name]),
+                AstRoot::Global(..) => todo!(),
             }
         }
         self
@@ -964,7 +962,6 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
             }
             c.code.jmp(".R");
         }
-        _ => {}
     }
 }
 
