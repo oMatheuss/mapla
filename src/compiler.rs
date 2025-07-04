@@ -1020,7 +1020,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
 
     compile_args(c, args);
 
-    let code = std::mem::take(&mut c.code);
+    let mut code = std::mem::take(&mut c.code);
 
     for inner in nodes {
         compile_node(c, inner);
@@ -1030,7 +1030,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
     if total_mem > 0 {
         // align by 16
         let total_mem = total_mem + (16 - total_mem % 16);
-        asm::code!(c.code, Sub, Reg::Rsp, Imm::Int64(total_mem));
+        asm::code!(code, Sub, Reg::Rsp, Imm::Int64(total_mem));
     }
 
     let inner_code = std::mem::replace(&mut c.code, code);
