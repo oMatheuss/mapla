@@ -126,98 +126,40 @@ impl Display for OpCode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[rustfmt::skip]
 pub enum Reg {
     // accumulator
-    Rax,
-    Eax,
-    Ax,
-    Ah,
-    Al,
+    Rax, Eax, Ax, Ah, Al,
 
     // counter
-    Rcx,
-    Ecx,
-    Cx,
-    Ch,
-    Cl,
+    Rcx, Ecx, Cx, Ch, Cl,
 
     // data
-    Rdx,
-    Edx,
-    Dx,
-    Dh,
-    Dl,
+    Rdx, Edx, Dx, Dh, Dl,
 
     // base
-    Rbx,
-    Ebx,
-    Bx,
-    Bh,
-    Bl,
+    Rbx, Ebx, Bx, Bh, Bl,
 
     // stack pointer
-    Rsp,
-    Esp,
-    Sp,
-    Spl,
+    Rsp, Esp, Sp, Spl,
 
     // base pointer
-    Rbp,
-    Ebp,
-    Bp,
-    Bpl,
+    Rbp, Ebp, Bp, Bpl,
 
     // source index
-    Rsi,
-    Esi,
-    Si,
-    Sil,
+    Rsi, Esi, Si, Sil,
 
     // destination index
-    Rdi,
-    Edi,
-    Di,
-    Dil,
+    Rdi, Edi, Di, Dil,
 
-    R8,
-    R8D,
-    R8W,
-    R8B,
-
-    R9,
-    R9D,
-    R9W,
-    R9B,
-
-    R10,
-    R10D,
-    R10W,
-    R10B,
-
-    R11,
-    R11D,
-    R11W,
-    R11B,
-
-    R12,
-    R12D,
-    R12W,
-    R12B,
-
-    R13,
-    R13D,
-    R13W,
-    R13B,
-
-    R14,
-    R14D,
-    R14W,
-    R14B,
-
-    R15,
-    R15D,
-    R15W,
-    R15B,
+    R8,  R8D, R8W, R8B,
+    R9,  R9D, R9W, R9B,
+    R10, R10D, R10W, R10B,
+    R11, R11D, R11W, R11B,
+    R12, R12D, R12W, R12B,
+    R13, R13D, R13W, R13B,
+    R14, R14D, R14W, R14B,
+    R15, R15D, R15W, R15B,
 }
 
 impl Display for Reg {
@@ -756,13 +698,25 @@ impl Display for Xmm {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Lbl(u64);
+pub struct Lbl {
+    hash: u64,
+    prefix: &'static str,
+}
 
 impl Lbl {
+    const L_STR: &'static str = "str";
+
     pub fn from_str(slice: &str) -> Self {
         let mut state = std::hash::DefaultHasher::new();
         std::hash::Hash::hash_slice(slice.as_bytes(), &mut state);
-        Self(state.finish())
+        Self {
+            hash: state.finish(),
+            prefix: Self::L_STR,
+        }
+    }
+
+    pub fn from_id(_id: &str) -> Self {
+        todo!("custom label is not supported yet")
     }
 }
 
@@ -774,7 +728,7 @@ impl MemSized for Lbl {
 
 impl Display for Lbl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "D{:x}", self.0)
+        write!(f, "L.{}.{:x}", self.prefix, self.hash)
     }
 }
 
@@ -1049,6 +1003,29 @@ impl OperandManager<Xmm> for RegManager<Xmm> {
     }
 }
 
+macro_rules! code {
+    ($builder:expr, $opcode:ident) => {{
+        use $crate::asm::OpCode::$opcode;
+        ::core::writeln!($builder, "  {}", $opcode);
+    }};
+
+    ($builder:expr, $opcode:ident, $dst:expr) => {{
+        use $crate::asm::OpCode::$opcode;
+        ::core::writeln!($builder, "  {} {}", $opcode, $dst);
+    }};
+
+    ($builder:expr, $opcode:ident, $dst:expr, $src:expr) => {{
+        use $crate::asm::OpCode::$opcode;
+        ::core::writeln!($builder, "  {} {}, {}", $opcode, $dst, $src);
+    }};
+
+    ($builder:expr, $($arg:tt)*) => {
+        ::core::writeln!($builder, $($arg)*)
+    };
+}
+
+pub(crate) use code;
+
 #[derive(Debug, Default)]
 pub struct AsmBuilder(String);
 
@@ -1057,332 +1034,12 @@ impl AsmBuilder {
         Self(String::new())
     }
 
-    fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) {
+    pub fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) {
         let _ = self.0.write_fmt(args);
     }
 
     pub fn append(&mut self, another: Self) {
         self.0.push_str(&another.0);
-    }
-
-    pub fn global(&mut self, symbols: &[&str]) {
-        writeln!(self, "global {symbols}", symbols = symbols.join(", "));
-    }
-
-    pub fn extrn(&mut self, symbols: &[&str]) {
-        writeln!(self, "extern {symbols}", symbols = symbols.join(", "));
-    }
-
-    pub fn section(&mut self, label: &str) {
-        writeln!(self, "section .{label}");
-    }
-
-    pub fn label(&mut self, label: &str) {
-        writeln!(self, "{label}:");
-    }
-
-    pub fn bits(&mut self, bits: u8) {
-        writeln!(self, "bits {bits}");
-    }
-
-    pub fn db(&mut self, label: &str, bytes: &[u8]) {
-        write!(self, "{label}: {} ", OpCode::Db);
-        for byte in bytes {
-            write!(self, "0x{byte:x},");
-        }
-        write!(self, "0x00\n");
-    }
-
-    pub fn jmp(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jmp);
-    }
-
-    pub fn je(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Je);
-    }
-
-    pub fn jne(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jne);
-    }
-
-    pub fn jg(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jg);
-    }
-
-    pub fn jge(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jge);
-    }
-
-    pub fn jl(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jl);
-    }
-
-    pub fn jle(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Jle)
-    }
-
-    pub fn sete<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Sete);
-    }
-
-    pub fn setne<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setne);
-    }
-
-    pub fn setg<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setg);
-    }
-
-    pub fn setge<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setge);
-    }
-
-    pub fn setl<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setl);
-    }
-
-    pub fn setle<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Setle);
-    }
-
-    pub fn inc<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Inc);
-    }
-
-    pub fn dec(&mut self, value: Operand) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Dec);
-    }
-
-    pub fn mov<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Mov);
-    }
-
-    pub fn movd<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Movd);
-    }
-
-    pub fn movq<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Movq);
-    }
-
-    pub fn cmp<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Cmp);
-    }
-
-    pub fn lea(&mut self, reg: Reg, mem: Mem) {
-        writeln!(self, "  {opcode} {reg}, {mem}", opcode = OpCode::Lea);
-    }
-
-    pub fn push<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Push);
-    }
-
-    pub fn pop<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Pop);
-    }
-
-    pub fn call(&mut self, label: &str) {
-        writeln!(self, "  {opcode} {label}", opcode = OpCode::Call);
-    }
-
-    pub fn ret(&mut self, nbytes: usize) {
-        if nbytes == 0 {
-            writeln!(self, "  {opcode}", opcode = OpCode::Ret);
-        } else {
-            writeln!(self, "  {opcode} {nbytes}", opcode = OpCode::Ret);
-        }
-    }
-
-    pub fn add<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Add);
-    }
-
-    pub fn sub<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Sub);
-    }
-
-    // Mul,
-
-    pub fn imul<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Imul);
-    }
-
-    pub fn div<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Div);
-    }
-
-    pub fn idiv<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Idiv);
-    }
-
-    // Rem,
-
-    pub fn and<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::And);
-    }
-
-    pub fn or<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Or);
-    }
-
-    pub fn not<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Not);
-    }
-
-    pub fn xor<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Xor);
-    }
-
-    pub fn shl<T: Into<Operand> + Display>(&mut self, value1: T, value2: Imm) {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Shl);
-    }
-
-    pub fn shl_cl<T: Into<Operand> + Display>(&mut self, value: T) {
-        let reg = Reg::Cl;
-        writeln!(self, "  {opcode} {value}, {reg}", opcode = OpCode::Shl);
-    }
-
-    pub fn shr<T: Into<Operand> + Display>(&mut self, value1: T, value2: Imm) {
-        writeln!(self, "  {opcode} {value1}, {value2}", opcode = OpCode::Shr);
-    }
-
-    pub fn shr_cl<T: Into<Operand> + Display>(&mut self, value: T) {
-        let reg = Reg::Cl;
-        writeln!(self, "  {opcode} {value}, {reg}", opcode = OpCode::Shr);
-    }
-
-    pub fn neg<T: Into<Operand> + Display>(&mut self, value: T) {
-        writeln!(self, "  {opcode} {value}", opcode = OpCode::Neg);
-    }
-
-    pub fn movss<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(
-            self,
-            "  {opcode} {value1}, {value2}",
-            opcode = OpCode::Movss
-        );
-    }
-
-    pub fn comiss<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(
-            self,
-            "  {opcode} {value1}, {value2}",
-            opcode = OpCode::Comiss
-        );
-    }
-
-    pub fn addss<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(
-            self,
-            "  {opcode} {value1}, {value2}",
-            opcode = OpCode::Addss
-        );
-    }
-
-    pub fn subss<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(
-            self,
-            "  {opcode} {value1}, {value2}",
-            opcode = OpCode::Subss
-        );
-    }
-
-    pub fn mulss<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(
-            self,
-            "  {opcode} {value1}, {value2}",
-            opcode = OpCode::Mulss
-        );
-    }
-
-    pub fn divss<T1, T2>(&mut self, value1: T1, value2: T2)
-    where
-        T1: Into<Operand> + Display,
-        T2: Into<Operand> + Display,
-    {
-        writeln!(
-            self,
-            "  {opcode} {value1}, {value2}",
-            opcode = OpCode::Divss
-        );
-    }
-
-    pub fn syscall(&mut self) {
-        writeln!(self, "  {opcode}", opcode = OpCode::Syscall);
-    }
-
-    pub fn nop(&mut self) {
-        writeln!(self, "  {opcode}", opcode = OpCode::Nop);
-    }
-
-    pub fn push_sf(&mut self) {
-        self.push(Reg::Rbp);
-        self.mov(Reg::Rbp, Reg::Rsp);
-    }
-
-    pub fn pop_sf(&mut self) {
-        self.mov(Reg::Rsp, Reg::Rbp);
-        self.pop(Reg::Rbp);
     }
 }
 

@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::asm::{
-    AsmBuilder, BaseOperandManager, Imm, Lbl, Mem, MemSize, MemSized, Operand, OperandManager, Reg,
-    RegManager, Xmm,
+    self, AsmBuilder, BaseOperandManager, Imm, Lbl, Mem, MemSize, MemSized, Operand,
+    OperandManager, Reg, RegManager, Xmm,
 };
 use crate::ast::{
     Annotated, Annotation, Argument, Ast, AstNode, AstRoot, BinaryOp, Expression, FunctionCall,
@@ -12,6 +12,7 @@ use crate::ast::{
 };
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
+use crate::utils::HexSlice;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct ScopeContext {
@@ -176,9 +177,9 @@ impl Compiler {
     }
 
     pub fn prolog(mut self) -> Self {
-        self.code.bits(64);
-        self.code.section("text");
-        self.code.global(&["main"]);
+        asm::code!(self.code, "bits 64");
+        asm::code!(self.code, "section .text");
+        asm::code!(self.code, "global main");
         self
     }
 
@@ -189,8 +190,31 @@ impl Compiler {
                 AstRoot::Func(ident, args, _, ast_nodes) => {
                     compile_func(&mut self, ident, args, ast_nodes);
                 }
-                AstRoot::ExternFunc(name, ..) => self.code.extrn(&[name]),
-                AstRoot::Global(..) => todo!(),
+                AstRoot::ExternFunc(name, ..) => asm::code!(self.code, "extern {name}"),
+                AstRoot::Global(annot, ident, value) => {
+                    let label = Lbl::from_id(ident);
+                    self.scope.set(ident, Mem::lbl(label, annot.mem_size()));
+                    match value {
+                        Some(value) => match value {
+                            ValueExpr::String(s) => {
+                                self.data.insert(label, s.as_bytes().to_vec());
+                            }
+                            ValueExpr::Int(i) => {
+                                self.data.insert(label, i.to_le_bytes().to_vec());
+                            }
+                            ValueExpr::Float(f) => {
+                                self.data.insert(label, f.to_le_bytes().to_vec());
+                            }
+                            ValueExpr::Bool(b) => {
+                                self.data.insert(label, [*b as u8].to_vec());
+                            }
+                            ValueExpr::Identifier(..) => {}
+                        },
+                        None => {
+                            todo!("create a entry on .bss section")
+                        }
+                    }
+                }
             }
         }
         self
@@ -198,10 +222,10 @@ impl Compiler {
 
     pub fn epilog(mut self) -> Self {
         if !self.data.is_empty() {
-            self.code.section("data");
+            asm::code!(self.code, "section .data");
 
-            for (label, val) in self.data.iter() {
-                self.code.db(&label.to_string(), val);
+            for (label, bytes) in self.data.iter() {
+                asm::code!(self.code, "  {label}: db {:x}", HexSlice::new(bytes));
             }
         }
         self
@@ -272,31 +296,31 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
         Operand::Mem(mem) if annot.is_float() => {
             c.regs.try_push(operand);
             let xmm = c.xmms.take_any(mem.mem_size());
-            c.code.movss(xmm, mem);
+            asm::code!(c.code, Movss, xmm, mem);
             Operand::Xmm(xmm)
         }
         Operand::Reg(reg) if annot.is_float() => {
             c.regs.push(reg);
             let xmm = c.xmms.take_any(reg.mem_size());
-            c.code.movd(xmm, reg);
+            asm::code!(c.code, Movd, xmm, reg);
             Operand::Xmm(xmm)
         }
         Operand::Imm(imm) if annot.is_float() => {
             let xmm = c.xmms.take_any(imm.mem_size());
             let tmp = c.scope.new_temp(imm.mem_size());
-            c.code.mov(tmp, imm);
-            c.code.movss(xmm, tmp);
+            asm::code!(c.code, Mov, tmp, imm);
+            asm::code!(c.code, Movss, xmm, tmp);
             Operand::Xmm(xmm)
         }
         Operand::Mem(mem) => {
             c.regs.try_push(operand);
             let reg = c.regs.take_any(mem.mem_size());
-            c.code.mov(reg, mem);
+            asm::code!(c.code, Mov, reg, mem);
             Operand::Reg(reg)
         }
         Operand::Imm(imm) => {
             let reg = c.regs.take_any(imm.mem_size());
-            c.code.mov(reg, imm);
+            asm::code!(c.code, Mov, reg, imm);
             Operand::Reg(reg)
         }
         _ => operand,
@@ -309,7 +333,7 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
             let label = Lbl::from_str(&string);
             c.data.insert(label, string.as_bytes().to_vec());
             let reg = c.regs.take_any(MemSize::QWord);
-            c.code.lea(reg, Mem::lbl(label, MemSize::QWord));
+            asm::code!(c.code, Lea, reg, Mem::lbl(label, MemSize::QWord));
             Operand::Reg(reg)
         }
         ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
@@ -323,7 +347,7 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
             Annotation::Array(..) => {
                 let mem = c.scope.get(id);
                 let reg = c.regs.take_any(MemSize::QWord);
-                c.code.lea(reg, mem);
+                asm::code!(c.code, Lea, reg, mem);
                 Operand::Reg(reg)
             }
         },
@@ -363,59 +387,59 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
 
     let result = match ope {
         Operator::Equal => {
-            c.code.cmp(lhs, rhs);
+            asm::code!(c.code, Cmp, lhs, rhs);
             let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            c.code.sete(lhs);
+            asm::code!(c.code, Sete, lhs);
             lhs
         }
         Operator::NotEqual => {
-            c.code.cmp(lhs, rhs);
+            asm::code!(c.code, Cmp, lhs, rhs);
             let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            c.code.setne(lhs);
+            asm::code!(c.code, Setne, lhs);
             lhs
         }
         Operator::Greater => {
-            c.code.cmp(lhs, rhs);
+            asm::code!(c.code, Cmp, lhs, rhs);
             let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            c.code.setg(lhs);
+            asm::code!(c.code, Setg, lhs);
             lhs
         }
         Operator::GreaterEqual => {
-            c.code.cmp(lhs, rhs);
+            asm::code!(c.code, Cmp, lhs, rhs);
             let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            c.code.setge(lhs);
+            asm::code!(c.code, Setge, lhs);
             lhs
         }
         Operator::Less => {
-            c.code.cmp(lhs, rhs);
+            asm::code!(c.code, Cmp, lhs, rhs);
             let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            c.code.setl(lhs);
+            asm::code!(c.code, Setl, lhs);
             lhs
         }
         Operator::LessEqual => {
-            c.code.cmp(lhs, rhs);
+            asm::code!(c.code, Cmp, lhs, rhs);
             let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            c.code.setle(lhs);
+            asm::code!(c.code, Setle, lhs);
             lhs
         }
         Operator::And => {
-            c.code.and(lhs, rhs);
+            asm::code!(c.code, And, lhs, rhs);
             lhs
         }
         Operator::Or => {
-            c.code.or(lhs, rhs);
+            asm::code!(c.code, Or, lhs, rhs);
             lhs
         }
         Operator::Add => {
-            c.code.add(lhs, rhs);
+            asm::code!(c.code, Add, lhs, rhs);
             lhs
         }
         Operator::Sub => {
-            c.code.sub(lhs, rhs);
+            asm::code!(c.code, Sub, lhs, rhs);
             lhs
         }
         Operator::Mul => {
-            c.code.imul(lhs, rhs);
+            asm::code!(c.code, Imul, lhs, rhs);
             lhs
         }
         Operator::Div => {
@@ -425,19 +449,19 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
                 _ => {
                     let bkp = c.regs.take_any(MemSize::QWord);
                     let acc = Reg::acc(lhs.mem_size());
-                    c.code.mov(bkp, Reg::acc(MemSize::QWord));
-                    c.code.mov(acc, lhs);
+                    asm::code!(c.code, Mov, bkp, Reg::acc(MemSize::QWord));
+                    asm::code!(c.code, Mov, acc, lhs);
                     (acc, Some(bkp))
                 }
             };
             // TODO: also backup Edx
             c.regs.ensure(Reg::Edx);
-            c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
-            c.code.idiv(rhs); // divisor (rhs)
+            asm::code!(c.code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
+            asm::code!(c.code, Idiv, rhs); // divisor (rhs)
             if let Some(reg) = bkp {
                 c.regs.push(reg);
-                c.code.mov(lhs, acc);
-                c.code.mov(Reg::acc(MemSize::QWord), reg);
+                asm::code!(c.code, Mov, lhs, acc);
+                asm::code!(c.code, Mov, Reg::acc(MemSize::QWord), reg);
             }
             lhs
         }
@@ -447,48 +471,48 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
                 Operand::Reg(acc) if acc.is_acc() => None,
                 _ => {
                     let bkp = c.regs.take_any(MemSize::QWord);
-                    c.code.mov(bkp, Reg::acc(MemSize::QWord));
-                    c.code.mov(Reg::acc(lhs.mem_size()), lhs);
+                    asm::code!(c.code, Mov, bkp, Reg::acc(MemSize::QWord));
+                    asm::code!(c.code, Mov, Reg::acc(lhs.mem_size()), lhs);
                     Some(bkp)
                 }
             };
             // TODO: also backup Edx
             c.regs.ensure(Reg::Edx);
-            c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
-            c.code.idiv(rhs); // divisor (rhs)
+            asm::code!(c.code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
+            asm::code!(c.code, Idiv, rhs); // divisor (rhs)
             if let Some(reg) = bkp {
                 c.regs.push(reg);
-                c.code.mov(Reg::acc(MemSize::QWord), reg);
+                asm::code!(c.code, Mov, Reg::acc(MemSize::QWord), reg);
             }
-            c.code.mov(lhs, Reg::dta(lhs.mem_size()));
+            asm::code!(c.code, Mov, lhs, Reg::dta(lhs.mem_size()));
             lhs
         }
         Operator::Assign => {
-            c.code.mov(lhs, rhs);
+            asm::code!(c.code, Mov, lhs, rhs);
             lhs
         }
         Operator::AddAssign => {
-            c.code.add(lhs, rhs);
+            asm::code!(c.code, Add, lhs, rhs);
             lhs
         }
         Operator::SubAssign => {
-            c.code.sub(lhs, rhs);
+            asm::code!(c.code, Sub, lhs, rhs);
             lhs
         }
         Operator::MulAssign => {
             let reg = c.regs.take_any(lhs.mem_size());
-            c.code.mov(reg, lhs);
-            c.code.imul(reg, rhs);
-            c.code.mov(lhs, reg);
+            asm::code!(c.code, Mov, reg, lhs);
+            asm::code!(c.code, Imul, reg, rhs);
+            asm::code!(c.code, Mov, lhs, reg);
             c.regs.push(reg);
             lhs
         }
         Operator::DivAssign => {
             let reg = c.regs.take_any(lhs.mem_size());
-            c.code.mov(reg, lhs); // quotient (lhs)
-            c.code.mov(Reg::Edx, Imm::Int32(0)); // remainder
-            c.code.idiv(rhs); // divisor (rhs)
-            c.code.mov(lhs, reg);
+            asm::code!(c.code, Mov, reg, lhs); // quotient (lhs)
+            asm::code!(c.code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
+            asm::code!(c.code, Idiv, rhs); // divisor (rhs)
+            asm::code!(c.code, Mov, lhs, reg);
             c.regs.push(reg);
             lhs
         }
@@ -502,7 +526,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
 fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
     if let Operand::Imm(imm) = rhs {
         rhs = c.scope.new_temp(imm.mem_size());
-        c.code.mov(rhs, imm);
+        asm::code!(c.code, Mov, rhs, imm);
     }
 
     assert!(lhs.mem_size() == rhs.mem_size());
@@ -512,72 +536,72 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         Operator::NotEqual => todo!(),
         Operator::Greater => {
             let reg = c.regs.take_any(MemSize::Byte);
-            c.code.comiss(lhs, rhs);
-            c.code.setg(reg);
+            asm::code!(c.code, Comiss, lhs, rhs);
+            asm::code!(c.code, Setg, reg);
             Operand::Reg(reg)
         }
         Operator::GreaterEqual => todo!(),
         Operator::Less => {
             let reg = c.regs.take_any(MemSize::Byte);
-            c.code.comiss(lhs, rhs);
-            c.code.setl(reg);
+            asm::code!(c.code, Comiss, lhs, rhs);
+            asm::code!(c.code, Setl, reg);
             Operand::Reg(reg)
         }
         Operator::LessEqual => todo!(),
         Operator::And => todo!(),
         Operator::Or => todo!(),
         Operator::Add => {
-            c.code.addss(lhs, rhs);
+            asm::code!(c.code, Addss, lhs, rhs);
             lhs
         }
         Operator::Sub => {
-            c.code.subss(lhs, rhs);
+            asm::code!(c.code, Subss, lhs, rhs);
             lhs
         }
         Operator::Mul => {
-            c.code.mulss(lhs, rhs);
+            asm::code!(c.code, Mulss, lhs, rhs);
             lhs
         }
         Operator::Div => {
-            c.code.divss(lhs, rhs);
+            asm::code!(c.code, Divss, lhs, rhs);
             lhs
         }
         Operator::Mod => todo!(),
         Operator::Assign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            c.code.movss(lhs, rhs);
+            asm::code!(c.code, Movss, lhs, rhs);
             lhs
         }
         Operator::AddAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
             let xmm = c.xmms.take_any(lhs.mem_size());
-            c.code.movss(xmm, lhs);
-            c.code.addss(xmm, rhs);
-            c.code.movss(lhs, xmm);
+            asm::code!(c.code, Movss, xmm, lhs);
+            asm::code!(c.code, Addss, xmm, rhs);
+            asm::code!(c.code, Movss, lhs, xmm);
             lhs
         }
         Operator::SubAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
             let xmm = c.xmms.take_any(lhs.mem_size());
-            c.code.movss(xmm, lhs);
-            c.code.subss(xmm, rhs);
-            c.code.movss(lhs, xmm);
+            asm::code!(c.code, Movss, xmm, lhs);
+            asm::code!(c.code, Subss, xmm, rhs);
+            asm::code!(c.code, Movss, lhs, xmm);
             lhs
         }
         Operator::MulAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
             let xmm = c.xmms.take_any(lhs.mem_size());
-            c.code.movss(xmm, lhs);
-            c.code.mulss(xmm, rhs);
-            c.code.movss(lhs, xmm);
+            asm::code!(c.code, Movss, xmm, lhs);
+            asm::code!(c.code, Mulss, xmm, rhs);
+            asm::code!(c.code, Movss, lhs, xmm);
             lhs
         }
         Operator::DivAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
             let xmm = c.xmms.take_any(lhs.mem_size());
-            c.code.divss(xmm, lhs);
-            c.code.addss(xmm, rhs);
-            c.code.movss(lhs, xmm);
+            asm::code!(c.code, Divss, xmm, lhs);
+            asm::code!(c.code, Addss, xmm, rhs);
+            asm::code!(c.code, Movss, lhs, xmm);
             lhs
         }
     };
@@ -604,8 +628,8 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
 
         if let Some(reg) = reg {
             match arg {
-                Operand::Xmm(xmm) => c.code.movd(reg, xmm),
-                _ => c.code.mov(reg, arg),
+                Operand::Xmm(xmm) => asm::code!(c.code, Movd, reg, xmm),
+                _ => asm::code!(c.code, Mov, reg, arg),
             }
         }
 
@@ -614,8 +638,10 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
             let xmm = xmm.unwrap();
             match arg {
                 Operand::Xmm(arg) if arg == xmm => {}
-                Operand::Xmm(..) | Operand::Mem(..) | Operand::Imm(..) => c.code.movss(xmm, arg),
-                Operand::Reg(reg) => c.code.movd(xmm, reg),
+                Operand::Xmm(..) | Operand::Mem(..) | Operand::Imm(..) => {
+                    asm::code!(c.code, Movss, xmm, arg)
+                }
+                Operand::Reg(reg) => asm::code!(c.code, Movd, xmm, reg),
             }
         }
 
@@ -625,25 +651,25 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
             stack_offset += MemSize::QWord as isize;
 
             match arg {
-                Operand::Xmm(..) => c.code.movss(mem, arg),
+                Operand::Xmm(..) => asm::code!(c.code, Movss, mem, arg),
                 Operand::Reg(reg) => {
                     c.regs.push(reg);
-                    c.code.mov(mem, reg)
+                    asm::code!(c.code, Mov, mem, reg);
                 }
                 Operand::Mem(..) => {
                     let reg = c.regs.take_any(mem_size);
-                    c.code.mov(reg, arg);
-                    c.code.mov(mem, reg);
+                    asm::code!(c.code, Mov, reg, arg);
+                    asm::code!(c.code, Mov, mem, reg);
                     c.regs.push(reg);
                 }
-                _ => c.code.mov(mem, arg),
+                _ => asm::code!(c.code, Mov, mem, arg),
             }
         }
 
         c.regs.try_push(arg);
     }
 
-    c.code.call(func.name());
+    asm::code!(c.code, Call, func.name());
     c.scope.new_call(stack_offset as usize);
     release_cdecl(c);
 
@@ -666,7 +692,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             };
             let mem = c.scope.get(id);
             let reg = c.regs.take_any(MemSize::QWord);
-            c.code.lea(reg, mem);
+            asm::code!(c.code, Lea, reg, mem);
             Operand::Reg(reg)
         }
         UnaryOperator::Dereference => {
@@ -676,8 +702,8 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             let mem = c.scope.get(id);
             let reg = c.regs.take_any(MemSize::QWord);
             let tmp = c.scope.new_temp(annot.mem_size());
-            c.code.mov(reg, mem);
-            c.code.mov(tmp, Mem::reg(reg, annot.mem_size()));
+            asm::code!(c.code, Mov, reg, mem);
+            asm::code!(c.code, Mov, tmp, Mem::reg(reg, annot.mem_size()));
             c.regs.push(reg);
             tmp
         }
@@ -687,13 +713,13 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             if expr_ty.is_int() {
                 match operand {
                     Operand::Reg(..) => {
-                        c.code.neg(operand);
+                        asm::code!(c.code, Neg, operand);
                         operand
                     }
                     Operand::Imm(..) | Operand::Mem(..) => {
                         let reg = c.regs.take_any(operand.mem_size());
-                        c.code.mov(reg, operand);
-                        c.code.neg(reg);
+                        asm::code!(c.code, Mov, reg, operand);
+                        asm::code!(c.code, Neg, reg);
                         Operand::Reg(reg)
                     }
                     _ => panic!("operator minus could not be applied"),
@@ -702,20 +728,20 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                 const MINUS_BIT: u32 = 1 << 31;
                 match operand {
                     Operand::Reg(..) => {
-                        c.code.xor(operand, Imm::Int32(MINUS_BIT as i32));
+                        asm::code!(c.code, Xor, operand, Imm::Int32(MINUS_BIT as i32));
                         operand
                     }
                     Operand::Imm(..) | Operand::Mem(..) => {
                         let reg = c.regs.take_any(operand.mem_size());
-                        c.code.mov(reg, operand);
-                        c.code.xor(reg, Imm::Int32(MINUS_BIT as i32));
+                        asm::code!(c.code, Mov, reg, operand);
+                        asm::code!(c.code, Xor, reg, Imm::Int32(MINUS_BIT as i32));
                         Operand::Reg(reg)
                     }
                     Operand::Xmm(xmm) => {
                         let tmp = c.scope.new_temp(xmm.mem_size());
                         c.xmms.push(xmm);
-                        c.code.movss(tmp, xmm);
-                        c.code.xor(tmp, Imm::Int32(MINUS_BIT as i32));
+                        asm::code!(c.code, Movss, tmp, xmm);
+                        asm::code!(c.code, Xor, tmp, Imm::Int32(MINUS_BIT as i32));
                         tmp
                     }
                 }
@@ -726,19 +752,19 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             let operand = compile_expr_rec(c, operand);
             match operand {
                 Operand::Reg(..) | Operand::Mem(..) => {
-                    c.code.not(operand);
+                    asm::code!(c.code, Not, operand);
                     operand
                 }
                 Operand::Imm(imm) => {
                     let reg = c.regs.take_any(imm.mem_size());
-                    c.code.mov(reg, imm);
-                    c.code.not(reg);
+                    asm::code!(c.code, Mov, reg, imm);
+                    asm::code!(c.code, Not, reg);
                     Operand::Reg(reg)
                 }
                 Operand::Xmm(xmm) => {
                     let tmp = c.scope.new_temp(xmm.mem_size());
-                    c.code.movss(tmp, xmm);
-                    c.code.not(tmp);
+                    asm::code!(c.code, Movss, tmp, xmm);
+                    asm::code!(c.code, Not, tmp);
                     tmp
                 }
             }
@@ -755,14 +781,14 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
         offset => {
             let reg = c.regs.take_any(offset.mem_size());
             c.regs.try_push(offset);
-            c.code.mov(reg, offset);
+            asm::code!(c.code, Mov, reg, offset);
             reg
         }
     };
 
     let reg = c.regs.switch_size(reg, MemSize::QWord);
-    c.code.imul(reg, Imm::Int64(size as i64));
-    c.code.add(reg, array);
+    asm::code!(c.code, Mul, reg, Imm::Int64(size as i64));
+    asm::code!(c.code, Add, reg, array);
     c.regs.try_push(array);
 
     Operand::Mem(Mem::reg(reg, size))
@@ -798,21 +824,21 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                 let result = compile_expr(c, expr);
                 match result {
                     Operand::Reg(reg) => {
-                        c.code.mov(local, reg);
+                        asm::code!(c.code, Mov, local, reg);
                         c.regs.push(reg);
                     }
                     Operand::Xmm(xmm) => {
                         c.xmms.push(xmm);
-                        c.code.movss(local, xmm);
+                        asm::code!(c.code, Movss, local, xmm);
                     }
                     Operand::Mem(mem) => {
                         let reg = c.regs.take_any(mem.mem_size());
-                        c.code.mov(reg, mem);
-                        c.code.mov(local, reg);
+                        asm::code!(c.code, Mov, reg, mem);
+                        asm::code!(c.code, Mov, local, reg);
                         c.regs.push(reg);
                     }
                     Operand::Imm(..) => {
-                        c.code.mov(local, result);
+                        asm::code!(c.code, Mov, local, result);
                     }
                 }
             }
@@ -823,11 +849,11 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
             let mut result = compile_expr(c, expr);
             if let Operand::Imm(imm) = result {
                 result = Operand::Reg(c.regs.take_any(imm.mem_size()));
-                c.code.mov(result, imm);
+                asm::code!(c.code, Mov, result, imm);
             }
 
-            c.code.cmp(result, Imm::FALSE);
-            c.code.je(&endif_lbl);
+            asm::code!(c.code, Cmp, result, Imm::FALSE);
+            asm::code!(c.code, Je, endif_lbl);
 
             c.regs.try_push(result);
             c.scope.continue_on();
@@ -838,22 +864,22 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             c.scope.exit();
 
-            c.code.label(&endif_lbl);
+            asm::code!(c.code, "{endif_lbl}:");
         }
         AstNode::While(expr, nodes) => {
             let startwhile_lbl = c.scope.new_label();
             let endwhile_lbl = c.scope.new_label();
 
-            c.code.label(&startwhile_lbl);
+            asm::code!(c.code, "{startwhile_lbl}:");
 
             let mut result = compile_expr(c, expr);
             if let Operand::Imm(imm) = result {
                 result = Operand::Reg(c.regs.take_any(imm.mem_size()));
-                c.code.mov(result, imm);
+                asm::code!(c.code, Mov, result, imm);
             }
 
-            c.code.cmp(result, Imm::FALSE);
-            c.code.je(&endwhile_lbl);
+            asm::code!(c.code, Cmp, result, Imm::FALSE);
+            asm::code!(c.code, Je, endwhile_lbl);
 
             c.regs.try_push(result);
             c.scope.continue_on();
@@ -864,8 +890,8 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             c.scope.exit();
 
-            c.code.jmp(&startwhile_lbl);
-            c.code.label(&endwhile_lbl);
+            asm::code!(c.code, Jmp, startwhile_lbl);
+            asm::code!(c.code, "{endwhile_lbl}:");
         }
         AstNode::For(ident, init, limit, nodes) => {
             let startfor_lbl = c.scope.new_label();
@@ -879,23 +905,23 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                 None => Imm::Int32(0).into(),
             };
 
-            c.code.mov(counter, init);
-            c.code.label(&startfor_lbl);
+            asm::code!(c.code, Mov, counter, init);
+            asm::code!(c.code, "{startfor_lbl}:");
 
             c.regs.try_push(init);
 
             match limit {
                 ValueExpr::Int(value) => {
-                    c.code.cmp(counter, Imm::Int32(*value));
+                    asm::code!(c.code, Cmp, counter, Imm::Int32(*value));
                 }
                 ValueExpr::Identifier(.., id) => {
-                    c.code.mov(Reg::Eax, c.scope.get(id));
-                    c.code.cmp(counter, Reg::Eax);
+                    asm::code!(c.code, Mov, Reg::Eax, c.scope.get(id));
+                    asm::code!(c.code, Cmp, counter, Reg::Eax);
                 }
                 _ => unreachable!(),
             };
 
-            c.code.jg(&endfor_lbl);
+            asm::code!(c.code, Jg, endfor_lbl);
 
             for inner in nodes {
                 compile_node(c, inner);
@@ -903,9 +929,9 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             c.scope.exit();
 
-            c.code.inc(counter);
-            c.code.jmp(&startfor_lbl);
-            c.code.label(&endfor_lbl);
+            asm::code!(c.code, Inc, counter);
+            asm::code!(c.code, Jmp, startfor_lbl);
+            asm::code!(c.code, "{endfor_lbl}:");
         }
         AstNode::Expr(expr) => {
             let result = compile_expr(c, expr);
@@ -919,20 +945,20 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                     match result {
                         Operand::Reg(reg) => {
                             c.regs.push(reg);
-                            c.code.movd(xmm0, reg);
+                            asm::code!(c.code, Movd, xmm0, reg);
                         }
                         Operand::Xmm(xmm) => {
                             c.xmms.push(xmm);
-                            c.code.movss(xmm0, xmm);
+                            asm::code!(c.code, Movss, xmm0, xmm);
                         }
                         Operand::Mem(mem) => {
                             c.regs.try_push(result);
-                            c.code.movss(xmm0, mem);
+                            asm::code!(c.code, Movss, xmm0, mem);
                         }
                         Operand::Imm(imm) => {
                             let tmp = c.scope.new_temp(imm.mem_size());
-                            c.code.mov(tmp, imm);
-                            c.code.mov(xmm0, tmp);
+                            asm::code!(c.code, Mov, tmp, imm);
+                            asm::code!(c.code, Mov, xmm0, tmp);
                         }
                     }
                 } else {
@@ -944,29 +970,29 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                     match result {
                         Operand::Reg(reg) => {
                             c.regs.push(reg);
-                            c.code.mov(acc, reg);
+                            asm::code!(c.code, Mov, acc, reg);
                         }
                         Operand::Mem(..) | Operand::Imm(..) => {
                             c.regs.try_push(result);
-                            c.code.mov(acc, result);
+                            asm::code!(c.code, Mov, acc, result);
                         }
                         Operand::Xmm(xmm) => {
                             c.xmms.push(xmm);
                             let tmp = c.scope.new_temp(xmm.mem_size());
-                            c.code.movss(tmp, xmm);
-                            c.code.mov(acc, tmp);
+                            asm::code!(c.code, Movss, tmp, xmm);
+                            asm::code!(c.code, Mov, acc, tmp);
                         }
                     }
                 } else {
                     c.regs.push(acc);
                 }
             }
-            c.code.jmp(".R");
+            asm::code!(c.code, Jmp, ".R");
         }
     }
 }
 
-fn set_args(c: &mut Compiler, args: &[Argument]) {
+fn compile_args(c: &mut Compiler, args: &[Argument]) {
     let mut mem_offset = match c.target {
         CompilerTarget::Linux => 16,   // rip + rbp
         CompilerTarget::Windows => 48, // rip + rbp + shadow space
@@ -976,7 +1002,7 @@ fn set_args(c: &mut Compiler, args: &[Argument]) {
         let mem_size = annot.mem_size();
         if let Some(reg) = cdecl(c, arg_num, mem_size) {
             let addr = c.scope.new_local(name, mem_size);
-            c.code.mov(addr, reg);
+            asm::code!(c.code, Mov, addr, reg);
         } else {
             mem_offset += MemSize::QWord as isize;
             let addr = Mem::offset(Reg::Rbp, mem_offset, mem_size);
@@ -986,14 +1012,15 @@ fn set_args(c: &mut Compiler, args: &[Argument]) {
 }
 
 fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
-    c.code.label(ident);
-    c.code.push_sf();
+    asm::code!(c.code, "{ident}:");
+    asm::code!(c.code, Push, Reg::Rbp);
+    asm::code!(c.code, Mov, Reg::Rbp, Reg::Rsp);
 
     c.scope.new_inner();
 
-    set_args(c, args);
+    compile_args(c, args);
 
-    let mut code = std::mem::take(&mut c.code);
+    let code = std::mem::take(&mut c.code);
 
     for inner in nodes {
         compile_node(c, inner);
@@ -1003,7 +1030,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
     if total_mem > 0 {
         // align by 16
         let total_mem = total_mem + (16 - total_mem % 16);
-        code.sub(Reg::Rsp, Imm::Int64(total_mem));
+        asm::code!(c.code, Sub, Reg::Rsp, Imm::Int64(total_mem));
     }
 
     let inner_code = std::mem::replace(&mut c.code, code);
@@ -1011,7 +1038,8 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
 
     c.scope.exit();
 
-    c.code.label(".R");
-    c.code.pop_sf();
-    c.code.ret(0);
+    asm::code!(c.code, ".R:");
+    asm::code!(c.code, Mov, Reg::Rsp, Reg::Rbp);
+    asm::code!(c.code, Pop, Reg::Rbp);
+    asm::code!(c.code, Ret);
 }

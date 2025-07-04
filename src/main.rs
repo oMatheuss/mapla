@@ -17,6 +17,7 @@ mod parser;
 mod position;
 mod target;
 mod token;
+mod utils;
 
 struct ParsedArgs {
     input: String,
