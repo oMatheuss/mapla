@@ -14,7 +14,7 @@ use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
 
 #[derive(Debug, Clone, Copy, Default)]
-struct MemAlloc {
+struct ScopeContext {
     // actual stack offset of local variables
     local_off: isize,
 
@@ -26,9 +26,12 @@ struct MemAlloc {
 
     // max stack offset needed temp variables
     max_temp_off: isize,
+
+    // label count used for jumps
+    lbl_count: usize,
 }
 
-impl MemAlloc {
+impl ScopeContext {
     pub fn get_max(&self) -> i64 {
         self.local_off.abs() as i64 + self.max_temp_off.abs() as i64 + self.max_func as i64
     }
@@ -37,8 +40,7 @@ impl MemAlloc {
 #[derive(Debug, Default)]
 struct Scope {
     var: HashMap<String, Mem>,
-    mem: Rc<RefCell<MemAlloc>>,
-    lbl: Rc<RefCell<usize>>,
+    ctx: Rc<RefCell<ScopeContext>>,
     sup: Option<Box<Scope>>,
 }
 
@@ -58,8 +60,7 @@ impl Scope {
         let cur = std::mem::take(self);
         let src = Self {
             var: HashMap::new(),
-            mem: cur.mem.clone(),
-            lbl: cur.lbl.clone(),
+            ctx: cur.ctx.clone(),
             sup: Some(Box::new(cur)),
         };
         let _ = std::mem::replace(self, src);
@@ -87,7 +88,7 @@ impl Scope {
     }
 
     fn new_local(&mut self, ident: &str, mem_size: MemSize) -> Operand {
-        let mut mem = self.mem.borrow_mut();
+        let mut mem = self.ctx.borrow_mut();
         mem.local_off -= mem_size as isize;
         let mem = Mem::offset(Reg::Rbp, mem.local_off, mem_size);
         self.var.insert(String::from(ident), mem);
@@ -95,7 +96,7 @@ impl Scope {
     }
 
     fn new_array(&mut self, ident: &str, size: u32, mem_size: MemSize) -> Operand {
-        let mut mem = self.mem.borrow_mut();
+        let mut mem = self.ctx.borrow_mut();
         mem.local_off -= mem_size as isize * size as isize;
         let mem = Mem::offset(Reg::Rbp, mem.local_off, MemSize::QWord);
         self.var.insert(String::from(ident), mem);
@@ -103,7 +104,7 @@ impl Scope {
     }
 
     fn new_temp(&mut self, mem_size: MemSize) -> Operand {
-        let mut mem = self.mem.borrow_mut();
+        let mut mem = self.ctx.borrow_mut();
         mem.temp_off -= mem_size as isize;
         if mem.temp_off < mem.max_temp_off {
             mem.max_temp_off = mem.temp_off;
@@ -113,7 +114,7 @@ impl Scope {
     }
 
     fn new_call(&mut self, call_size: usize) {
-        let mut mem = self.mem.borrow_mut();
+        let mut mem = self.ctx.borrow_mut();
         if call_size > mem.max_func {
             mem.max_func = call_size;
         }
@@ -121,14 +122,14 @@ impl Scope {
 
     #[inline]
     fn reset_temps(&mut self) {
-        self.mem.borrow_mut().temp_off = 0;
+        self.ctx.borrow_mut().temp_off = 0;
     }
 
     #[inline]
     fn new_label(&mut self) -> String {
-        let mut lbl = self.lbl.borrow_mut();
-        *lbl += 1;
-        format!(".L{lbl}", lbl = *lbl)
+        let mut ctx = self.ctx.borrow_mut();
+        ctx.lbl_count += 1;
+        format!(".L{cnt}", cnt = ctx.lbl_count)
     }
 }
 
@@ -998,7 +999,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
         compile_node(c, inner);
     }
 
-    let total_mem = c.scope.mem.borrow().get_max();
+    let total_mem = c.scope.ctx.borrow().get_max();
     if total_mem > 0 {
         // align by 16
         let total_mem = total_mem + (16 - total_mem % 16);
