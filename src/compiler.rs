@@ -104,14 +104,14 @@ impl Scope {
         Operand::Mem(mem)
     }
 
-    fn new_temp(&mut self, mem_size: MemSize) -> Operand {
+    fn new_temp(&mut self, mem_size: MemSize) -> Mem {
         let mut mem = self.ctx.borrow_mut();
         mem.temp_off -= mem_size as isize;
         if mem.temp_off < mem.max_temp_off {
             mem.max_temp_off = mem.temp_off;
         }
         let offset = mem.local_off + mem.temp_off;
-        Operand::Mem(Mem::offset(Reg::Rbp, offset, mem_size))
+        Mem::offset(Reg::Rbp, offset, mem_size)
     }
 
     fn new_call(&mut self, call_size: usize) {
@@ -271,22 +271,21 @@ fn cdecl_f(c: &mut Compiler, arg_num: usize, mem_size: MemSize) -> Option<Xmm> {
     Some(xmm)
 }
 
-fn reserve_cdecl(c: &mut Compiler) {
-    let regs: &[Reg] = match c.target {
+fn cdecl_regs(target: CompilerTarget) -> &'static [Reg] {
+    match target {
         CompilerTarget::Linux => &[Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9],
         CompilerTarget::Windows => &[Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9],
-    };
-    for reg in regs {
+    }
+}
+
+fn reserve_cdecl(c: &mut Compiler) {
+    for reg in cdecl_regs(c.target) {
         c.regs.take(*reg);
     }
 }
 
 fn release_cdecl(c: &mut Compiler) {
-    let regs: &[Reg] = match c.target {
-        CompilerTarget::Linux => &[Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx, Reg::R8, Reg::R9],
-        CompilerTarget::Windows => &[Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9],
-    };
-    for reg in regs {
+    for reg in cdecl_regs(c.target) {
         c.regs.push(*reg);
     }
 }
@@ -322,6 +321,27 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
             let reg = c.regs.take_any(imm.mem_size());
             asm::code!(c.code, Mov, reg, imm);
             Operand::Reg(reg)
+        }
+        _ => operand,
+    }
+}
+
+fn move_operand_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
+    match operand {
+        Operand::Reg(reg) => {
+            c.regs.push(reg);
+            let mem = c.scope.new_temp(annot.mem_size());
+            asm::code!(c.code, Mov, mem, reg);
+            Operand::Mem(mem)
+        }
+        Operand::Mem(mem) => match mem.base() {
+            asm::MemBase::Reg(reg) if !reg.is_reserved() => {
+                c.regs.push(reg);
+                let mem = c.scope.new_temp(annot.mem_size());
+                asm::code!(c.code, Mov, mem, reg);
+                Operand::Mem(mem)
+            },
+            _ => operand,
         }
         _ => operand,
     }
@@ -368,9 +388,13 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
         (lhs, rhs)
     } else {
         let lhs = compile_expr_rec(c, bin_op.lhs());
-        let lhs = move_operand_to_reg(c, annot, lhs);
+        let lhs = match bin_op.rhs().is_value() {
+            true => move_operand_to_reg(c, annot, lhs),
+            false => move_operand_to_mem(c, annot, lhs),
+        };
 
         let rhs = compile_expr_rec(c, bin_op.rhs());
+        let lhs = move_operand_to_reg(c, annot, lhs);
 
         (lhs, rhs)
     };
@@ -525,7 +549,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
 
 fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
     if let Operand::Imm(imm) = rhs {
-        rhs = c.scope.new_temp(imm.mem_size());
+        rhs = c.scope.new_temp(imm.mem_size()).into();
         asm::code!(c.code, Mov, rhs, imm);
     }
 
@@ -705,7 +729,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             asm::code!(c.code, Mov, reg, mem);
             asm::code!(c.code, Mov, tmp, Mem::reg(reg, annot.mem_size()));
             c.regs.push(reg);
-            tmp
+            Operand::Mem(tmp)
         }
         UnaryOperator::Minus => {
             let expr_ty = operand.get_annot();
@@ -742,7 +766,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                         c.xmms.push(xmm);
                         asm::code!(c.code, Movss, tmp, xmm);
                         asm::code!(c.code, Xor, tmp, Imm::Int32(MINUS_BIT as i32));
-                        tmp
+                        Operand::Mem(tmp)
                     }
                 }
             }
@@ -765,7 +789,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     let tmp = c.scope.new_temp(xmm.mem_size());
                     asm::code!(c.code, Movss, tmp, xmm);
                     asm::code!(c.code, Not, tmp);
-                    tmp
+                    Operand::Mem(tmp)
                 }
             }
         }

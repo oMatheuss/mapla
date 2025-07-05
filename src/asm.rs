@@ -343,6 +343,10 @@ impl Reg {
         }
     }
 
+    pub fn is_reserved(&self) -> bool {
+        matches!(self, Self::Rsp | Self::Rbp)
+    }
+
     pub fn is_acc(&self) -> bool {
         matches!(self, Self::Rax | Self::Eax | Self::Ax | Self::Al)
     }
