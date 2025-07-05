@@ -971,13 +971,13 @@ impl OperandManager<Xmm> for RegManager<Xmm> {
     fn name(ope: Xmm) -> &'static str {
         match ope.reg {
             XmmReg::Xmm0 => Self::NAMES[0],
-            XmmReg::Xmm1 => Self::NAMES[0],
-            XmmReg::Xmm2 => Self::NAMES[0],
-            XmmReg::Xmm3 => Self::NAMES[0],
-            XmmReg::Xmm4 => Self::NAMES[0],
-            XmmReg::Xmm5 => Self::NAMES[0],
-            XmmReg::Xmm6 => Self::NAMES[0],
-            XmmReg::Xmm7 => Self::NAMES[0],
+            XmmReg::Xmm1 => Self::NAMES[1],
+            XmmReg::Xmm2 => Self::NAMES[2],
+            XmmReg::Xmm3 => Self::NAMES[3],
+            XmmReg::Xmm4 => Self::NAMES[4],
+            XmmReg::Xmm5 => Self::NAMES[5],
+            XmmReg::Xmm6 => Self::NAMES[6],
+            XmmReg::Xmm7 => Self::NAMES[7],
         }
     }
 
