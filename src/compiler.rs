@@ -811,7 +811,7 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     };
 
     let reg = c.regs.switch_size(reg, MemSize::QWord);
-    asm::code!(c.code, Mul, reg, Imm::Int64(size as i64));
+    asm::code!(c.code, Imul, reg, Imm::Int64(size as i64));
     asm::code!(c.code, Add, reg, array);
     c.regs.try_push(array);
 
