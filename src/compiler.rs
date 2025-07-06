@@ -945,7 +945,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                 _ => unreachable!(),
             };
 
-            asm::code!(c.code, Jg, endfor_lbl);
+            asm::code!(c.code, Jge, endfor_lbl);
 
             for inner in nodes {
                 compile_node(c, inner);
