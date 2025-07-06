@@ -192,7 +192,7 @@ impl Compiler {
                 }
                 AstRoot::ExternFunc(name, ..) => asm::code!(self.code, "extern {name}"),
                 AstRoot::Global(annot, ident, value) => {
-                    let label = Lbl::from_id(ident);
+                    let label = Lbl::from_label(ident);
                     self.scope.set(ident, Mem::lbl(label, annot.mem_size()));
                     match value {
                         Some(value) => match value {
@@ -350,7 +350,7 @@ fn move_operand_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
 fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
     match value {
         ValueExpr::String(string) => {
-            let label = Lbl::from_str(&string);
+            let label = Lbl::new();
             c.data.insert(label, string.as_bytes().to_vec());
             let reg = c.regs.take_any(MemSize::QWord);
             asm::code!(c.code, Lea, reg, Mem::lbl(label, MemSize::QWord));

@@ -702,25 +702,27 @@ impl Display for Xmm {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Lbl {
-    hash: u64,
-    prefix: &'static str,
+pub struct Lbl(usize);
+
+thread_local! {
+    static LABELS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 impl Lbl {
-    const L_STR: &'static str = "str";
-
-    pub fn from_str(slice: &str) -> Self {
-        let mut state = std::hash::DefaultHasher::new();
-        std::hash::Hash::hash_slice(slice.as_bytes(), &mut state);
-        Self {
-            hash: state.finish(),
-            prefix: Self::L_STR,
-        }
+    pub fn new() -> Self {
+        LABELS.with_borrow_mut(|labels| {
+            let id = labels.len();
+            labels.push(format!("L.str.{id}"));
+            Self(id)
+        })
     }
 
-    pub fn from_id(_id: &str) -> Self {
-        todo!("custom label is not supported yet")
+    pub fn from_label(label: &str) -> Self {
+        LABELS.with_borrow_mut(|labels| {
+            let id = labels.len();
+            labels.push(String::from(label));
+            Self(id)
+        })
     }
 }
 
@@ -732,7 +734,7 @@ impl MemSized for Lbl {
 
 impl Display for Lbl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "L.{}.{:x}", self.prefix, self.hash)
+        LABELS.with_borrow(|labels| write!(f, "{}", labels[self.0]))
     }
 }
 
