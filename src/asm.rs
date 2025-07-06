@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use std::fmt::{Display, Write};
-use std::hash::Hasher;
 
 pub enum OpCode {
     Db, // Declare byte (1 byte)

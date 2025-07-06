@@ -340,9 +340,9 @@ fn move_operand_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
                 let mem = c.scope.new_temp(annot.mem_size());
                 asm::code!(c.code, Mov, mem, reg);
                 Operand::Mem(mem)
-            },
+            }
             _ => operand,
-        }
+        },
         _ => operand,
     }
 }
