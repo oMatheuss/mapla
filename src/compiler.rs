@@ -1040,11 +1040,10 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
     asm::code!(c.code, Push, Reg::Rbp);
     asm::code!(c.code, Mov, Reg::Rbp, Reg::Rsp);
 
-    c.scope.new_inner();
-
-    compile_args(c, args);
-
     let mut code = std::mem::take(&mut c.code);
+
+    c.scope.new_inner();
+    compile_args(c, args);
 
     for inner in nodes {
         compile_node(c, inner);
@@ -1057,10 +1056,10 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
         asm::code!(code, Sub, Reg::Rsp, Imm::Int64(total_mem));
     }
 
+    c.scope.exit();
+
     let inner_code = std::mem::replace(&mut c.code, code);
     c.code.append(inner_code);
-
-    c.scope.exit();
 
     asm::code!(c.code, ".R:");
     asm::code!(c.code, Mov, Reg::Rsp, Reg::Rbp);
