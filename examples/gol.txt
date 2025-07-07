@@ -1,0 +1,111 @@
+extern func malloc(size: int): int*;
+extern func free(mem: int*);
+extern func memcpy(dst: int*, src: int*, cnt: int): int*;
+extern func putchar(ch: int): int;
+extern func printf(fmt: char*, arg1: int);
+extern func usleep(ms: int);
+extern func srand(seed: int);
+extern func rand(): int;
+
+int WIDTH  = 64;
+int HEIGHT = 32;
+
+int DEAD_CELL = 32;
+int ALIVE_CELL = 35;
+
+func printBoard(board: int*) do
+    for y to HEIGHT then
+        int dy = y * WIDTH;
+        for x to WIDTH then
+            putchar(board[dy + x]);
+        end
+        putchar(10);
+    end
+end
+
+func createBoard(): int* do
+    int* board = malloc(WIDTH * HEIGHT * 4);
+    for y to HEIGHT then
+        int dy = y * WIDTH;
+        for x to WIDTH then
+            board[dy + x] = DEAD_CELL;
+        end
+    end
+    return board;
+end
+
+func checkNeighbors(board: int*, posX: int, posY: int): int do
+    int sum = 0;
+    for j to 3 then
+        int y = posY + j - 1;
+        if y >= HEIGHT then y -= HEIGHT; end
+        if y < 0 then y += HEIGHT; end
+        int dy = y * WIDTH;
+        for i to 3 then
+            int x = posX + i - 1;
+            if x >= WIDTH then x -= WIDTH; end
+            if x < 0 then x += WIDTH; end
+            if board[dy + x] == ALIVE_CELL && (i != 1 || j != 1) then
+                sum += 1;
+            end
+        end
+    end
+    return sum;
+end
+
+func updateBoard(actualState: int*) do
+    int* nextState = createBoard();
+    for y to HEIGHT then
+        int dy = y * WIDTH;
+        for x to WIDTH then
+            int actual = actualState[dy + x];
+            int alives = checkNeighbors(actualState, x, y);
+            if actual == ALIVE_CELL && alives < 2 then
+                nextState[dy + x] = DEAD_CELL;
+            end
+            if actual == ALIVE_CELL && alives == 2 || alives == 3 then
+                nextState[dy + x] = ALIVE_CELL;
+            end
+            if actual == ALIVE_CELL && alives > 3 then
+                nextState[dy + x] = DEAD_CELL;
+            end
+            if actual == DEAD_CELL && alives == 3 then
+                nextState[dy + x] = ALIVE_CELL;
+            end
+        end
+    end
+    memcpy(actualState, nextState, WIDTH * HEIGHT * 4);
+    free(nextState);
+end
+
+func randomizeBoard(board: int*) do
+    srand(1283);
+    for y to HEIGHT then
+        int dy = y * WIDTH;
+        for x to WIDTH then
+            if rand() > 15000 then
+                board[dy + x] = ALIVE_CELL;
+            end
+        end
+    end
+end
+
+func clearTerminal() do
+    printf("%c[H", 27);
+    printf("%c[J", 27);
+end
+
+func main(): int do
+    int* board = createBoard();
+    randomizeBoard(board);
+
+    while true then
+        clearTerminal();
+        printBoard(board);
+        usleep(33000);
+
+        updateBoard(board);
+    end
+
+    return 0;
+end
