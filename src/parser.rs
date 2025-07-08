@@ -105,6 +105,14 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
+    fn peek_pos(&mut self) -> Position {
+        match self.tokens.peek() {
+            Some(some) => *some.position(),
+            None => self.pos,
+        }
+    }
+
+    #[inline]
     fn next_or_err(&mut self) -> Result<&'a Token<'a>> {
         if let Some(token) = self.next() {
             Ok(token)
@@ -655,8 +663,8 @@ impl<'a> Parser<'a> {
 
             Token::Return => self.consume_ret(),
 
-            Token::Eof | Token::End => panic!("token not allowed"),
-            _ => Error::syntatic("wrong placement for this token", self.pos),
+            Token::Eof | Token::End => unreachable!(),
+            _ => Error::syntatic("wrong placement for this token", self.peek_pos()),
         }
     }
 
@@ -697,8 +705,8 @@ impl<'a> Parser<'a> {
             Token::Function => self.consume_func(),
             Token::Extern => self.consume_extern(),
 
-            Token::Eof | Token::End => panic!("token not allowed"),
-            _ => Error::syntatic("wrong placement for this token", self.pos),
+            Token::Eof => unreachable!(),
+            _ => Error::syntatic("wrong placement for this token", self.peek_pos()),
         }
     }
 

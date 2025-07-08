@@ -207,13 +207,12 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Result<LexItem<'a>> {
-        let position = self.position.clone();
-
         while let Some(&ch) = self.peek() {
             if self.skip_whitespace() {
                 continue;
             }
 
+            let position = self.position;
             let token = match ch {
                 'a'..='z' | 'A'..='Z' | '_' => self.next_ident(),
                 '0'..='9' | '.' => self.next_number(),
@@ -225,7 +224,7 @@ impl<'a> Lexer<'a> {
         }
 
         self.ended = true;
-        LexItem::eof(position).ok()
+        LexItem::eof(self.position).ok()
     }
 }
 
