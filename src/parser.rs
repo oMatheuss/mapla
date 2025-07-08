@@ -121,9 +121,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_value(&mut self) -> Result<ValueExpr> {
-        let token = self.next_or_err()?;
-
-        let expr = match *token {
+        let expr = match *self.next_or_err()? {
             Token::Identifier(id) => {
                 let Some(symbol) = self.symbols.find(id) else {
                     Error::syntatic("symbol not found in scope", self.pos)?
@@ -133,6 +131,11 @@ impl<'a> Parser<'a> {
             Token::StrLiteral(string) => ValueExpr::String(string.into()),
             Token::IntLiteral(int) => ValueExpr::Int(int),
             Token::FloatLiteral(float) => ValueExpr::Float(float),
+            Token::Sub => match *self.next_or_err()? {
+                Token::IntLiteral(int) => ValueExpr::Int(-int),
+                Token::FloatLiteral(float) => ValueExpr::Float(-float),
+                _ => Error::syntatic("unexpected token", self.pos)?,
+            },
             Token::True => ValueExpr::Bool(true),
             Token::False => ValueExpr::Bool(false),
             _ => Error::syntatic("unexpected token", self.pos)?,
@@ -210,10 +213,14 @@ impl<'a> Parser<'a> {
             Token::Sub => {
                 let operand = self.parse_atom()?;
                 let annot = operand.get_annot();
-                if !annot.is_number() {
-                    Error::syntatic("can only apply unary operator minus to numbers", self.pos)?
+                match operand {
+                    Expression::Value(ValueExpr::Int(int)) => Expression::int(-int),
+                    Expression::Value(ValueExpr::Float(float)) => Expression::float(-float),
+                    _ if annot.is_number() => {
+                        Expression::una_op(UnaryOperator::Minus, operand, annot)
+                    }
+                    _ => Error::syntatic("cannot apply unary minus here", self.pos)?,
                 }
-                Expression::una_op(UnaryOperator::Minus, operand, annot)
             }
             Token::Mul => {
                 let operand = self.parse_atom()?;

@@ -34,19 +34,23 @@ func createBoard(): int* do
     return board;
 end
 
+func wrapAround(value: int, maxValue: int): int do
+    if value >= maxValue then value -= maxValue; end
+    if value < 0 then value += maxValue; end
+    return value;
+end
+
 func checkNeighbors(board: int*, posX: int, posY: int): int do
     int sum = 0;
-    for j to 3 then
-        int y = posY + j - 1;
-        if y >= HEIGHT then y -= HEIGHT; end
-        if y < 0 then y += HEIGHT; end
+    for j = -1 to 2 then
+        int y = wrapAround(posY + j, HEIGHT);
         int dy = y * WIDTH;
-        for i to 3 then
-            int x = posX + i - 1;
-            if x >= WIDTH then x -= WIDTH; end
-            if x < 0 then x += WIDTH; end
-            if board[dy + x] == ALIVE_CELL && (i != 1 || j != 1) then
-                sum += 1;
+        for i = -1 to 2 then
+            if i != 0 || j != 0 then
+                int x = wrapAround(posX + i, WIDTH);
+                if board[dy + x] == ALIVE_CELL then
+                    sum += 1;
+                end
             end
         end
     end
@@ -102,7 +106,7 @@ func main(): int do
     while true then
         clearTerminal();
         printBoard(board);
-        usleep(33000);
+        usleep(100000);
 
         updateBoard(board);
     end
