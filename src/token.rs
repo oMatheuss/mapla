@@ -17,7 +17,7 @@ pub enum Token<'a> {
     Return,
     Use,
     StrLiteral(&'a str),
-    IntLiteral(i32),
+    IntLiteral(u32),
     FloatLiteral(f32),
     True,
     False,

@@ -137,10 +137,10 @@ impl<'a> Parser<'a> {
                 ValueExpr::Identifier(symbol.annot, id.into())
             }
             Token::StrLiteral(string) => ValueExpr::String(string.into()),
-            Token::IntLiteral(int) => ValueExpr::Int(int),
+            Token::IntLiteral(int) => ValueExpr::Int(int as i32),
             Token::FloatLiteral(float) => ValueExpr::Float(float),
             Token::Sub => match *self.next_or_err()? {
-                Token::IntLiteral(int) => ValueExpr::Int(-int),
+                Token::IntLiteral(int) => ValueExpr::Int(-(int as i32)),
                 Token::FloatLiteral(float) => ValueExpr::Float(-float),
                 _ => Error::syntatic("unexpected token", self.pos)?,
             },
@@ -193,7 +193,7 @@ impl<'a> Parser<'a> {
                 Expression::identifier(symbol.annot, id)
             }
             Token::StrLiteral(string) => Expression::string(string),
-            Token::IntLiteral(int) => Expression::int(int),
+            Token::IntLiteral(int) => Expression::int(int as i32),
             Token::FloatLiteral(float) => Expression::float(float),
             Token::True => Expression::TRUE,
             Token::False => Expression::FALSE,

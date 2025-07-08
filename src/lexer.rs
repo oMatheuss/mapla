@@ -97,24 +97,40 @@ impl<'a> Lexer<'a> {
 
     fn next_number(&mut self) -> Result<Token<'a>> {
         let start = self.index();
-        let mut state = 1;
+        let mut state = 0;
         while let Some(ch) = self.peek() {
-            match (state, ch) {
-                (1, '0'..='9') => {}
-                (1, '.') => state = 2,
-                (2, '0'..='9') => {}
+            state = match (state, ch) {
+                (0, '0') => 1, // final integer 0
+                (0, '1'..='9') => 4,
+                (1, 'x') => 2,
+                (1, '0'..='9') => 4,
+                (2, '0'..='9' | 'a'..='f' | 'A'..='F') => 3,
+                (3, '0'..='9' | 'a'..='f' | 'A'..='F') => 3, // final hex
+                (4, '0'..='9') => 4,                         // final integer
+                (4, '.') => 5,
+                (5, '0'..='9') => 6,
+                (6, '0'..='9') => 6, // final float
                 (_, _) => break,
-            }
+            };
             self.next();
         }
 
         let slice = &self.input[start..self.index()];
-        if state == 1 {
-            let num = slice.parse().with_position(self.position)?;
-            Ok(Token::IntLiteral(num))
-        } else {
-            let num = slice.parse().with_position(self.position)?;
-            Ok(Token::FloatLiteral(num))
+        match state {
+            3 => {
+                let slice = &self.input[start + 2..self.index()];
+                let num = u32::from_str_radix(slice, 16).with_position(self.position)?;
+                Ok(Token::IntLiteral(num))
+            }
+            1 | 4 => {
+                let num = u32::from_str_radix(slice, 10).with_position(self.position)?;
+                Ok(Token::IntLiteral(num))
+            }
+            6 => {
+                let num = slice.parse().with_position(self.position)?;
+                Ok(Token::FloatLiteral(num))
+            }
+            _ => Error::lexical("invalid number or hexadecimal", self.position),
         }
     }
 
