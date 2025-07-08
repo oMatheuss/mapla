@@ -8,14 +8,14 @@ extern func ClearBackground(color: int);
 extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: int);
 extern func EndDrawing();
 
+int BLACK = 0xFF000000;
+int RED   = 0xFF0000FF;
+
 func main(): int do
     __main();
 
     InitWindow(800, 450, "RayLib Example");
     SetTargetFPS(60);
-
-    int BLACK = 0;
-    int RED = -16776961;
 
     while WindowShouldClose() == false then
         BeginDrawing();
