@@ -640,10 +640,15 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
 fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
     reserve_cdecl(c);
 
+    let args_len = func.args().len() as isize;
+    let word_size = MemSize::QWord as isize;
+
     let mut stack_offset = match c.target {
-        CompilerTarget::Linux => 0,
-        CompilerTarget::Windows => 32,
+        CompilerTarget::Linux => 0.max(args_len - 6) * word_size,
+        CompilerTarget::Windows => 32 + 0.max(args_len - 4) * word_size,
     };
+
+    c.scope.new_call(stack_offset as usize);
 
     for (arg_num, arg) in func.args().iter().enumerate().rev() {
         let annot = arg.get_annot();
@@ -673,8 +678,8 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
 
         if reg.is_none() {
             let mem_size = arg.mem_size();
+            stack_offset -= word_size;
             let mem = Mem::offset(Reg::Rsp, stack_offset, mem_size);
-            stack_offset += MemSize::QWord as isize;
 
             match arg {
                 Operand::Xmm(..) => asm::code!(c.code, Movss, mem, arg),
@@ -696,11 +701,10 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
     }
 
     asm::code!(c.code, Call, func.name());
-    c.scope.new_call(stack_offset as usize);
     release_cdecl(c);
 
     let func_annot = func.get_annot();
-    
+
     if func_annot.is_float() {
         let xmm = Xmm::xmm0(func_annot.mem_size());
         c.xmms.take(xmm);
