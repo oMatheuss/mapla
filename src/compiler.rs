@@ -700,7 +700,12 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
     release_cdecl(c);
 
     let func_annot = func.get_annot();
-    if !func_annot.is_void() {
+    
+    if func_annot.is_float() {
+        let xmm = Xmm::xmm0(func_annot.mem_size());
+        c.xmms.take(xmm);
+        Operand::Xmm(xmm)
+    } else if !func_annot.is_void() {
         let reg = Reg::acc(func_annot.mem_size());
         c.regs.take(reg);
         Operand::Reg(reg)
