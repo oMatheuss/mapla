@@ -5,7 +5,7 @@ func main(): int do
     real flip = -1.0;
     real i = 1.0;
 
-    for j to 100000 then
+    for j to 100000 do
         flip = -flip;
         sum += flip / ( 2.0 * i - 1.0 );
         i += 1.0;

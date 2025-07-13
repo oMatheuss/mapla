@@ -2,7 +2,7 @@ use io;
 
 func main() do
     int i = 32;
-    while i < 128 then
+    while i < 128 do
         printChar(i);
         i += 1;
     end

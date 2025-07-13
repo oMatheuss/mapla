@@ -1,9 +1,9 @@
 use io;
 
 func main() do
-    for x = 2 to 100 then
+    for x = 2 to 100 do
         int y = 2;
-        while y * y < x && x % y > 0 then
+        while y * y < x && x % y > 0 do
             y += 1;
         end
         if y * y > x then

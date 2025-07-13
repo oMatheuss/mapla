@@ -17,7 +17,7 @@ func main(): int do
     InitWindow(800, 450, "RayLib Example");
     SetTargetFPS(60);
 
-    while WindowShouldClose() == false then
+    while WindowShouldClose() == false do
         BeginDrawing();
         ClearBackground(BLACK);
         DrawText("Hello World", 190, 200, 20, RED);

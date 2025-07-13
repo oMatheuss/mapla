@@ -361,8 +361,8 @@ impl<'a> Parser<'a> {
             Error::syntatic("expected token `to`", self.pos)?
         };
         let limit = self.parse_value()?;
-        let Token::Then = self.next_or_err()? else {
-            Error::syntatic("expected token `then`", self.pos)?
+        let Token::Do = self.next_or_err()? else {
+            Error::syntatic("expected token `do`", self.pos)?
         };
         let inner = self.consume_inner()?;
         AstNode::For((*ident).into(), init, limit, inner).ok()
@@ -371,8 +371,8 @@ impl<'a> Parser<'a> {
     fn consume_while(&mut self) -> Result<AstNode> {
         self.next(); // discard 'while' token
         let expr = self.parse_expr(1)?;
-        let Token::Then = self.next_or_err()? else {
-            Error::syntatic("expected `then`", self.pos)?
+        let Token::Do = self.next_or_err()? else {
+            Error::syntatic("expected `do`", self.pos)?
         };
         let inner = self.consume_inner()?;
         AstNode::While(expr, inner).ok()

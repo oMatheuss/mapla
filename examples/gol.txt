@@ -14,9 +14,9 @@ int DEAD_CELL = 32;
 int ALIVE_CELL = 35;
 
 func printBoard(board: int*) do
-    for y to HEIGHT then
+    for y to HEIGHT do
         int dy = y * WIDTH;
-        for x to WIDTH then
+        for x to WIDTH do
             putchar(board[dy + x]);
         end
         putchar(10);
@@ -25,9 +25,9 @@ end
 
 func createBoard(): int* do
     int* board = malloc(WIDTH * HEIGHT * 4);
-    for y to HEIGHT then
+    for y to HEIGHT do
         int dy = y * WIDTH;
-        for x to WIDTH then
+        for x to WIDTH do
             board[dy + x] = DEAD_CELL;
         end
     end
@@ -42,10 +42,10 @@ end
 
 func checkNeighbors(board: int*, posX: int, posY: int): int do
     int sum = 0;
-    for j = -1 to 2 then
+    for j = -1 to 2 do
         int y = wrapAround(posY + j, HEIGHT);
         int dy = y * WIDTH;
-        for i = -1 to 2 then
+        for i = -1 to 2 do
             if i != 0 || j != 0 then
                 int x = wrapAround(posX + i, WIDTH);
                 if board[dy + x] == ALIVE_CELL then
@@ -59,9 +59,9 @@ end
 
 func updateBoard(actualState: int*) do
     int* nextState = createBoard();
-    for y to HEIGHT then
+    for y to HEIGHT do
         int dy = y * WIDTH;
-        for x to WIDTH then
+        for x to WIDTH do
             int actual = actualState[dy + x];
             int alives = checkNeighbors(actualState, x, y);
             if actual == ALIVE_CELL && alives < 2 then
@@ -84,9 +84,9 @@ end
 
 func randomizeBoard(board: int*) do
     srand(1283);
-    for y to HEIGHT then
+    for y to HEIGHT do
         int dy = y * WIDTH;
-        for x to WIDTH then
+        for x to WIDTH do
             if rand() > 15000 then
                 board[dy + x] = ALIVE_CELL;
             end
@@ -103,7 +103,7 @@ func main(): int do
     int* board = createBoard();
     randomizeBoard(board);
 
-    while true then
+    while true do
         clearTerminal();
         printBoard(board);
         usleep(100000);
