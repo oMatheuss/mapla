@@ -314,8 +314,8 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
             Operand::Xmm(xmm)
         }
         Operand::Mem(mem) => {
-            c.regs.try_push(operand);
             let reg = c.regs.take_any(mem.mem_size());
+            c.regs.try_push(operand);
             asm::code!(c.code, Mov, reg, mem);
             Operand::Reg(reg)
         }
@@ -328,7 +328,7 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
     }
 }
 
-fn move_operand_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
+fn move_reg_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
     match operand {
         Operand::Reg(reg) => {
             c.regs.push(reg);
@@ -337,11 +337,14 @@ fn move_operand_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
             Operand::Mem(mem)
         }
         Operand::Mem(mem) => match mem.base() {
-            asm::MemBase::Reg(reg) if !reg.is_reserved() => {
+            asm::MemBase::Reg(bse) if !bse.is_reserved() => {
+                let tmp = c.scope.new_temp(annot.mem_size());
+                let reg = c.regs.take_any(annot.mem_size());
+                asm::code!(c.code, Mov, reg, mem);
+                asm::code!(c.code, Mov, tmp, reg);
                 c.regs.push(reg);
-                let mem = c.scope.new_temp(annot.mem_size());
-                asm::code!(c.code, Mov, mem, reg);
-                Operand::Mem(mem)
+                c.regs.push(bse);
+                Operand::Mem(tmp)
             }
             _ => operand,
         },
@@ -392,7 +395,7 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
         let lhs = compile_expr_rec(c, bin_op.lhs());
         let lhs = match bin_op.rhs().is_value() {
             true => move_operand_to_reg(c, annot, lhs),
-            false => move_operand_to_mem(c, annot, lhs),
+            false => move_reg_to_mem(c, annot, lhs),
         };
 
         let rhs = compile_expr_rec(c, bin_op.rhs());
@@ -469,7 +472,11 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             lhs
         }
         Operator::Div => {
-            rhs = move_operand_to_reg(c, TypeAnnot::INT, rhs);
+            rhs = move_reg_to_mem(c, TypeAnnot::INT, rhs);
+            if let Operand::Imm(imm) = rhs {
+                rhs = c.scope.new_temp(imm.mem_size()).into();
+                asm::code!(c.code, Mov, rhs, imm);
+            }
             let (acc, bkp) = match lhs {
                 Operand::Reg(acc) if acc.is_acc() => (acc, None),
                 _ => {
@@ -492,7 +499,11 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             lhs
         }
         Operator::Mod => {
-            rhs = move_operand_to_reg(c, TypeAnnot::INT, rhs);
+            rhs = move_reg_to_mem(c, TypeAnnot::INT, rhs);
+            if let Operand::Imm(imm) = rhs {
+                rhs = c.scope.new_temp(imm.mem_size()).into();
+                asm::code!(c.code, Mov, rhs, imm);
+            }
             let bkp = match lhs {
                 Operand::Reg(acc) if acc.is_acc() => None,
                 _ => {
@@ -871,6 +882,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                         asm::code!(c.code, Mov, reg, mem);
                         asm::code!(c.code, Mov, local, reg);
                         c.regs.push(reg);
+                        c.regs.try_push(mem.into());
                     }
                     Operand::Imm(..) => {
                         asm::code!(c.code, Mov, local, result);
