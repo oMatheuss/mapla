@@ -296,31 +296,31 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
     match operand {
         Operand::Mem(mem) if annot.is_float() => {
             c.regs.try_push(operand);
-            let xmm = c.xmms.take_any(mem.mem_size());
+            let xmm = c.xmms.take_any(mem.mem_size()).expect("register available");
             asm::code!(c.code, Movss, xmm, mem);
             Operand::Xmm(xmm)
         }
         Operand::Reg(reg) if annot.is_float() => {
             c.regs.push(reg);
-            let xmm = c.xmms.take_any(reg.mem_size());
+            let xmm = c.xmms.take_any(reg.mem_size()).expect("register available");
             asm::code!(c.code, Movd, xmm, reg);
             Operand::Xmm(xmm)
         }
         Operand::Imm(imm) if annot.is_float() => {
-            let xmm = c.xmms.take_any(imm.mem_size());
+            let xmm = c.xmms.take_any(imm.mem_size()).expect("register available");
             let tmp = c.scope.new_temp(imm.mem_size());
             asm::code!(c.code, Mov, tmp, imm);
             asm::code!(c.code, Movss, xmm, tmp);
             Operand::Xmm(xmm)
         }
         Operand::Mem(mem) => {
-            let reg = c.regs.take_any(mem.mem_size());
+            let reg = c.regs.take_any(mem.mem_size()).expect("register available");
             c.regs.try_push(operand);
             asm::code!(c.code, Mov, reg, mem);
             Operand::Reg(reg)
         }
         Operand::Imm(imm) => {
-            let reg = c.regs.take_any(imm.mem_size());
+            let reg = c.regs.take_any(imm.mem_size()).expect("register available");
             asm::code!(c.code, Mov, reg, imm);
             Operand::Reg(reg)
         }
@@ -339,7 +339,10 @@ fn move_reg_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Oper
         Operand::Mem(mem) => match mem.base() {
             asm::MemBase::Reg(bse) if !bse.is_reserved() => {
                 let tmp = c.scope.new_temp(annot.mem_size());
-                let reg = c.regs.take_any(annot.mem_size());
+                let reg = c
+                    .regs
+                    .take_any(annot.mem_size())
+                    .expect("register available");
                 asm::code!(c.code, Mov, reg, mem);
                 asm::code!(c.code, Mov, tmp, reg);
                 c.regs.push(reg);
@@ -352,12 +355,30 @@ fn move_reg_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Oper
     }
 }
 
+fn backup_reg(c: &mut Compiler, reg: Reg) -> Option<Reg> {
+    if !c.regs.ensure(reg) {
+        let bkp = c.regs.take_any(MemSize::QWord).expect("register available");
+        let reg = c.regs.switch_size(reg, MemSize::QWord);
+        asm::code!(c.code, Mov, bkp, reg);
+        Some(bkp)
+    } else {
+        None
+    }
+}
+
+fn restore_reg(c: &mut Compiler, reg: Reg, bkp: Option<Reg>) {
+    if let Some(bkp) = bkp {
+        asm::code!(c.code, Mov, reg, bkp);
+        c.regs.push(bkp);
+    }
+}
+
 fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
     match value {
         ValueExpr::String(string) => {
             let label = Lbl::new();
             c.data.insert(label, string.as_bytes().to_vec());
-            let reg = c.regs.take_any(MemSize::QWord);
+            let reg = c.regs.take_any(MemSize::QWord).expect("register available");
             asm::code!(c.code, Lea, reg, Mem::lbl(label, MemSize::QWord));
             Operand::Reg(reg)
         }
@@ -371,7 +392,7 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
             Annotation::Value | Annotation::Pointer => Operand::Mem(c.scope.get(id)),
             Annotation::Array(..) => {
                 let mem = c.scope.get(id);
-                let reg = c.regs.take_any(MemSize::QWord);
+                let reg = c.regs.take_any(MemSize::QWord).expect("register available");
                 asm::code!(c.code, Lea, reg, mem);
                 Operand::Reg(reg)
             }
@@ -410,7 +431,7 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
     }
 }
 
-fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
+fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> Operand {
     assert!(ope.is_assign() == lhs.is_mem());
     assert!(lhs.mem_size() == rhs.mem_size());
 
@@ -472,58 +493,121 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             lhs
         }
         Operator::Div => {
-            rhs = move_reg_to_mem(c, TypeAnnot::INT, rhs);
-            if let Operand::Imm(imm) = rhs {
-                rhs = c.scope.new_temp(imm.mem_size()).into();
-                asm::code!(c.code, Mov, rhs, imm);
-            }
-            let (acc, bkp) = match lhs {
-                Operand::Reg(acc) if acc.is_acc() => (acc, None),
-                _ => {
-                    let bkp = c.regs.take_any(MemSize::QWord);
-                    let acc = Reg::acc(lhs.mem_size());
-                    asm::code!(c.code, Mov, bkp, Reg::acc(MemSize::QWord));
-                    asm::code!(c.code, Mov, acc, lhs);
-                    (acc, Some(bkp))
+            let lhs = lhs.expect_reg();
+            let rhs = match rhs {
+                Operand::Imm(imm) => {
+                    let tmp = c.scope.new_temp(imm.mem_size()).into();
+                    asm::code!(c.code, Mov, rhs, imm);
+                    tmp
                 }
+                _ => move_reg_to_mem(c, TypeAnnot::INT, rhs),
             };
-            // TODO: also backup Edx
-            c.regs.ensure(Reg::Edx);
-            asm::code!(c.code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
-            asm::code!(c.code, Idiv, rhs); // divisor (rhs)
-            if let Some(reg) = bkp {
-                c.regs.push(reg);
-                asm::code!(c.code, Mov, lhs, acc);
-                asm::code!(c.code, Mov, Reg::acc(MemSize::QWord), reg);
+
+            if lhs.is_acc() {
+                let bkp_dta = backup_reg(c, Reg::Rdx);
+                asm::code!(c.code, Xor, Reg::Rdx, Reg::Rdx); // remainder
+                asm::code!(c.code, Idiv, rhs); // divisor (rhs)
+                restore_reg(c, Reg::Rdx, bkp_dta);
+                Operand::Reg(lhs)
+            } else if lhs.is_dta() {
+                let bkp_acc = backup_reg(c, Reg::Rax);
+                asm::code!(c.code, Mov, Reg::acc(lhs.mem_size()), lhs);
+                asm::code!(c.code, Xor, Reg::Rdx, Reg::Rdx); // remainder
+                asm::code!(c.code, Idiv, rhs); // divisor (rhs)
+                asm::code!(c.code, Mov, lhs, Reg::acc(lhs.mem_size()));
+                restore_reg(c, Reg::Rax, bkp_acc);
+                Operand::Reg(lhs)
+            } else {
+                let bkp_dta = backup_reg(c, Reg::Rdx);
+                let bkp_acc = backup_reg(c, Reg::Rax);
+                asm::code!(c.code, Mov, Reg::acc(lhs.mem_size()), lhs);
+                asm::code!(c.code, Xor, Reg::Rdx, Reg::Rdx); // remainder
+                asm::code!(c.code, Idiv, rhs); // divisor (rhs)
+                asm::code!(c.code, Mov, lhs, Reg::acc(lhs.mem_size()));
+                restore_reg(c, Reg::Rdx, bkp_dta);
+                restore_reg(c, Reg::Rax, bkp_acc);
+                Operand::Reg(lhs)
             }
-            lhs
         }
         Operator::Mod => {
-            rhs = move_reg_to_mem(c, TypeAnnot::INT, rhs);
-            if let Operand::Imm(imm) = rhs {
-                rhs = c.scope.new_temp(imm.mem_size()).into();
-                asm::code!(c.code, Mov, rhs, imm);
-            }
-            let bkp = match lhs {
-                Operand::Reg(acc) if acc.is_acc() => None,
-                _ => {
-                    let bkp = c.regs.take_any(MemSize::QWord);
-                    asm::code!(c.code, Mov, bkp, Reg::acc(MemSize::QWord));
-                    asm::code!(c.code, Mov, Reg::acc(lhs.mem_size()), lhs);
-                    Some(bkp)
+            let lhs = lhs.expect_reg();
+            let rhs = match rhs {
+                Operand::Imm(imm) => {
+                    let tmp = c.scope.new_temp(imm.mem_size()).into();
+                    asm::code!(c.code, Mov, rhs, imm);
+                    tmp
                 }
+                _ => move_reg_to_mem(c, TypeAnnot::INT, rhs),
             };
-            // TODO: also backup Edx
-            c.regs.ensure(Reg::Edx);
-            asm::code!(c.code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
-            asm::code!(c.code, Idiv, rhs); // divisor (rhs)
-            if let Some(reg) = bkp {
-                c.regs.push(reg);
-                asm::code!(c.code, Mov, Reg::acc(MemSize::QWord), reg);
+
+            if lhs.is_acc() {
+                let bkp_dta = backup_reg(c, Reg::Rdx);
+                asm::code!(c.code, Xor, Reg::Rdx, Reg::Rdx); // remainder
+                asm::code!(c.code, Idiv, rhs); // divisor (rhs)
+                asm::code!(c.code, Mov, lhs, Reg::dta(lhs.mem_size()));
+                restore_reg(c, Reg::Rdx, bkp_dta);
+                Operand::Reg(lhs)
+            } else if lhs.is_dta() {
+                let bkp_acc = backup_reg(c, Reg::Rax);
+                asm::code!(c.code, Mov, Reg::acc(lhs.mem_size()), lhs);
+                asm::code!(c.code, Xor, Reg::Rdx, Reg::Rdx); // remainder
+                asm::code!(c.code, Idiv, rhs); // divisor (rhs)
+                restore_reg(c, Reg::Rax, bkp_acc);
+                Operand::Reg(lhs)
+            } else {
+                let bkp_dta = backup_reg(c, Reg::Rdx);
+                let bkp_acc = backup_reg(c, Reg::Rax);
+                asm::code!(c.code, Mov, Reg::acc(lhs.mem_size()), lhs);
+                asm::code!(c.code, Xor, Reg::Rdx, Reg::Rdx); // remainder
+                asm::code!(c.code, Idiv, rhs); // divisor (rhs)
+                asm::code!(c.code, Mov, lhs, Reg::dta(lhs.mem_size()));
+                restore_reg(c, Reg::Rdx, bkp_dta);
+                restore_reg(c, Reg::Rax, bkp_acc);
+                Operand::Reg(lhs)
             }
-            asm::code!(c.code, Mov, lhs, Reg::dta(lhs.mem_size()));
-            lhs
         }
+        Operator::Shr => match rhs {
+            Operand::Reg(reg) if reg.is_cnt() => {
+                asm::code!(c.code, Shr, lhs, c.regs.switch_size(reg, MemSize::Byte));
+                lhs
+            }
+            Operand::Reg(reg) => {
+                let bkp = backup_reg(c, Reg::Rcx);
+                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
+                asm::code!(c.code, Shr, lhs, Reg::Cl);
+                restore_reg(c, Reg::Rcx, bkp);
+                lhs
+            }
+            _ => {
+                let reg = move_operand_to_reg(c, TypeAnnot::INT, rhs).expect_reg();
+                let bkp = backup_reg(c, Reg::Rcx);
+                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
+                asm::code!(c.code, Shr, lhs, Reg::Cl);
+                restore_reg(c, Reg::Rcx, bkp);
+                lhs
+            }
+        },
+        Operator::Shl => match rhs {
+            Operand::Reg(reg) if reg.is_cnt() => {
+                asm::code!(c.code, Shl, lhs, c.regs.switch_size(reg, MemSize::Byte));
+                lhs
+            }
+            Operand::Reg(reg) => {
+                let bkp = backup_reg(c, Reg::Rcx);
+                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
+                asm::code!(c.code, Shl, lhs, Reg::Cl);
+                restore_reg(c, Reg::Rcx, bkp);
+                lhs
+            }
+            _ => {
+                let reg = move_operand_to_reg(c, TypeAnnot::INT, rhs).expect_reg();
+                let bkp = backup_reg(c, Reg::Rcx);
+                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
+                asm::code!(c.code, Shl, lhs, Reg::Cl);
+                restore_reg(c, Reg::Rcx, bkp);
+                lhs
+            }
+        },
         Operator::Assign => {
             asm::code!(c.code, Mov, lhs, rhs);
             lhs
@@ -537,7 +621,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             lhs
         }
         Operator::MulAssign => {
-            let reg = c.regs.take_any(lhs.mem_size());
+            let reg = c.regs.take_any(lhs.mem_size()).expect("register available");
             asm::code!(c.code, Mov, reg, lhs);
             asm::code!(c.code, Imul, reg, rhs);
             asm::code!(c.code, Mov, lhs, reg);
@@ -545,7 +629,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             lhs
         }
         Operator::DivAssign => {
-            let reg = c.regs.take_any(lhs.mem_size());
+            let reg = c.regs.take_any(lhs.mem_size()).expect("register available");
             asm::code!(c.code, Mov, reg, lhs); // quotient (lhs)
             asm::code!(c.code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
             asm::code!(c.code, Idiv, rhs); // divisor (rhs)
@@ -572,14 +656,14 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         Operator::Equal => todo!(),
         Operator::NotEqual => todo!(),
         Operator::Greater => {
-            let reg = c.regs.take_any(MemSize::Byte);
+            let reg = c.regs.take_any(MemSize::Byte).expect("register available");
             asm::code!(c.code, Comiss, lhs, rhs);
             asm::code!(c.code, Setg, reg);
             Operand::Reg(reg)
         }
         Operator::GreaterEqual => todo!(),
         Operator::Less => {
-            let reg = c.regs.take_any(MemSize::Byte);
+            let reg = c.regs.take_any(MemSize::Byte).expect("register available");
             asm::code!(c.code, Comiss, lhs, rhs);
             asm::code!(c.code, Setl, reg);
             Operand::Reg(reg)
@@ -609,9 +693,11 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             asm::code!(c.code, Movss, lhs, rhs);
             lhs
         }
+        Operator::Shr => todo!(),
+        Operator::Shl => todo!(),
         Operator::AddAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
             asm::code!(c.code, Movss, xmm, lhs);
             asm::code!(c.code, Addss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
@@ -619,7 +705,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         }
         Operator::SubAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
             asm::code!(c.code, Movss, xmm, lhs);
             asm::code!(c.code, Subss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
@@ -627,7 +713,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         }
         Operator::MulAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
             asm::code!(c.code, Movss, xmm, lhs);
             asm::code!(c.code, Mulss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
@@ -635,7 +721,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         }
         Operator::DivAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size());
+            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
             asm::code!(c.code, Divss, xmm, lhs);
             asm::code!(c.code, Addss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
@@ -699,7 +785,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
                     asm::code!(c.code, Mov, mem, reg);
                 }
                 Operand::Mem(..) => {
-                    let reg = c.regs.take_any(mem_size);
+                    let reg = c.regs.take_any(mem_size).expect("register available");
                     asm::code!(c.code, Mov, reg, arg);
                     asm::code!(c.code, Mov, mem, reg);
                     c.regs.push(reg);
@@ -737,7 +823,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                 panic!("operator AddressOf can only be used on vars");
             };
             let mem = c.scope.get(id);
-            let reg = c.regs.take_any(MemSize::QWord);
+            let reg = c.regs.take_any(MemSize::QWord).expect("register available");
             asm::code!(c.code, Lea, reg, mem);
             Operand::Reg(reg)
         }
@@ -746,7 +832,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                 panic!("operator Dereference can only be used on vars");
             };
             let mem = c.scope.get(id);
-            let reg = c.regs.take_any(MemSize::QWord);
+            let reg = c.regs.take_any(MemSize::QWord).expect("register available");
             let tmp = c.scope.new_temp(annot.mem_size());
             asm::code!(c.code, Mov, reg, mem);
             asm::code!(c.code, Mov, tmp, Mem::reg(reg, annot.mem_size()));
@@ -763,7 +849,10 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                         operand
                     }
                     Operand::Imm(..) | Operand::Mem(..) => {
-                        let reg = c.regs.take_any(operand.mem_size());
+                        let reg = c
+                            .regs
+                            .take_any(operand.mem_size())
+                            .expect("register available");
                         asm::code!(c.code, Mov, reg, operand);
                         asm::code!(c.code, Neg, reg);
                         Operand::Reg(reg)
@@ -778,7 +867,10 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                         operand
                     }
                     Operand::Imm(..) | Operand::Mem(..) => {
-                        let reg = c.regs.take_any(operand.mem_size());
+                        let reg = c
+                            .regs
+                            .take_any(operand.mem_size())
+                            .expect("register available");
                         asm::code!(c.code, Mov, reg, operand);
                         asm::code!(c.code, Xor, reg, Imm::Int32(MINUS_BIT as i32));
                         Operand::Reg(reg)
@@ -802,7 +894,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     operand
                 }
                 Operand::Imm(imm) => {
-                    let reg = c.regs.take_any(imm.mem_size());
+                    let reg = c.regs.take_any(imm.mem_size()).expect("register available");
                     asm::code!(c.code, Mov, reg, imm);
                     asm::code!(c.code, Not, reg);
                     Operand::Reg(reg)
@@ -825,7 +917,10 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     let reg = match compile_expr_rec(c, index.index()) {
         Operand::Reg(reg) => reg,
         offset => {
-            let reg = c.regs.take_any(offset.mem_size());
+            let reg = c
+                .regs
+                .take_any(offset.mem_size())
+                .expect("register available");
             c.regs.try_push(offset);
             asm::code!(c.code, Mov, reg, offset);
             reg
@@ -878,7 +973,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                         asm::code!(c.code, Movss, local, xmm);
                     }
                     Operand::Mem(mem) => {
-                        let reg = c.regs.take_any(mem.mem_size());
+                        let reg = c.regs.take_any(mem.mem_size()).expect("register available");
                         asm::code!(c.code, Mov, reg, mem);
                         asm::code!(c.code, Mov, local, reg);
                         c.regs.push(reg);
@@ -895,7 +990,8 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             let mut result = compile_expr(c, expr);
             if let Operand::Imm(imm) = result {
-                result = Operand::Reg(c.regs.take_any(imm.mem_size()));
+                let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                result = Operand::Reg(reg);
                 asm::code!(c.code, Mov, result, imm);
             }
 
@@ -921,7 +1017,8 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             let mut result = compile_expr(c, expr);
             if let Operand::Imm(imm) = result {
-                result = Operand::Reg(c.regs.take_any(imm.mem_size()));
+                let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                result = Operand::Reg(reg);
                 asm::code!(c.code, Mov, result, imm);
             }
 
@@ -948,7 +1045,10 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             let counter = c.scope.new_local(ident, MemSize::DWord);
             let init = match init {
-                Some(expr) => compile_value(c, expr),
+                Some(expr) => {
+                    let value = compile_value(c, expr);
+                    move_operand_to_reg(c, expr.get_annot(), value)
+                }
                 None => Imm::Int32(0).into(),
             };
 

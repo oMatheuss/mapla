@@ -261,6 +261,8 @@ impl<'a> Parser<'a> {
             Token::Mul => Operator::Mul,
             Token::Div => Operator::Div,
             Token::Mod => Operator::Mod,
+            Token::Shr => Operator::Shr,
+            Token::Shl => Operator::Shl,
             Token::Assign => Operator::Assign,
             Token::AddAssign => Operator::AddAssign,
             Token::SubAssign => Operator::SubAssign,
@@ -297,6 +299,8 @@ impl<'a> Parser<'a> {
             | Operator::Sub
             | Operator::Mul
             | Operator::Div
+            | Operator::Shr
+            | Operator::Shl
             | Operator::AddAssign
             | Operator::SubAssign
             | Operator::MulAssign

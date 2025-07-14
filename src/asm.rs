@@ -353,6 +353,10 @@ impl Reg {
     pub fn is_cnt(&self) -> bool {
         matches!(self, Self::Rcx | Self::Ecx | Self::Cx | Self::Cl)
     }
+
+    pub fn is_dta(&self) -> bool {
+        matches!(self, Self::Rdx | Self::Edx | Self::Dx | Self::Dl)
+    }
 }
 
 impl MemSized for Reg {
@@ -842,9 +846,9 @@ where
 {
     fn new() -> Self;
     fn push(&mut self, ope: T);
-    fn take(&mut self, ope: T);
-    fn take_any(&mut self, mem_size: MemSize) -> T;
-    fn ensure(&mut self, ope: T);
+    fn take(&mut self, ope: T) -> bool;
+    fn take_any(&mut self, mem_size: MemSize) -> Option<T>;
+    fn ensure(&mut self, ope: T) -> bool;
     fn switch_size(&mut self, ope: T, mem_size: MemSize) -> T;
 }
 
@@ -882,31 +886,26 @@ where
         };
     }
 
-    fn take(&mut self, ope: T) {
+    fn take(&mut self, ope: T) -> bool {
         match self.registers.get_mut(Self::name(ope)) {
-            Some(true) => panic!("register is already in use: {ope}"),
-            Some(in_use) => *in_use = true,
-            None => panic!("register does not exists"),
+            Some(in_use @ false) => *in_use = true,
+            Some(true) | None => return false,
         };
+        return true;
     }
 
-    fn take_any(&mut self, mem_size: MemSize) -> T {
-        let reg = self
-            .registers
-            .iter_mut()
-            .find(|r| !*r.1)
-            .expect("any register available");
+    fn take_any(&mut self, mem_size: MemSize) -> Option<T> {
+        let reg = self.registers.iter_mut().find(|r| !*r.1)?;
 
         *reg.1 = true;
-        Self::get_reg(reg.0, mem_size)
+        Some(Self::get_reg(reg.0, mem_size))
     }
 
-    fn ensure(&mut self, ope: T) {
+    fn ensure(&mut self, ope: T) -> bool {
         match self.registers.get(Self::name(ope)) {
-            Some(true) => panic!("register is already in use: {ope}"),
-            Some(false) => {}
-            None => panic!("register does not exists"),
-        };
+            Some(false) => true,
+            Some(true) | None => false,
+        }
     }
 
     fn switch_size(&mut self, ope: T, mem_size: MemSize) -> T {

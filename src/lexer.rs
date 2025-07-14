@@ -178,10 +178,18 @@ impl<'a> Lexer<'a> {
                 self.next();
                 Token::GreaterEqual
             }
+            ('>', Some('>')) => {
+                self.next();
+                Token::Shr
+            }
             ('>', _) => Token::Greater,
             ('<', Some('=')) => {
                 self.next();
                 Token::LessEqual
+            }
+            ('<', Some('<')) => {
+                self.next();
+                Token::Shl
             }
             ('<', _) => Token::Less,
             ('&', Some('&')) => {

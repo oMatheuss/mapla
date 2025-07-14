@@ -486,6 +486,8 @@ pub enum Operator {
     Mul,
     Div,
     Mod,
+    Shr,
+    Shl,
     Assign,
     AddAssign,
     SubAssign,
@@ -496,8 +498,9 @@ pub enum Operator {
 impl Operator {
     pub fn precedence(&self) -> u8 {
         match self {
-            Operator::Mul | Operator::Div | Operator::Mod => 7,
-            Operator::Add | Operator::Sub => 6,
+            Operator::Mul | Operator::Div | Operator::Mod => 8,
+            Operator::Add | Operator::Sub => 7,
+            Operator::Shl | Operator::Shr => 6,
             Operator::Greater | Operator::GreaterEqual | Operator::Less | Operator::LessEqual => 5,
             Operator::Equal | Operator::NotEqual => 4,
             Operator::And => 3,

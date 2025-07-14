@@ -34,6 +34,8 @@ pub enum Token<'a> {
     Mul,
     Div,
     Mod,
+    Shr,
+    Shl,
     Assign,
     AddAssign,
     SubAssign,
