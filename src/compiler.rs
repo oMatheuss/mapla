@@ -497,7 +497,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
             let rhs = match rhs {
                 Operand::Imm(imm) => {
                     let tmp = c.scope.new_temp(imm.mem_size()).into();
-                    asm::code!(c.code, Mov, rhs, imm);
+                    asm::code!(c.code, Mov, tmp, imm);
                     tmp
                 }
                 _ => move_reg_to_mem(c, TypeAnnot::INT, rhs),
@@ -534,7 +534,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
             let rhs = match rhs {
                 Operand::Imm(imm) => {
                     let tmp = c.scope.new_temp(imm.mem_size()).into();
-                    asm::code!(c.code, Mov, rhs, imm);
+                    asm::code!(c.code, Mov, tmp, imm);
                     tmp
                 }
                 _ => move_reg_to_mem(c, TypeAnnot::INT, rhs),
