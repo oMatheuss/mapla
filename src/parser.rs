@@ -156,6 +156,11 @@ impl<'a> Parser<'a> {
         let token: &Token<'_> = self.next_or_err()?;
 
         let expr = match *token {
+            Token::StrLiteral(string) => Expression::string(string),
+            Token::IntLiteral(int) => Expression::int(int as i32),
+            Token::FloatLiteral(float) => Expression::float(float),
+            Token::True => Expression::TRUE,
+            Token::False => Expression::FALSE,
             Token::Identifier(id) if matches!(self.peek(), Some(Token::OpenParen)) => {
                 let Some(symbol) = self.symbols.find(id).cloned() else {
                     Error::syntatic("symbol not found in scope", self.pos)?
@@ -192,11 +197,6 @@ impl<'a> Parser<'a> {
                 };
                 Expression::identifier(symbol.annot, id)
             }
-            Token::StrLiteral(string) => Expression::string(string),
-            Token::IntLiteral(int) => Expression::int(int as i32),
-            Token::FloatLiteral(float) => Expression::float(float),
-            Token::True => Expression::TRUE,
-            Token::False => Expression::FALSE,
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(1)?;
                 let Token::CloseParen = self.next_or_err()? else {
@@ -204,47 +204,26 @@ impl<'a> Parser<'a> {
                 };
                 inner_expr
             }
-            Token::Ampersand => {
-                let Token::Identifier(id) = *self.next_or_err()? else {
-                    Error::syntatic("a ref can only be taken from a var", self.pos)?
-                };
-                let Some(symbol) = self.symbols.find(id).cloned() else {
-                    Error::syntatic("symbol not found in scope", self.pos)?
-                };
-                if symbol.annot.is_ref() {
-                    Error::syntatic("double references are not supported", self.pos)?
-                }
-                let operand = ValueExpr::Identifier(symbol.annot, id.into());
-                let annot = TypeAnnot::new_ptr(symbol.annot.inner_type());
-                Expression::una_op(UnaryOperator::AddressOf, operand.into(), annot)
-            }
-            Token::Sub => {
-                let operand = self.parse_atom()?;
-                let annot = operand.get_annot();
-                match operand {
-                    Expression::Value(ValueExpr::Int(int)) => Expression::int(-int),
-                    Expression::Value(ValueExpr::Float(float)) => Expression::float(-float),
-                    _ if annot.is_number() => {
-                        Expression::una_op(UnaryOperator::Minus, operand, annot)
-                    }
-                    _ => Error::syntatic("cannot apply unary minus here", self.pos)?,
-                }
-            }
-            Token::Mul => {
-                let operand = self.parse_atom()?;
-                let annot = operand.get_annot();
-                if !annot.is_ref() || !annot.is_int() {
-                    Error::syntatic("can only dereference addresses", self.pos)?
-                }
-                Expression::una_op(UnaryOperator::Dereference, operand, annot)
-            }
             _ => Error::syntatic("unexpected token", self.pos)?,
         };
 
         Ok(expr)
     }
 
-    fn peek_operator(&mut self) -> Option<Operator> {
+    fn peek_unaop(&mut self) -> Option<UnaryOperator> {
+        let token = self.peek()?;
+
+        let op = match token {
+            Token::Ampersand => UnaryOperator::AddressOf,
+            Token::Sub => UnaryOperator::Minus,
+            Token::Mul => UnaryOperator::Dereference,
+            _ => return None,
+        };
+
+        Some(op)
+    }
+
+    fn peek_binop(&mut self) -> Option<Operator> {
         let token = self.peek()?;
 
         let op = match token {
@@ -274,7 +253,34 @@ impl<'a> Parser<'a> {
         Some(op)
     }
 
-    fn check_expr(
+    fn check_unaexpr(&mut self, op: UnaryOperator, operand: &Expression) -> Result<TypeAnnot> {
+        let annot = operand.get_annot();
+        match op {
+            UnaryOperator::AddressOf if annot.is_ref() => {
+                Error::syntatic("double references are not supported", self.pos)
+            }
+            UnaryOperator::AddressOf if operand.is_ident() => {
+                Ok(TypeAnnot::new_ptr(annot.inner_type()))
+            }
+            UnaryOperator::AddressOf => {
+                Error::syntatic("a ref can only be taken from a var", self.pos)
+            }
+
+            UnaryOperator::Minus if annot.is_number() => Ok(annot),
+            UnaryOperator::Minus => Error::syntatic("cannot apply unary minus here", self.pos),
+
+            UnaryOperator::Dereference if annot.is_ref() => Ok(TypeAnnot::new(annot.inner_type())),
+            UnaryOperator::Dereference if annot.is_int() => Ok(TypeAnnot::VOID),
+            UnaryOperator::Dereference => {
+                Error::syntatic("can only dereference addresses", self.pos)
+            }
+
+            UnaryOperator::Not => todo!(),
+            UnaryOperator::BitwiseNot => todo!(),
+        }
+    }
+
+    fn check_binexpr(
         &mut self,
         op: Operator,
         lhs: &Expression,
@@ -317,10 +323,18 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Result<Expression> {
-        let mut lhs = self.parse_atom()?;
+        let mut lhs = match self.peek_unaop() {
+            Some(op) => {
+                let operand = self.parse_atom()?;
+                let result = self.check_unaexpr(op, &operand)?;
+
+                Expression::una_op(op, operand, result)
+            }
+            None => self.parse_atom()?,
+        };
 
         loop {
-            let Some(op) = self.peek_operator() else {
+            let Some(op) = self.peek_binop() else {
                 break;
             };
 
@@ -333,7 +347,7 @@ impl<'a> Parser<'a> {
             self.next(); // consume operator
 
             let rhs = self.parse_expr(min_prec)?;
-            let result = self.check_expr(op, &lhs, &rhs)?;
+            let result = self.check_binexpr(op, &lhs, &rhs)?;
 
             lhs = Expression::bin_op(op, lhs, rhs, result);
         }

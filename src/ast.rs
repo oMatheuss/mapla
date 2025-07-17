@@ -404,6 +404,11 @@ impl Expression {
     pub fn is_index(&self) -> bool {
         matches!(self, Self::Index(..))
     }
+
+    #[inline]
+    pub fn is_ident(&self) -> bool {
+        matches!(self, Self::Value(ValueExpr::Identifier(..)))
+    }
 }
 
 impl Annotated for Expression {
