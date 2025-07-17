@@ -336,6 +336,7 @@ impl<'a> Parser<'a> {
     fn parse_expr(&mut self, min_prec: u8) -> Result<Expression> {
         let mut lhs = match self.peek_unaop() {
             Some(op) => {
+                self.next_or_err()?;
                 let operand = self.parse_atom()?;
                 let result = self.check_unaexpr(op, &operand)?;
 
