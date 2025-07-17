@@ -3,18 +3,18 @@
 use std::fmt::{Display, Write};
 
 pub enum OpCode {
-    Db, // Declare byte (1 byte)
-    Dw, // Declare word (2 bytes)
-    Dd, // Declare double word (4 bytes)
-    Dq, // Declare quad word (8 bytes)
-    Dt, // Declare ten word (10 bytes)
+    Db,
+    Dw,
+    Dd,
+    Dq,
+    Dt,
 
-    Jmp, // Jump incondicional
-    Je,  // Jump if equal
-    Jne, // Jump if not equal
-    Jg,  // Jump if greater than
+    Jmp,
+    Je,
+    Jne,
+    Jg,
     Jge,
-    Jl, // Jump if less than
+    Jl,
     Jle,
 
     Sete,
@@ -24,18 +24,18 @@ pub enum OpCode {
     Setl,
     Setle,
 
-    Inc,  // Increment one
-    Dec,  // Decrement one
-    Mov,  // Move x into y
-    Movd, // Move double word
-    Movq, // Move double word
-    Cmp,  // Compare two values
-    Lea,  // Load effective address
+    Inc,
+    Dec,
+    Mov,
+    Movd,
+    Movq,
+    Cmp,
+    Lea,
 
-    Push, // Push from reg/mem into stack
-    Pop,  // Pop value from the stack into reg/mem
-    Call, // Push next address then jumps to label,
-    Ret,  // Pop value and jumps to it
+    Push,
+    Pop,
+    Call,
+    Ret,
 
     Add,
     Sub,
@@ -47,19 +47,22 @@ pub enum OpCode {
     And,
     Or,
     Not,
-    Xor, // Exclusive or
-    Shl, // Shift left
-    Shr, // Shift right
-    Neg, // Negate
+    Xor,
+    Shl,
+    Shr,
+    Neg,
 
-    Movss,  // mov f32 to/from xmm to xmm/memory
-    Comiss, // compares f32 and set eflags (branchfull)
-    Cmpss,  // xmm1, xmm2/mem, imm (branchless)
+    Movss,
+    Comiss,
+    Cmpss,
 
     Addss,
     Subss,
     Mulss,
     Divss,
+
+    Cvtss2si,
+    Cvtsi2ss,
 
     Syscall,
     Nop,
@@ -118,6 +121,8 @@ impl Display for OpCode {
             OpCode::Subss => write!(f, "subss"),
             OpCode::Mulss => write!(f, "mulss"),
             OpCode::Divss => write!(f, "divss"),
+            OpCode::Cvtss2si => write!(f, "cvtss2si"),
+            OpCode::Cvtsi2ss => write!(f, "cvtsi2ss"),
             OpCode::Syscall => write!(f, "syscall"),
             OpCode::Nop => write!(f, "nop"),
         }
@@ -127,30 +132,14 @@ impl Display for OpCode {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[rustfmt::skip]
 pub enum Reg {
-    // accumulator
     Rax, Eax, Ax, Ah, Al,
-
-    // counter
     Rcx, Ecx, Cx, Ch, Cl,
-
-    // data
     Rdx, Edx, Dx, Dh, Dl,
-
-    // base
     Rbx, Ebx, Bx, Bh, Bl,
-
-    // stack pointer
     Rsp, Esp, Sp, Spl,
-
-    // base pointer
     Rbp, Ebp, Bp, Bpl,
-
-    // source index
     Rsi, Esi, Si, Sil,
-
-    // destination index
     Rdi, Edi, Di, Dil,
-
     R8,  R8D, R8W, R8B,
     R9,  R9D, R9W, R9B,
     R10, R10D, R10W, R10B,
