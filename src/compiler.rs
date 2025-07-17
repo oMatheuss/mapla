@@ -8,7 +8,8 @@ use crate::asm::{
 };
 use crate::ast::{
     Annotated, Annotation, Argument, Ast, AstNode, AstRoot, BinaryOp, Expression, FunctionCall,
-    Identifier, Indexing, Operator, TypeAnnot, UnaryOp, UnaryOperator, ValueExpr, VarType,
+    Identifier, Indexing, Operator, TypeAnnot, TypeCast, UnaryOp, UnaryOperator, ValueExpr,
+    VarType,
 };
 use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
@@ -795,6 +796,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
         }
 
         c.regs.try_push(arg);
+        c.xmms.try_push(arg);
     }
 
     asm::code!(c.code, Call, func.name());
@@ -935,6 +937,66 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     Operand::Mem(Mem::reg(reg, size))
 }
 
+fn compile_cast(c: &mut Compiler, cast: &TypeCast) -> Operand {
+    let value = cast.value();
+    let cast_from = value.get_annot();
+    let cast_to = cast.get_annot();
+
+    let operand = compile_expr_rec(c, value);
+    if cast_from.is_float() && cast_to.is_int() {
+        match operand {
+            Operand::Mem(..) | Operand::Xmm(..) => {
+                let reg = c
+                    .regs
+                    .take_any(operand.mem_size())
+                    .expect("register available");
+                asm::code!(c.code, Cvtss2si, reg, operand);
+                Operand::Reg(reg)
+            }
+            Operand::Imm(imm) => {
+                let tmp = c.scope.new_temp(operand.mem_size());
+                let reg = c
+                    .regs
+                    .take_any(operand.mem_size())
+                    .expect("register available");
+                asm::code!(c.code, Mov, tmp, imm);
+                asm::code!(c.code, Cvtss2si, reg, tmp);
+                Operand::Reg(reg)
+            }
+            Operand::Reg(reg) => {
+                let tmp = c.scope.new_temp(operand.mem_size());
+                asm::code!(c.code, Mov, tmp, reg);
+                asm::code!(c.code, Cvtss2si, reg, tmp);
+                Operand::Reg(reg)
+            }
+        }
+    } else if cast_from.is_int() && cast_to.is_float() {
+        match operand {
+            Operand::Reg(..) | Operand::Mem(..) => {
+                let xmm = c
+                    .xmms
+                    .take_any(operand.mem_size())
+                    .expect("register available");
+                asm::code!(c.code, Cvtsi2ss, xmm, operand);
+                Operand::Xmm(xmm)
+            }
+            Operand::Imm(imm) => {
+                let tmp = c.scope.new_temp(operand.mem_size());
+                let xmm = c
+                    .xmms
+                    .take_any(operand.mem_size())
+                    .expect("register available");
+                asm::code!(c.code, Mov, tmp, imm);
+                asm::code!(c.code, Cvtsi2ss, xmm, tmp);
+                Operand::Xmm(xmm)
+            }
+            Operand::Xmm(..) => unimplemented!(),
+        }
+    } else {
+        todo!("conversion between {cast_from} to {cast_to} not implemented yet");
+    }
+}
+
 fn compile_expr_rec(c: &mut Compiler, expr: &Expression) -> Operand {
     match expr {
         Expression::Value(value) => compile_value(c, value),
@@ -942,6 +1004,7 @@ fn compile_expr_rec(c: &mut Compiler, expr: &Expression) -> Operand {
         Expression::BinOp(bin_op) => compile_binop(c, bin_op),
         Expression::Func(func) => compile_call(c, func),
         Expression::Index(index) => compile_index(c, index),
+        Expression::Cast(cast) => compile_cast(c, cast),
     }
 }
 
@@ -1083,6 +1146,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
         AstNode::Expr(expr) => {
             let result = compile_expr(c, expr);
             c.regs.try_push(result);
+            c.xmms.try_push(result);
         }
         AstNode::Ret(expr) => {
             let result = compile_expr(c, expr);

@@ -300,12 +300,32 @@ impl Annotated for Indexing {
 }
 
 #[derive(Debug)]
+pub struct TypeCast {
+    value: Box<Expression>,
+    annot: TypeAnnot,
+}
+
+impl TypeCast {
+    #[inline]
+    pub fn value(&self) -> &Expression {
+        &self.value
+    }
+}
+
+impl Annotated for TypeCast {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Value(ValueExpr),
     UnaOp(UnaryOp),
     BinOp(BinaryOp),
     Func(FunctionCall),
     Index(Indexing),
+    Cast(TypeCast),
 }
 
 impl From<ValueExpr> for Expression {
@@ -396,6 +416,14 @@ impl Expression {
     }
 
     #[inline]
+    pub fn cast(expr: Expression, annot: TypeAnnot) -> Self {
+        Self::Cast(TypeCast {
+            value: Box::new(expr),
+            annot,
+        })
+    }
+
+    #[inline]
     pub fn is_value(&self) -> bool {
         matches!(self, Self::Value(..))
     }
@@ -419,6 +447,7 @@ impl Annotated for Expression {
             Expression::BinOp(binop) => binop.get_annot(),
             Expression::Func(func) => func.get_annot(),
             Expression::Index(index) => index.get_annot(),
+            Expression::Cast(cast) => cast.get_annot(),
         }
     }
 }

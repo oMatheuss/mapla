@@ -322,6 +322,17 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn check_cast(&mut self, value: &Expression, target: TypeAnnot) -> Result<TypeAnnot> {
+        let annot = value.get_annot();
+
+        if annot.is_number() && target.is_number() {
+            Ok(target)
+        } else {
+            let msg = format!("cannot cast from {annot} to {target}");
+            Error::syntatic(&msg, self.pos)
+        }
+    }
+
     fn parse_expr(&mut self, min_prec: u8) -> Result<Expression> {
         let mut lhs = match self.peek_unaop() {
             Some(op) => {
@@ -332,6 +343,14 @@ impl<'a> Parser<'a> {
             }
             None => self.parse_atom()?,
         };
+
+        if let Some(Token::As) = self.peek() {
+            self.next_or_err()?;
+            let target = self.parse_annot()?;
+            let target = self.check_cast(&lhs, target)?;
+
+            lhs = Expression::cast(lhs, target);
+        }
 
         loop {
             let Some(op) = self.peek_binop() else {

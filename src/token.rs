@@ -21,6 +21,7 @@ pub enum Token<'a> {
     FloatLiteral(f32),
     True,
     False,
+    As,
     Equal,
     NotEqual,
     Greater,
@@ -72,6 +73,7 @@ impl<'a> Token<'a> {
             "use" => Self::Use,
             "true" => Self::True,
             "false" => Self::False,
+            "as" => Self::As,
             s => Self::Identifier(s),
         }
     }
