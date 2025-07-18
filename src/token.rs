@@ -75,6 +75,9 @@ impl<'a> Token<'a> {
             "true" => Self::True,
             "false" => Self::False,
             "as" => Self::As,
+            "not" => Self::Not,
+            "or" => Self::Or,
+            "and" => Self::And,
             s => Self::Identifier(s),
         }
     }
