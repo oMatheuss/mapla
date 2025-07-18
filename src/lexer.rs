@@ -174,6 +174,7 @@ impl<'a> Lexer<'a> {
                 self.next();
                 Token::NotEqual
             }
+            ('!', _) => Token::Not,
             ('>', Some('=')) => {
                 self.next();
                 Token::GreaterEqual

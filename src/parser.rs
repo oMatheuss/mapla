@@ -217,6 +217,7 @@ impl<'a> Parser<'a> {
             Token::Ampersand => UnaryOperator::AddressOf,
             Token::Sub => UnaryOperator::Minus,
             Token::Mul => UnaryOperator::Dereference,
+            Token::Not => UnaryOperator::Not,
             _ => return None,
         };
 
@@ -275,7 +276,9 @@ impl<'a> Parser<'a> {
                 Error::syntatic("can only dereference addresses", self.pos)
             }
 
-            UnaryOperator::Not => todo!(),
+            UnaryOperator::Not if annot.is_bool() => Ok(annot),
+            UnaryOperator::Not => Error::syntatic("cannot apply unary not here", self.pos),
+
             UnaryOperator::BitwiseNot => todo!(),
         }
     }

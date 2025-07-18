@@ -23,6 +23,7 @@ pub enum Token<'a> {
     False,
     As,
     Equal,
+    Not,
     NotEqual,
     Greater,
     GreaterEqual,
