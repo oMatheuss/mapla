@@ -75,11 +75,27 @@ impl<'a> Lexer<'a> {
 
     #[inline]
     fn skip_whitespace(&mut self) -> bool {
-        let is = self.peek().is_some_and(|ch| ch.is_whitespace());
-        if is {
-            self.next();
+        if let Some(ch) = self.peek() {
+            if ch.is_whitespace() {
+                self.next();
+                return true;
+            }
         }
-        is
+        return false;
+    }
+
+    #[inline]
+    fn skip_comment(&mut self) -> bool {
+        if let Some('#') = self.peek() {
+            while let Some(ch) = self.next() {
+                if ch == '\n' {
+                    break;
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 
     fn next_ident(&mut self) -> Result<Token<'a>> {
@@ -234,7 +250,7 @@ impl<'a> Lexer<'a> {
 
     pub fn next_token(&mut self) -> Result<LexItem<'a>> {
         while let Some(&ch) = self.peek() {
-            if self.skip_whitespace() {
+            if self.skip_whitespace() || self.skip_comment() {
                 continue;
             }
 

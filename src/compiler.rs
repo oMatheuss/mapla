@@ -894,17 +894,17 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     asm::code!(c.code, Xor, operand, Imm::Byte(0xFF));
                     asm::code!(c.code, And, operand, Imm::Byte(0x01));
                     operand
-                },
+                }
                 Operand::Imm(imm) => {
                     let reg = c.regs.take_any(imm.mem_size()).expect("register available");
                     asm::code!(c.code, Mov, reg, imm);
                     asm::code!(c.code, Xor, reg, Imm::Byte(0xFF));
                     asm::code!(c.code, And, reg, Imm::Byte(0x01));
                     Operand::Reg(reg)
-                },
+                }
                 Operand::Xmm(..) => unimplemented!(),
             }
-        },
+        }
         UnaryOperator::BitwiseNot => {
             let operand = compile_expr_rec(c, operand);
             match operand {
