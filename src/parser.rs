@@ -6,7 +6,7 @@ use crate::ast::{
     Annotated, Argument, Ast, AstNode, AstRoot, Expression, Operator, TypeAnnot, UnaryOperator,
     ValueExpr, VarType,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, PositionResult, Result};
 use crate::lexer::LexItem;
 use crate::position::Position;
 use crate::token::Token;
@@ -128,6 +128,33 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    fn parse_str(&mut self, s: &str) -> Result<ValueExpr> {
+        let mut chs = s.bytes().peekable();
+        let mut acc = Vec::with_capacity(s.len());
+
+        loop {
+            let Some(curr) = chs.next() else {
+                let escaped = String::from_utf8(acc).with_position(self.pos)?;
+                break Ok(ValueExpr::String(escaped));
+            };
+
+            let b = match curr {
+                b'\\' => match &[chs.next().unwrap()] {
+                    b"n" => b'\n',
+                    b"r" => b'\r',
+                    b"t" => b'\t',
+                    b"0" => b'\0',
+                    b"\"" => b'"',
+                    b"\\" => b'\\',
+                    _ => return Error::syntatic("unknown escape sequence", self.pos)
+                },
+                _ => curr,
+            };
+
+            acc.push(b);
+        }
+    }
+
     fn parse_value(&mut self) -> Result<ValueExpr> {
         let expr = match *self.next_or_err()? {
             Token::Identifier(id) => {
@@ -136,7 +163,7 @@ impl<'a> Parser<'a> {
                 };
                 ValueExpr::Identifier(symbol.annot, id.into())
             }
-            Token::StrLiteral(string) => ValueExpr::String(string.into()),
+            Token::StrLiteral(string) => self.parse_str(string)?,
             Token::IntLiteral(int) => ValueExpr::Int(int as i32),
             Token::FloatLiteral(float) => ValueExpr::Float(float),
             Token::Sub => match *self.next_or_err()? {
@@ -156,7 +183,7 @@ impl<'a> Parser<'a> {
         let token: &Token<'_> = self.next_or_err()?;
 
         let expr = match *token {
-            Token::StrLiteral(string) => Expression::string(string),
+            Token::StrLiteral(string) => self.parse_str(string)?.into(),
             Token::IntLiteral(int) => Expression::int(int as i32),
             Token::FloatLiteral(float) => Expression::float(float),
             Token::True => Expression::TRUE,

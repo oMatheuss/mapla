@@ -152,24 +152,26 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_string(&mut self) -> Result<Token<'a>> {
+        let str_pos = self.position.clone();
         self.next(); // discard quotation mark
         let start = self.index();
-        while let Some(ch) = self.peek() {
-            if ch.is_control() {
-                return Error::lexical("control characters are not allowed", self.position);
+        while let Some(ch) = self.next() {
+            match ch {
+                '"' => {
+                    let end = self.index() - 1;
+                    let string = &self.input[start..end];
+                    return Ok(Token::StrLiteral(string));
+                }
+                '\\' if matches!(self.peek(), Some('"')) => {
+                    self.next();
+                }
+                _ if ch.is_control() => {
+                    return Error::lexical("control characters are not allowed", str_pos)
+                }
+                _ => (),
             }
-            if '"'.eq(ch) {
-                break;
-            }
-            self.next();
         }
-        let end = self.index();
-        if let Some('"') = self.next() {
-            let string = &self.input[start..end];
-            Ok(Token::StrLiteral(string))
-        } else {
-            Error::lexical("unexpected end of file", self.position)
-        }
+        Error::lexical("expected trailing `\"`", str_pos)
     }
 
     fn next_symbol(&mut self) -> Result<Token<'a>> {

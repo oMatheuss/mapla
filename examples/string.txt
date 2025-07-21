@@ -1,5 +1,6 @@
-use io;
+extern func printf(str: char*);
 
-func main() do
-    printString("Hello, World!", 13);
+func main(): int do
+    printf("Hello, World!\n");
+    return 0;
 end
