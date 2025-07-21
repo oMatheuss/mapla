@@ -112,6 +112,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_number(&mut self) -> Result<Token<'a>> {
+        let num_pos = self.position.clone();
         let start = self.index();
         let mut state = 0;
         while let Some(ch) = self.peek() {
@@ -136,18 +137,18 @@ impl<'a> Lexer<'a> {
         match state {
             3 => {
                 let slice = &self.input[start + 2..self.index()];
-                let num = u32::from_str_radix(slice, 16).with_position(self.position)?;
+                let num = u32::from_str_radix(slice, 16).with_position(num_pos)?;
                 Ok(Token::IntLiteral(num))
             }
             1 | 4 => {
-                let num = u32::from_str_radix(slice, 10).with_position(self.position)?;
+                let num = u32::from_str_radix(slice, 10).with_position(num_pos)?;
                 Ok(Token::IntLiteral(num))
             }
             6 => {
-                let num = slice.parse().with_position(self.position)?;
+                let num = slice.parse().with_position(num_pos)?;
                 Ok(Token::FloatLiteral(num))
             }
-            _ => Error::lexical("invalid number or hexadecimal", self.position),
+            _ => Error::lexical("invalid number or hexadecimal", num_pos),
         }
     }
 
