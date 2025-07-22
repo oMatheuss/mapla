@@ -569,22 +569,16 @@ impl Display for Mem {
 #[derive(Debug, Clone, Copy)]
 pub enum Imm {
     Byte(u8),
-    Char(char),
-    Int32(i32),
-    Int64(i64),
-    Float32(f32),
-    Float64(f64),
+    Dword(u32),
+    Qword(u64),
 }
 
 impl Display for Imm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Imm::Byte(value) => write!(f, "byte {value}"),
-            Imm::Char(value) => write!(f, "byte '{value}'"),
-            Imm::Int32(value) => write!(f, "dword {value}"),
-            Imm::Int64(value) => write!(f, "qword {value}"),
-            Imm::Float32(value) => write!(f, "dword 0x{:x}", value.to_bits()),
-            Imm::Float64(value) => write!(f, "qword 0x{:x}", value.to_bits()),
+            Imm::Byte(value) => write!(f, "byte 0x{value:x}"),
+            Imm::Dword(value) => write!(f, "dword 0x{value:x}"),
+            Imm::Qword(value) => write!(f, "qword 0x{value:x}"),
         }
     }
 }
@@ -592,14 +586,22 @@ impl Display for Imm {
 impl Imm {
     pub const TRUE: Self = Self::Byte(1);
     pub const FALSE: Self = Self::Byte(0);
+
+    pub fn from_i32(v: i32) -> Self {
+        Self::Dword(v as u32)
+    }
+
+    pub fn from_f32(v: f32) -> Self {
+        Self::Dword(v.to_bits())
+    }
 }
 
 impl MemSized for Imm {
     fn mem_size(&self) -> MemSize {
         match self {
-            Imm::Byte(..) | Imm::Char(..) => MemSize::Byte,
-            Imm::Int32(..) | Imm::Float32(..) => MemSize::DWord,
-            Imm::Int64(..) | Imm::Float64(..) => MemSize::QWord,
+            Imm::Byte(..) => MemSize::Byte,
+            Imm::Dword(..) => MemSize::DWord,
+            Imm::Qword(..) => MemSize::QWord,
         }
     }
 }

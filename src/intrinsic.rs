@@ -28,22 +28,22 @@ fn print_char(code: &mut AsmBuilder, target: CompilerTarget) {
     };
     let p_01 = Mem::offset(Reg::Rbp, -4, MemSize::DWord);
 
-    asm::code!(code, Sub, Reg::Rsp, Imm::Int64(4));
+    asm::code!(code, Sub, Reg::Rsp, Imm::Qword(4));
     asm::code!(code, Mov, p_01, r_01);
 
     match target {
         CompilerTarget::Linux => {
-            asm::code!(code, Mov, Reg::Eax, Imm::Int32(1)); // sys_write call
-            asm::code!(code, Mov, Reg::Edi, Imm::Int32(1)); // file descriptor
+            asm::code!(code, Mov, Reg::Eax, Imm::Dword(1)); // sys_write call
+            asm::code!(code, Mov, Reg::Edi, Imm::Dword(1)); // file descriptor
             asm::code!(code, Lea, Reg::Rsi, p_01); // *buffer
-            asm::code!(code, Mov, Reg::Edx, Imm::Int32(4)); // count
+            asm::code!(code, Mov, Reg::Edx, Imm::Dword(4)); // count
             asm::code!(code, Syscall);
         }
         CompilerTarget::Windows => {
-            asm::code!(code, Mov, Reg::Ecx, Imm::Int32(1)); // file descriptor
+            asm::code!(code, Mov, Reg::Ecx, Imm::Dword(1)); // file descriptor
             asm::code!(code, Lea, Reg::Rdx, p_01); // *buffer
-            asm::code!(code, Mov, Reg::R8D, Imm::Int32(4)); // count
-            asm::code!(code, Sub, Reg::Rsp, Imm::Int64(32)); // shadow space
+            asm::code!(code, Mov, Reg::R8D, Imm::Dword(4)); // count
+            asm::code!(code, Sub, Reg::Rsp, Imm::Qword(32)); // shadow space
             asm::code!(code, Call, "_write");
         }
     }
@@ -64,10 +64,10 @@ fn print_int(code: &mut AsmBuilder, target: CompilerTarget) {
     };
 
     asm::code!(code, Mov, Reg::Eax, p_01); // quotient
-    asm::code!(code, Mov, Reg::Ebx, Imm::Int32(10)); // divisor
-    asm::code!(code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
+    asm::code!(code, Mov, Reg::Ebx, Imm::Dword(10)); // divisor
+    asm::code!(code, Mov, Reg::Edx, Imm::Dword(0)); // remainder
 
-    asm::code!(code, Mov, Reg::Rcx, Imm::Int64(0)); // counter
+    asm::code!(code, Mov, Reg::Rcx, Imm::Qword(0)); // counter
 
     asm::code!(code, ".L1:");
 
@@ -76,26 +76,26 @@ fn print_int(code: &mut AsmBuilder, target: CompilerTarget) {
 
     asm::code!(code, Inc, Reg::Rcx);
 
-    asm::code!(code, Sub, Reg::Rsp, Imm::Int64(1));
+    asm::code!(code, Sub, Reg::Rsp, Imm::Qword(1));
     asm::code!(code, Mov, Mem::reg(Reg::Rsp, MemSize::Byte), Reg::Dl);
-    asm::code!(code, Add, Mem::reg(Reg::Rsp, MemSize::Byte), Imm::Char('0'));
+    asm::code!(code, Add, Mem::reg(Reg::Rsp, MemSize::Byte), Imm::Byte(b'0'));
 
-    asm::code!(code, Cmp, Reg::Eax, Imm::Int32(0));
+    asm::code!(code, Cmp, Reg::Eax, Imm::Dword(0));
     asm::code!(code, Jg, ".L1");
 
     match target {
         CompilerTarget::Linux => {
-            asm::code!(code, Mov, Reg::Eax, Imm::Int32(1)); // sys_write call
-            asm::code!(code, Mov, Reg::Edi, Imm::Int32(1)); // file descriptor
+            asm::code!(code, Mov, Reg::Eax, Imm::Dword(1)); // sys_write call
+            asm::code!(code, Mov, Reg::Edi, Imm::Dword(1)); // file descriptor
             asm::code!(code, Lea, Reg::Rsi, Mem::reg(Reg::Rsp, MemSize::QWord)); // *buffer
             asm::code!(code, Mov, Reg::Edx, Reg::Ecx); // count
             asm::code!(code, Syscall);
         }
         CompilerTarget::Windows => {
             asm::code!(code, Mov, Reg::R8D, Reg::Ecx); // count
-            asm::code!(code, Mov, Reg::Ecx, Imm::Int32(1)); // file descriptor
+            asm::code!(code, Mov, Reg::Ecx, Imm::Dword(1)); // file descriptor
             asm::code!(code, Lea, Reg::Rdx, Mem::reg(Reg::Rsp, MemSize::QWord)); // *buffer
-            asm::code!(code, Sub, Reg::Rsp, Imm::Int64(32)); // shadow space
+            asm::code!(code, Sub, Reg::Rsp, Imm::Qword(32)); // shadow space
             asm::code!(code, Call, "_write");
         }
     }
@@ -122,23 +122,23 @@ fn print_string(code: &mut AsmBuilder, target: CompilerTarget) {
     };
     let p_02 = Mem::offset(Reg::Rbp, -12, MemSize::DWord);
 
-    asm::code!(code, Sub, Reg::Rsp, Imm::Int64(12));
+    asm::code!(code, Sub, Reg::Rsp, Imm::Qword(12));
     asm::code!(code, Mov, p_01, r_01);
     asm::code!(code, Mov, p_02, r_02);
 
     match target {
         CompilerTarget::Linux => {
-            asm::code!(code, Mov, Reg::Eax, Imm::Int32(1)); // sys_read call
-            asm::code!(code, Mov, Reg::Edi, Imm::Int32(1)); // file descriptor
+            asm::code!(code, Mov, Reg::Eax, Imm::Dword(1)); // sys_read call
+            asm::code!(code, Mov, Reg::Edi, Imm::Dword(1)); // file descriptor
             asm::code!(code, Mov, Reg::Rsi, p_01); // *buffer
             asm::code!(code, Mov, Reg::Edx, p_02); // count
             asm::code!(code, Syscall);
         }
         CompilerTarget::Windows => {
-            asm::code!(code, Mov, Reg::Ecx, Imm::Int32(1)); // file descriptor
+            asm::code!(code, Mov, Reg::Ecx, Imm::Dword(1)); // file descriptor
             asm::code!(code, Mov, Reg::Rdx, p_01); // *buffer
             asm::code!(code, Mov, Reg::R8D, p_02); // buffer_size
-            asm::code!(code, Sub, Reg::Rsp, Imm::Int64(32));
+            asm::code!(code, Sub, Reg::Rsp, Imm::Qword(32));
             asm::code!(code, Call, "_write");
         }
     }
@@ -165,23 +165,23 @@ fn read_string(code: &mut AsmBuilder, target: CompilerTarget) {
     };
     let p_02 = Mem::offset(Reg::Rbp, -12, MemSize::DWord);
 
-    asm::code!(code, Sub, Reg::Rsp, Imm::Int64(12));
+    asm::code!(code, Sub, Reg::Rsp, Imm::Qword(12));
     asm::code!(code, Mov, p_01, r_01);
     asm::code!(code, Mov, p_02, r_02);
 
     match target {
         CompilerTarget::Linux => {
-            asm::code!(code, Mov, Reg::Eax, Imm::Int32(0)); // sys_read call
-            asm::code!(code, Mov, Reg::Edi, Imm::Int32(1)); // file descriptor
+            asm::code!(code, Mov, Reg::Eax, Imm::Dword(0)); // sys_read call
+            asm::code!(code, Mov, Reg::Edi, Imm::Dword(1)); // file descriptor
             asm::code!(code, Mov, Reg::Rsi, p_01); // *buffer
             asm::code!(code, Mov, Reg::Edx, p_02); // count
             asm::code!(code, Syscall);
         }
         CompilerTarget::Windows => {
-            asm::code!(code, Mov, Reg::Ecx, Imm::Int32(0)); // file descriptor
+            asm::code!(code, Mov, Reg::Ecx, Imm::Dword(0)); // file descriptor
             asm::code!(code, Mov, Reg::Rdx, p_01); // *buffer
             asm::code!(code, Mov, Reg::R8D, p_02); // buffer_size
-            asm::code!(code, Sub, Reg::Rsp, Imm::Int64(32));
+            asm::code!(code, Sub, Reg::Rsp, Imm::Qword(32));
             asm::code!(code, Call, "_read"); // return is already on rax
         }
     }

@@ -34,8 +34,8 @@ struct ScopeContext {
 }
 
 impl ScopeContext {
-    pub fn get_max(&self) -> i64 {
-        self.local_off.abs() as i64 + self.max_temp_off.abs() as i64 + self.max_func as i64
+    pub fn get_max(&self) -> u64 {
+        self.local_off.abs() as u64 + self.max_temp_off.abs() as u64 + self.max_func as u64
     }
 }
 
@@ -383,8 +383,8 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
             asm::code!(c.code, Lea, reg, Mem::lbl(label, MemSize::QWord));
             Operand::Reg(reg)
         }
-        ValueExpr::Int(value) => Operand::Imm(Imm::Int32(*value)),
-        ValueExpr::Float(value) => Operand::Imm(Imm::Float32(*value)),
+        ValueExpr::Int(value) => Operand::Imm(Imm::from_i32(*value)),
+        ValueExpr::Float(value) => Operand::Imm(Imm::from_f32(*value)),
         ValueExpr::Bool(value) => match value {
             true => Operand::Imm(Imm::TRUE),
             false => Operand::Imm(Imm::FALSE),
@@ -632,7 +632,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
         Operator::DivAssign => {
             let reg = c.regs.take_any(lhs.mem_size()).expect("register available");
             asm::code!(c.code, Mov, reg, lhs); // quotient (lhs)
-            asm::code!(c.code, Mov, Reg::Edx, Imm::Int32(0)); // remainder
+            asm::code!(c.code, Mov, Reg::Edx, Imm::Dword(0)); // remainder
             asm::code!(c.code, Idiv, rhs); // divisor (rhs)
             asm::code!(c.code, Mov, lhs, reg);
             c.regs.push(reg);
@@ -813,7 +813,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
         c.regs.take(reg);
         Operand::Reg(reg)
     } else {
-        Operand::Imm(Imm::Int32(0))
+        Operand::Imm(Imm::Dword(0))
     }
 }
 
@@ -865,7 +865,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                 const MINUS_BIT: u32 = 1 << 31;
                 match operand {
                     Operand::Reg(..) => {
-                        asm::code!(c.code, Xor, operand, Imm::Int32(MINUS_BIT as i32));
+                        asm::code!(c.code, Xor, operand, Imm::Dword(MINUS_BIT));
                         operand
                     }
                     Operand::Imm(..) | Operand::Mem(..) => {
@@ -874,14 +874,14 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                             .take_any(operand.mem_size())
                             .expect("register available");
                         asm::code!(c.code, Mov, reg, operand);
-                        asm::code!(c.code, Xor, reg, Imm::Int32(MINUS_BIT as i32));
+                        asm::code!(c.code, Xor, reg, Imm::Dword(MINUS_BIT));
                         Operand::Reg(reg)
                     }
                     Operand::Xmm(xmm) => {
                         let tmp = c.scope.new_temp(xmm.mem_size());
                         c.xmms.push(xmm);
                         asm::code!(c.code, Movss, tmp, xmm);
-                        asm::code!(c.code, Xor, tmp, Imm::Int32(MINUS_BIT as i32));
+                        asm::code!(c.code, Xor, tmp, Imm::Dword(MINUS_BIT));
                         Operand::Mem(tmp)
                     }
                 }
@@ -947,7 +947,7 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     };
 
     let reg = c.regs.switch_size(reg, MemSize::QWord);
-    asm::code!(c.code, Imul, reg, Imm::Int64(size as i64));
+    asm::code!(c.code, Imul, reg, Imm::Qword(size as u64));
     asm::code!(c.code, Add, reg, array);
     c.regs.try_push(array);
 
@@ -1129,7 +1129,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                     let value = compile_value(c, expr);
                     move_operand_to_reg(c, expr.get_annot(), value)
                 }
-                None => Imm::Int32(0).into(),
+                None => Imm::Dword(0).into(),
             };
 
             asm::code!(c.code, Mov, counter, init);
@@ -1139,7 +1139,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             match limit {
                 ValueExpr::Int(value) => {
-                    asm::code!(c.code, Cmp, counter, Imm::Int32(*value));
+                    asm::code!(c.code, Cmp, counter, Imm::from_i32(*value));
                 }
                 ValueExpr::Identifier(.., id) => {
                     asm::code!(c.code, Mov, Reg::Eax, c.scope.get(id));
@@ -1257,7 +1257,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
     if total_mem > 0 {
         // align by 16
         let total_mem = total_mem + (16 - total_mem % 16);
-        asm::code!(code, Sub, Reg::Rsp, Imm::Int64(total_mem));
+        asm::code!(code, Sub, Reg::Rsp, Imm::Qword(total_mem));
     }
 
     c.scope.exit();
