@@ -11,10 +11,9 @@ impl<'a> HexSlice<'a> {
 
 impl std::fmt::LowerHex for HexSlice<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for i in 0..self.0.len() {
-            if i == 0 {
-                write!(f, "0x{:x}", self.0[i])?;
-            } else {
+        if self.0.len() > 0 {
+            write!(f, "0x{:x}", self.0[0])?;
+            for i in 1..self.0.len() {
                 write!(f, ",0x{:x}", self.0[i])?;
             }
         }
