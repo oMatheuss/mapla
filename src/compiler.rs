@@ -226,9 +226,7 @@ impl Compiler {
             asm::code!(self.code, "section .data");
 
             for (label, bytes) in self.data.iter() {
-                let label = label.to_string();
-                let end = label.starts_with("L.str").then_some(",0x0").unwrap_or("");
-                asm::code!(self.code, "  {label}: db {:x}{end}", HexSlice::new(bytes));
+                asm::code!(self.code, "  {label}: db {:x}", HexSlice::new(bytes));
             }
         }
         self

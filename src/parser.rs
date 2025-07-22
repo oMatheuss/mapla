@@ -134,6 +134,7 @@ impl<'a> Parser<'a> {
 
         loop {
             let Some(curr) = chs.next() else {
+                acc.push(b'\0');
                 let escaped = String::from_utf8(acc).with_position(self.pos)?;
                 break Ok(ValueExpr::String(escaped));
             };
