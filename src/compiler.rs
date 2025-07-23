@@ -436,41 +436,24 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
     assert!(lhs.mem_size() == rhs.mem_size());
 
     let result = match ope {
-        Operator::Equal => {
+        Operator::Equal
+        | Operator::NotEqual
+        | Operator::Greater
+        | Operator::GreaterEqual
+        | Operator::Less
+        | Operator::LessEqual => {
             asm::code!(c.code, Cmp, lhs, rhs);
-            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            asm::code!(c.code, Sete, lhs);
-            lhs
-        }
-        Operator::NotEqual => {
-            asm::code!(c.code, Cmp, lhs, rhs);
-            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            asm::code!(c.code, Setne, lhs);
-            lhs
-        }
-        Operator::Greater => {
-            asm::code!(c.code, Cmp, lhs, rhs);
-            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            asm::code!(c.code, Setg, lhs);
-            lhs
-        }
-        Operator::GreaterEqual => {
-            asm::code!(c.code, Cmp, lhs, rhs);
-            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            asm::code!(c.code, Setge, lhs);
-            lhs
-        }
-        Operator::Less => {
-            asm::code!(c.code, Cmp, lhs, rhs);
-            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            asm::code!(c.code, Setl, lhs);
-            lhs
-        }
-        Operator::LessEqual => {
-            asm::code!(c.code, Cmp, lhs, rhs);
-            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte).into();
-            asm::code!(c.code, Setle, lhs);
-            lhs
+            let lhs = c.regs.switch_size(lhs.expect_reg(), MemSize::Byte);
+            match ope {
+                Operator::Equal => asm::code!(c.code, Sete, lhs),
+                Operator::NotEqual => asm::code!(c.code, Setne, lhs),
+                Operator::Greater => asm::code!(c.code, Setg, lhs),
+                Operator::GreaterEqual => asm::code!(c.code, Setge, lhs),
+                Operator::Less => asm::code!(c.code, Setl, lhs),
+                Operator::LessEqual => asm::code!(c.code, Setle, lhs),
+                _ => unreachable!(),
+            }
+            lhs.into()
         }
         Operator::And => {
             asm::code!(c.code, And, lhs, rhs);
@@ -723,8 +706,8 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         Operator::DivAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
             let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
-            asm::code!(c.code, Divss, xmm, lhs);
-            asm::code!(c.code, Addss, xmm, rhs);
+            asm::code!(c.code, Movss, xmm, lhs);
+            asm::code!(c.code, Divss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
             lhs
         }
