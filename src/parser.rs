@@ -147,7 +147,7 @@ impl<'a> Parser<'a> {
                     b"0" => b'\0',
                     b"\"" => b'"',
                     b"\\" => b'\\',
-                    _ => return Error::syntatic("unknown escape sequence", self.pos)
+                    _ => return Error::syntatic("unknown escape sequence", self.pos),
                 },
                 _ => curr,
             };
@@ -336,8 +336,6 @@ impl<'a> Parser<'a> {
             | Operator::Sub
             | Operator::Mul
             | Operator::Div
-            | Operator::Shr
-            | Operator::Shl
             | Operator::AddAssign
             | Operator::SubAssign
             | Operator::MulAssign
@@ -347,7 +345,7 @@ impl<'a> Parser<'a> {
                 Ok(lhs)
             }
 
-            Operator::Mod if lhs.is_int() && lhs == rhs => Ok(lhs),
+            Operator::Mod | Operator::Shr | Operator::Shl if lhs == rhs && lhs.is_int() => Ok(lhs),
 
             _ => Error::syntatic("invalid operation between types", self.pos),
         }
