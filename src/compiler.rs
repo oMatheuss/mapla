@@ -401,11 +401,12 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
 
 fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
     let ope = bin_op.operator();
-    let annot = bin_op.get_annot();
+    let lhs_annot = bin_op.lhs().get_annot();
+    let rhs_annot = bin_op.rhs().get_annot();
 
     let (lhs, rhs) = if ope.is_assign() {
         let rhs = compile_expr_rec(c, bin_op.rhs());
-        let rhs = move_operand_to_reg(c, annot, rhs);
+        let rhs = move_operand_to_reg(c, rhs_annot, rhs);
 
         let lhs = compile_expr_rec(c, bin_op.lhs());
         assert!(lhs.is_mem());
@@ -414,17 +415,17 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
     } else {
         let lhs = compile_expr_rec(c, bin_op.lhs());
         let lhs = match bin_op.rhs().is_value() {
-            true => move_operand_to_reg(c, annot, lhs),
-            false => move_reg_to_mem(c, annot, lhs),
+            true => move_operand_to_reg(c, lhs_annot, lhs),
+            false => move_reg_to_mem(c, lhs_annot, lhs),
         };
 
         let rhs = compile_expr_rec(c, bin_op.rhs());
-        let lhs = move_operand_to_reg(c, annot, lhs);
+        let lhs = move_operand_to_reg(c, lhs_annot, lhs);
 
         (lhs, rhs)
     };
 
-    match annot.is_float() {
+    match bin_op.is_float() {
         true => compile_fop(c, ope, lhs, rhs),
         false => compile_iop(c, ope, lhs, rhs),
     }
@@ -652,24 +653,28 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
     assert!(lhs.mem_size() == rhs.mem_size());
 
     let result = match ope {
-        Operator::Equal => todo!(),
-        Operator::NotEqual => todo!(),
-        Operator::Greater => {
+        Operator::Equal
+        | Operator::NotEqual
+        | Operator::Greater
+        | Operator::GreaterEqual
+        | Operator::Less
+        | Operator::LessEqual => {
             let reg = c.regs.take_any(MemSize::Byte).expect("register available");
             asm::code!(c.code, Comiss, lhs, rhs);
-            asm::code!(c.code, Setg, reg);
+
+            match ope {
+                Operator::Equal => asm::code!(c.code, Sete, reg),
+                Operator::NotEqual => asm::code!(c.code, Setne, reg),
+                Operator::Greater => asm::code!(c.code, Seta, reg),
+                Operator::GreaterEqual => asm::code!(c.code, Setae, reg),
+                Operator::Less => asm::code!(c.code, Setb, reg),
+                Operator::LessEqual => asm::code!(c.code, Setbe, reg),
+                _ => unreachable!(),
+            }
+
+            c.xmms.try_push(lhs);
             Operand::Reg(reg)
         }
-        Operator::GreaterEqual => todo!(),
-        Operator::Less => {
-            let reg = c.regs.take_any(MemSize::Byte).expect("register available");
-            asm::code!(c.code, Comiss, lhs, rhs);
-            asm::code!(c.code, Setl, reg);
-            Operand::Reg(reg)
-        }
-        Operator::LessEqual => todo!(),
-        Operator::And => todo!(),
-        Operator::Or => todo!(),
         Operator::Add => {
             asm::code!(c.code, Addss, lhs, rhs);
             lhs
@@ -686,14 +691,11 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             asm::code!(c.code, Divss, lhs, rhs);
             lhs
         }
-        Operator::Mod => todo!(),
         Operator::Assign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
             asm::code!(c.code, Movss, lhs, rhs);
             lhs
         }
-        Operator::Shr => todo!(),
-        Operator::Shl => todo!(),
         Operator::AddAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
             let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
@@ -725,6 +727,9 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             asm::code!(c.code, Addss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
             lhs
+        }
+        Operator::Shr | Operator::Shl | Operator::And | Operator::Or | Operator::Mod => {
+            unimplemented!()
         }
     };
 

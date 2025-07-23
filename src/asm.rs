@@ -24,6 +24,11 @@ pub enum OpCode {
     Setl,
     Setle,
 
+    Seta,
+    Setae,
+    Setb,
+    Setbe,
+
     Inc,
     Dec,
     Mov,
@@ -89,6 +94,10 @@ impl Display for OpCode {
             OpCode::Setge => write!(f, "setge"),
             OpCode::Setl => write!(f, "setl"),
             OpCode::Setle => write!(f, "setle"),
+            OpCode::Seta => write!(f, "seta"),
+            OpCode::Setae => write!(f, "setae"),
+            OpCode::Setb => write!(f, "setb"),
+            OpCode::Setbe => write!(f, "setbe"),
             OpCode::Inc => write!(f, "inc"),
             OpCode::Dec => write!(f, "dec"),
             OpCode::Mov => write!(f, "mov"),

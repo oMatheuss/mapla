@@ -216,6 +216,10 @@ impl BinaryOp {
     pub fn operator(&self) -> Operator {
         self.operator
     }
+
+    pub fn is_float(&self) -> bool {
+        return self.lhs.get_annot().is_float() && self.lhs.get_annot().is_float();
+    }
 }
 
 impl Annotated for BinaryOp {
@@ -566,6 +570,20 @@ impl Operator {
                 | Operator::SubAssign
                 | Operator::MulAssign
                 | Operator::DivAssign
+        )
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        matches!(
+            self,
+            Operator::Greater
+                | Operator::GreaterEqual
+                | Operator::Less
+                | Operator::LessEqual
+                | Operator::Equal
+                | Operator::NotEqual
+                | Operator::And
+                | Operator::Or
         )
     }
 }
