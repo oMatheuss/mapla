@@ -1,0 +1,259 @@
+# To compile on windows, run:
+# make -B examples/snake.obj
+# cc examples/snake.obj -o examples/snake.exe -I/path/to/raylib/include -L/path/to/raylib/lib -lraylib -lwinmm -lgdi32 -lopengl32
+
+extern func InitWindow(width: int, height: int, title: char*);
+extern func CloseWindow();
+extern func SetTargetFPS(fps: int);
+extern func GetFrameTime(): real;
+extern func WindowShouldClose(): bool;
+extern func BeginDrawing();
+extern func EndDrawing();
+
+extern func ClearBackground(color: int);
+
+extern func TextFormat(text: char*, args: int): char*;
+extern func TextLength(text: char*): int;
+extern func MeasureText(text: char*, fontSize: int): int;
+
+extern func DrawFPS(posX: int, posY: int);
+extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: int);
+extern func DrawPixel(posX: int, posY: int, color: int);
+extern func DrawLine(startPosX: int, startPosY: int, endPosX: int, endPosY: int, color: int);
+extern func DrawRectangle(posX: int, posY: int, width: int, height: int, color: int);
+extern func DrawCircle(centerX: int, centerY: int, radius: real, color: int);
+
+extern func IsKeyUp(key: int): bool;
+extern func IsKeyDown(key: int): bool;
+extern func IsKeyPressed(key: int): bool;
+extern func IsKeyReleased(key: int): bool;
+
+extern func SetRandomSeed(seed: int); 
+extern func GetRandomValue(min: int, max: int): int;
+
+int SCREEN_WIDTH  = 664;
+int SCREEN_HEIGHT = 700;
+
+int GRID_WIDTH  = 20;
+int GRID_HEIGHT = 20;
+
+int GRID_X = 12;
+int GRID_Y = 48;
+
+int BLOCK_SIZE = 32;
+
+int BLACK  = 0xFF140800;
+int WHITE  = 0xFFFFFFFF;
+int RED    = 0xFF4947BC;
+int BLUE   = 0xFF91601E;
+
+int GREEN1 = 0xFF76D5AA;
+int GREEN2 = 0xFF50CC8B;
+int GREEN3 = 0xFF015524;
+
+int KEY_RIGHT = 262;
+int KEY_LEFT  = 263;
+int KEY_DOWN  = 264;
+int KEY_UP    = 265;
+int KEY_SPACE = 32;
+
+real SNAKE_MOVE_DELAY_MS = 0.2;
+
+func DrawGrid() do
+    for j to GRID_HEIGHT do
+        int y = GRID_Y + j * BLOCK_SIZE;
+        for i to GRID_WIDTH do
+            int x = GRID_X + i * BLOCK_SIZE;
+            int swap = (i + j) % 2;
+            if swap == 0 then
+                DrawRectangle(x, y, BLOCK_SIZE, BLOCK_SIZE, GREEN1);
+            end
+            if swap != 0 then
+                DrawRectangle(x, y, BLOCK_SIZE, BLOCK_SIZE, GREEN2);
+            end
+        end
+    end
+end
+
+func DrawApple(i: int, j: int) do
+    int radius = BLOCK_SIZE / 2;
+    int x = GRID_X + i * BLOCK_SIZE;
+    int y = GRID_Y + j * BLOCK_SIZE;
+    DrawCircle(x + radius, y + radius, radius as real, RED);
+end
+
+func Lerp(v0: real, v1: real, t: real): real do
+    return v0 + t * (v1 - v0);
+end
+
+func DrawSnake(snake: int*, moveTiming: real) do
+    int radius = BLOCK_SIZE / 2;
+    real frameTime = moveTiming / SNAKE_MOVE_DELAY_MS;
+
+    for j to GRID_HEIGHT do
+        int dj = j * GRID_WIDTH;
+        for i to GRID_WIDTH do
+            int value = snake[dj + i];
+            if value != 0 then
+                int x = GRID_X + i * BLOCK_SIZE;
+                int y = GRID_Y + j * BLOCK_SIZE;
+
+                if value == 1 then
+                    int oldX = GRID_X + (i - 1) * BLOCK_SIZE;
+                    x = Lerp(oldX as real, x as real, frameTime) as int;
+                end
+                if value == 2 then
+                    int oldY = GRID_Y + (j - 1) * BLOCK_SIZE;
+                    y = Lerp(oldY as real, y as real, frameTime) as int;
+                end
+                if value == 3 then
+                    int oldX = GRID_X + (i + 1) * BLOCK_SIZE;
+                    x = Lerp(oldX as real, x as real, frameTime) as int;
+                end
+                if value == 4 then
+                    int oldY = GRID_Y + (j + 1) * BLOCK_SIZE;
+                    y = Lerp(oldY as real, y as real, frameTime) as int;
+                end
+                
+                DrawCircle(x + radius, y + radius, radius as real, BLUE);
+            end
+        end
+    end
+end
+
+func InitField(snake: int*) do
+    int size = GRID_WIDTH * GRID_HEIGHT;
+    for i to size do
+        snake[i] = 0;
+    end
+end
+
+func InitSnake(snake: int*): int do
+    snake[5] = 1;
+    snake[6] = 1;
+
+    return 6;
+end
+
+func GetIndex(x: int, y: int): int do
+    if x < 0 then x = GRID_WIDTH - 1; end
+    if x >= GRID_WIDTH then x = 0; end
+    if y < 0 then y = GRID_HEIGHT - 1; end
+    if y >= GRID_HEIGHT then y = 0; end
+    return y * GRID_WIDTH + x;
+end
+
+func NextHeadSnake(snakeHead: int, dir: int): int do
+    int x = snakeHead % GRID_WIDTH;
+    int y = snakeHead / GRID_WIDTH;
+    if dir == 1 then x += 1; end
+    if dir == 2 then y += 1; end
+    if dir == 3 then x -= 1; end
+    if dir == 4 then y -= 1; end
+    return GetIndex(x, y);
+end
+
+func PreviousTailSnake(snakeHead: int, dir: int): int do
+    int x = snakeHead % GRID_WIDTH;
+    int y = snakeHead / GRID_WIDTH;
+    if dir == 1 then x -= 1; end
+    if dir == 2 then y -= 1; end
+    if dir == 3 then x += 1; end
+    if dir == 4 then y += 1; end
+    return GetIndex(x, y);
+end
+
+func RemoveTail(snake: int*, snakeHead: int): int do
+    int head = snakeHead;
+    while true do
+        int tail = PreviousTailSnake(head, snake[head]);
+        if snake[tail] == 0 || tail == snakeHead then
+            snake[head] = 0;
+            return 0;
+        end
+        head = tail;
+    end
+end
+
+func CanMoveSnake(snake: int*, snakeHead: int, dir: int): bool do
+    int nextHead = NextHeadSnake(snakeHead, dir);
+    return snake[nextHead] == 0;
+end
+
+func NewApple(snake: int*): int do
+    int max = GRID_WIDTH * GRID_HEIGHT;
+    while true do
+        int next = GetRandomValue(0, max);
+        if snake[next] == 0 then
+            return next;
+        end
+    end
+end
+
+func main(): int do
+    int[400] snake;
+
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Snake");
+    SetTargetFPS(120);
+
+    InitField(snake);
+    int snakeHead = InitSnake(snake);
+    int apple = NewApple(snake);
+    int points = 0;
+
+    real moveCooldown = 0.0;
+    int moveDir = 1;
+    int nextDir = 1;
+
+    while !WindowShouldClose() do
+        real dt = GetFrameTime();
+        moveCooldown += dt;
+
+        if IsKeyDown(KEY_RIGHT) && moveDir != 3 then nextDir = 1; end
+        if IsKeyDown(KEY_LEFT) && moveDir != 1 then nextDir = 3; end
+        if IsKeyDown(KEY_DOWN) && moveDir != 4 then nextDir = 2; end
+        if IsKeyDown(KEY_UP) && moveDir != 2 then nextDir = 4; end
+
+        if moveCooldown > SNAKE_MOVE_DELAY_MS then
+            moveDir = nextDir;
+
+            if !CanMoveSnake(snake, snakeHead, moveDir) then
+                CloseWindow();
+                return 0;
+            end
+
+            int newSnakeHead = NextHeadSnake(snakeHead, moveDir);
+
+            if newSnakeHead != apple then
+                RemoveTail(snake, snakeHead);
+            end
+
+            snakeHead = newSnakeHead;
+            snake[snakeHead] = moveDir;
+
+            if snakeHead == apple then
+                apple = NewApple(snake);
+                points += 1;
+            end
+            
+            moveCooldown = 0.0;
+        end
+
+        BeginDrawing();
+        ClearBackground(GREEN3);
+        DrawGrid();
+        DrawApple(apple % GRID_WIDTH, apple / GRID_WIDTH);
+        DrawSnake(snake, moveCooldown);
+        DrawFPS(10, 10);
+
+        char* pointsText = TextFormat("Points: %d", points);
+        int pointsTextSize = MeasureText(pointsText, 20);
+        int pointsPosX = SCREEN_WIDTH - pointsTextSize - 10;
+        DrawText(pointsText, pointsPosX, 10, 20, WHITE);
+
+        EndDrawing();
+    end
+
+    CloseWindow();
+    return 0;
+end
