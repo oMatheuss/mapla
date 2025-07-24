@@ -681,10 +681,9 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         }
         Operator::AddAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
-            asm::code!(c.code, Movss, xmm, lhs);
-            asm::code!(c.code, Addss, xmm, rhs);
-            asm::code!(c.code, Movss, lhs, xmm);
+            // commutative property allow us to change the order of operands
+            asm::code!(c.code, Addss, rhs, lhs);
+            asm::code!(c.code, Movss, lhs, rhs);
             lhs
         }
         Operator::SubAssign => {
@@ -693,14 +692,14 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             asm::code!(c.code, Movss, xmm, lhs);
             asm::code!(c.code, Subss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
+            c.xmms.push(xmm);
             lhs
         }
         Operator::MulAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
-            asm::code!(c.code, Movss, xmm, lhs);
-            asm::code!(c.code, Mulss, xmm, rhs);
-            asm::code!(c.code, Movss, lhs, xmm);
+            // commutative property allow us to change the order of operands
+            asm::code!(c.code, Mulss, rhs, lhs);
+            asm::code!(c.code, Movss, lhs, rhs);
             lhs
         }
         Operator::DivAssign => {
@@ -709,6 +708,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             asm::code!(c.code, Movss, xmm, lhs);
             asm::code!(c.code, Divss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
+            c.xmms.push(xmm);
             lhs
         }
         Operator::Shr | Operator::Shl | Operator::And | Operator::Or | Operator::Mod => {
