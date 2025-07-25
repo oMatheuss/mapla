@@ -850,18 +850,15 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             } else {
                 const MINUS_BIT: u32 = 1 << 31;
                 match operand {
-                    Operand::Reg(..) => {
+                    Operand::Reg(..) | Operand::Mem(..) => {
                         asm::code!(c.code, Xor, operand, Imm::Dword(MINUS_BIT));
                         operand
                     }
-                    Operand::Imm(..) | Operand::Mem(..) => {
-                        let reg = c
-                            .regs
-                            .take_any(operand.mem_size())
-                            .expect("register available");
-                        asm::code!(c.code, Mov, reg, operand);
-                        asm::code!(c.code, Xor, reg, Imm::Dword(MINUS_BIT));
-                        Operand::Reg(reg)
+                    Operand::Imm(imm) => {
+                        let tmp = c.scope.new_temp(imm.mem_size());
+                        asm::code!(c.code, Mov, tmp, imm);
+                        asm::code!(c.code, Xor, tmp, Imm::Dword(MINUS_BIT));
+                        Operand::Mem(tmp)
                     }
                     Operand::Xmm(xmm) => {
                         let tmp = c.scope.new_temp(xmm.mem_size());
