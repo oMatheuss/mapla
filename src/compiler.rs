@@ -1169,7 +1169,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                         Operand::Imm(imm) => {
                             let tmp = c.scope.new_temp(imm.mem_size());
                             asm::code!(c.code, Mov, tmp, imm);
-                            asm::code!(c.code, Mov, xmm0, tmp);
+                            asm::code!(c.code, Movss, xmm0, tmp);
                         }
                     }
                 } else {
