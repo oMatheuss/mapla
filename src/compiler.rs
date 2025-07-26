@@ -748,7 +748,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
             }
         }
 
-        if annot.is_float() {
+        if annot.is_float() && xmm.is_some() {
             // if expression is float also copy to xmm registers
             let xmm = xmm.unwrap();
             match arg {
@@ -1215,8 +1215,8 @@ fn compile_args(c: &mut Compiler, args: &[Argument]) {
             let addr = c.scope.new_local(name, mem_size);
             asm::code!(c.code, Mov, addr, reg);
         } else {
-            mem_offset += MemSize::QWord as isize;
             let addr = Mem::offset(Reg::Rbp, mem_offset, mem_size);
+            mem_offset += MemSize::QWord as isize;
             c.scope.set(name, addr);
         }
     }
