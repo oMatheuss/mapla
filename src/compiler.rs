@@ -753,7 +753,13 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
             let xmm = xmm.unwrap();
             match arg {
                 Operand::Xmm(arg) if arg == xmm => {}
-                Operand::Xmm(..) | Operand::Mem(..) | Operand::Imm(..) => {
+                Operand::Imm(imm) => {
+                    let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                    asm::code!(c.code, Mov, reg, imm);
+                    asm::code!(c.code, Movd, xmm, reg);
+                    c.regs.push(reg);
+                }
+                Operand::Xmm(..) | Operand::Mem(..) => {
                     asm::code!(c.code, Movss, xmm, arg)
                 }
                 Operand::Reg(reg) => asm::code!(c.code, Movd, xmm, reg),
