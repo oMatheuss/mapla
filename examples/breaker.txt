@@ -1,0 +1,323 @@
+# To compile on windows, run:
+# make -B examples/breaker.obj
+# cc examples/breaker.obj -o examples/breaker.exe -I/path/to/raylib/include -L/path/to/raylib/lib -lraylib -lwinmm -lgdi32 -lopengl32
+
+extern func printf();
+extern func powf(base: real, exponent: real): real;
+extern func sqrtf(arg: real): real;
+
+extern func InitWindow(width: int, height: int, title: char*);
+extern func CloseWindow();
+extern func SetTargetFPS(fps: int);
+extern func GetFrameTime(): real;
+extern func WindowShouldClose(): bool;
+extern func BeginDrawing();
+extern func EndDrawing();
+
+extern func ClearBackground(color: int);
+
+extern func TextFormat(text: char*, args: int): char*;
+extern func TextLength(text: char*): int;
+extern func MeasureText(text: char*, fontSize: int): int;
+
+extern func DrawFPS(posX: int, posY: int);
+extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: int);
+extern func DrawPixel(posX: int, posY: int, color: int);
+extern func DrawLine(startPosX: int, startPosY: int, endPosX: int, endPosY: int, color: int);
+extern func DrawRectangle(posX: int, posY: int, width: int, height: int, color: int);
+extern func DrawCircle(centerX: int, centerY: int, radius: real, color: int);
+
+extern func IsKeyUp(key: int): bool;
+extern func IsKeyDown(key: int): bool;
+extern func IsKeyPressed(key: int): bool;
+extern func IsKeyReleased(key: int): bool;
+
+extern func SetRandomSeed(seed: int); 
+extern func GetRandomValue(min: int, max: int): int;
+
+int SCREEN_WIDTH  = 800;
+int SCREEN_HEIGHT = 600;
+
+int BLACK  = 0xFF140800;
+int WHITE  = 0xFFFFFFFF;
+
+int COLOR1 = 0xFF5C4C0F; #0F4C5C
+int COLOR2 = 0xFF1464E3; #E36414
+int COLOR3 = 0xFF248BFB; #FB8B24
+int COLOR4 = 0xFF1E039A; #9A031E
+int COLOR5 = 0xFF400F5F; #5F0F40
+
+int COLOR1B = 0xFF4a3d0c;
+int COLOR2B = 0xFF1050b6;
+int COLOR3B = 0xFF046ee1;
+int COLOR4B = 0xFF18027b;
+int COLOR5B = 0xFF330c4c;
+
+int KEY_RIGHT = 262;
+int KEY_LEFT  = 263;
+int KEY_DOWN  = 264;
+int KEY_UP    = 265;
+int KEY_SPACE = 32;
+
+int PAD_WIDTH = 112;
+int PAD_HEIGHT = 14;
+
+real BALL_RADIUS = 12.0;
+real MAX_BALL_VELOCITY = 500.0;
+
+int BLOCK_WIDTH = 80;
+int BLOCK_HEIGHT = 30;
+
+int GRID_X = 0;
+int GRID_Y = 0;
+int GRID_GAP = 2;
+int GRID_COLS = 7;
+
+func math_abs(n: real): real do
+    if n < 0.0 then return -n; end
+    return n;
+end
+
+func IntersectBallAndRect(ball_x: real, ball_y: real, ball_radius: real, rect_x: real, rect_y: real, rect_width: int, rect_height: int): int do
+    real rect_cx = rect_width as real / 2.0;
+    real rect_cy = rect_height as real / 2.0;
+    
+    real dx = math_abs(ball_x - (rect_x + rect_cx));
+    real dy = math_abs(ball_y - (rect_y + rect_cy));
+
+    if dx <= rect_cx + ball_radius and dy <= rect_cy + ball_radius then
+        if dx > rect_cx and dy > rect_cy then
+            return 3; # collision on corner
+        end
+        if dx > rect_cx then
+            return 2; # collision on left or right
+        end
+        if dy > rect_cy then
+            return 1; # collision on top or bottom
+        end
+    end
+
+    return 0; # no collision
+end
+
+func FillBlocks(blocks: int*) do
+    for i to 28 do
+        blocks[i] = GetRandomValue(1, 4);
+    end
+end
+
+func GetColorLevelA(level: int): int do
+    if level == 1 then return COLOR1; end
+    if level == 2 then return COLOR2; end
+    if level == 3 then return COLOR3; end
+    if level == 4 then return COLOR4; end
+    return COLOR5;
+end
+
+func GetColorLevelB(level: int): int do
+    if level == 1 then return COLOR1B; end
+    if level == 2 then return COLOR2B; end
+    if level == 3 then return COLOR3B; end
+    if level == 4 then return COLOR4B; end
+    return COLOR5B;
+end
+
+func DrawBlocks(blocks: int*) do
+    for i to 28 do
+        if blocks[i] != 0 then
+            int x = i % GRID_COLS;
+            int y = i / GRID_COLS;
+            int posX = x * BLOCK_WIDTH + x * GRID_GAP + GRID_X;
+            int posY = y * BLOCK_HEIGHT + y * GRID_GAP + GRID_Y;
+            int colorA = GetColorLevelA(blocks[i]);
+            int colorB = GetColorLevelB(blocks[i]);
+            DrawRectangle(posX, posY, BLOCK_WIDTH, BLOCK_HEIGHT, colorB);
+            DrawRectangle(posX + 2, posY + 2, BLOCK_WIDTH - 4, BLOCK_HEIGHT - 4, colorA);
+        end
+    end
+end
+
+func IsZeroed(blocks: int*): bool do
+    for i to 28 do
+        if blocks[i] != 0 then
+            return false;
+        end
+    end
+    return true;
+end
+
+func CollideWithBlocks(blocks: int*, ball_x: real, ball_y: real, ball_radius: real): int do
+    for i to 28 do
+        if blocks[i] != 0 then
+            int x = i % GRID_COLS;
+            int y = i / GRID_COLS;
+            int rect_x = x * BLOCK_WIDTH + x * GRID_GAP + GRID_X;
+            int rect_y = y * BLOCK_HEIGHT + y * GRID_GAP + GRID_Y;
+            int hit = IntersectBallAndRect(ball_x, ball_y, ball_radius, rect_x as real, rect_y as real, BLOCK_WIDTH, BLOCK_HEIGHT);
+            if hit != 0 then
+                blocks[i] -= 1;
+                return hit;
+            end
+        end
+    end
+
+    return 0;
+end
+
+func main(): int do
+
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Breaker");
+    SetTargetFPS(240);
+
+    GRID_X = (SCREEN_WIDTH as real / 2.0 - (GRID_COLS * BLOCK_WIDTH + (GRID_COLS - 1) * GRID_GAP) as real / 2.0) as int;
+    GRID_Y = 48;
+
+    int points = 0;
+
+    real pad_x = SCREEN_WIDTH as real / 2.0 - PAD_WIDTH as real / 2.0;
+    real pad_vx = 0.0;
+    real pad_ax = 1200.0;
+    real pad_fx = 0.4;
+    real pad_y = SCREEN_HEIGHT as real - 50.0;
+
+    real pad_cx = PAD_WIDTH as real / 2.0;
+    real pad_cy = PAD_HEIGHT as real / 2.0;
+
+    real ball_x = SCREEN_WIDTH as real / 2.0 - BALL_RADIUS;
+    real ball_vx = 0.0;
+    real ball_y = SCREEN_HEIGHT as real - 200.0;
+    real ball_vy = MAX_BALL_VELOCITY;
+
+    int[28] blocks;
+    FillBlocks(blocks);
+
+    while !WindowShouldClose() do
+        real dt = GetFrameTime();
+
+        if dt > 0.032 then dt = 0.0; end
+
+        ball_x += ball_vx * dt;
+        ball_y += ball_vy * dt;
+
+        pad_x += pad_vx * 2.0 * dt;
+
+        if pad_vx < -0.1 or pad_vx > 0.1 then
+            real friction = powf(pad_fx, dt);
+            pad_vx *= friction;
+        end
+
+        if IsKeyDown(KEY_RIGHT) then
+            if pad_vx >= 0.0 then
+                pad_vx += pad_ax * dt;
+            end
+            if pad_vx < 0.0 then
+                pad_vx += pad_ax * dt * 3.0;
+            end
+        end
+
+        if IsKeyDown(KEY_LEFT) then
+            if pad_vx <= 0.0 then
+                pad_vx -= pad_ax * dt;
+            end
+            if pad_vx > 0.0 then
+                pad_vx -= pad_ax * dt * 3.0;
+            end
+        end
+
+        if pad_x + PAD_WIDTH as real > SCREEN_WIDTH as real then
+            pad_vx = 0.0;
+            pad_x = (SCREEN_WIDTH - PAD_WIDTH) as real;
+        end
+
+        if pad_x < 0.0 then
+            pad_vx = pad_x = 0.0;
+        end
+
+        if (ball_x - BALL_RADIUS) < 0.0 then
+            ball_x = BALL_RADIUS;
+            ball_vx = -ball_vx;
+        end
+
+        if (ball_x + BALL_RADIUS) > (SCREEN_WIDTH as real) then
+            ball_x = SCREEN_WIDTH as real - BALL_RADIUS;
+            ball_vx = -ball_vx;
+        end
+
+        if (ball_y - BALL_RADIUS) < 0.0 then
+            ball_y = BALL_RADIUS;
+            ball_vy = -ball_vy;
+        end
+
+        if ball_y > (SCREEN_HEIGHT as real) then
+            CloseWindow();
+            return 0;
+        end
+
+        int hit = IntersectBallAndRect(ball_x, ball_y, BALL_RADIUS, pad_x, pad_y, PAD_WIDTH, PAD_HEIGHT);
+
+        if hit > 0 then
+            real dx = (ball_x - (pad_x + pad_cx));
+            real dy = (ball_y - (pad_y + pad_cy));
+
+            if hit == 2 or hit == 3 then
+                if dx > 0.0 then ball_x = pad_x + PAD_WIDTH as real + BALL_RADIUS; end
+                if dx < 0.0 then ball_x = pad_x - BALL_RADIUS; end
+                ball_vx = -ball_vx;
+            end
+            if hit == 1 or hit == 3 then
+                if dy > 0.0 then ball_y = pad_y + PAD_HEIGHT as real + BALL_RADIUS; end
+                if dy < 0.0 then ball_y = pad_y - BALL_RADIUS; end
+                ball_vx = dx * MAX_BALL_VELOCITY / pad_cx + pad_vx;
+                ball_vy = -ball_vy;
+            end
+        end
+
+        hit = CollideWithBlocks(blocks, ball_x, ball_y, BALL_RADIUS);
+
+        if hit > 0 then
+            points += 1;
+
+            if hit == 2 or hit == 3 then
+                ball_vx = -ball_vx;
+            end
+            if hit == 1 or hit == 3 then
+                ball_vy = -ball_vy;
+            end
+        end
+
+        real ball_v_mag = sqrtf(ball_vx * ball_vx + ball_vy * ball_vy);
+        ball_vx = ball_vx / ball_v_mag * MAX_BALL_VELOCITY;
+        ball_vy = ball_vy / ball_v_mag * MAX_BALL_VELOCITY;
+
+        if IsZeroed(blocks) then
+            FillBlocks(blocks);
+
+            pad_x = SCREEN_WIDTH as real / 2.0 - PAD_WIDTH as real / 2.0;
+            pad_vx = 0.0;
+
+            ball_x = SCREEN_WIDTH as real / 2.0 - BALL_RADIUS;
+            ball_vx = 0.0;
+            ball_y = SCREEN_HEIGHT as real - 200.0;
+            ball_vy = MAX_BALL_VELOCITY;
+        end
+
+        BeginDrawing();
+        ClearBackground(BLACK);
+
+        DrawCircle(ball_x as int, ball_y as int, BALL_RADIUS, WHITE);
+        DrawRectangle(pad_x as int, pad_y as int, PAD_WIDTH, PAD_HEIGHT, WHITE);
+        DrawBlocks(blocks);
+
+        DrawFPS(10, 10);
+
+        char* pointsText = TextFormat("Points: %d", points);
+        int pointsTextSize = MeasureText(pointsText, 20);
+        int pointsPosX = SCREEN_WIDTH - pointsTextSize - 10;
+        DrawText(pointsText, pointsPosX, 10, 20, WHITE);
+
+        EndDrawing();
+    end
+
+    CloseWindow();
+    return 0;
+end
