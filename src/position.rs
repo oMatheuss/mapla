@@ -1,21 +1,17 @@
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Position {
+pub struct Position<'a> {
+    file: &'a str,
     index: usize,
     column: usize,
     line: usize,
 }
 
-impl Position {
-    pub const ZERO: Self = Self {
-        index: 0,
-        line: 0,
-        column: 0,
-    };
-
-    pub fn new() -> Self {
+impl<'a> Position<'a> {
+    pub fn new(file: &'a str) -> Self {
         Self {
+            file,
             index: 0,
             column: 1,
             line: 1,
@@ -41,8 +37,8 @@ impl Position {
     }
 }
 
-impl Display for Position {
+impl<'a> Display for Position<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.line, self.column)
+        write!(f, "{}:{}:{}", self.file, self.line, self.column)
     }
 }

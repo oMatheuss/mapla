@@ -77,13 +77,9 @@ fn run() -> Result<()> {
     let source = &args.input;
     let code = std::fs::read_to_string(in_file)?;
 
-    let tokens = Lexer::new(&code)
-        .collect::<Result<Vec<_>>>()
-        .map_err(|err| err.with_source(source))?;
+    let tokens = Lexer::new(source, &code).collect::<Result<Vec<_>>>()?;
 
-    let ast = Parser::new(&tokens)
-        .parse()
-        .map_err(|err| err.with_source(source))?;
+    let ast = Parser::new(&tokens).parse()?;
 
     let assembly = Compiler::new(args.target)
         .prolog()

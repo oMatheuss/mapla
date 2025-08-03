@@ -12,18 +12,18 @@ use crate::position::Position;
 use crate::token::Token;
 
 #[derive(Debug, Clone)]
-struct Symbol {
-    position: Position,
+struct Symbol<'a> {
+    position: Position<'a>,
     annot: TypeAnnot,
 }
 
-impl Symbol {
-    fn new(position: Position, annot: TypeAnnot) -> Self {
+impl<'a> Symbol<'a> {
+    fn new(position: Position<'a>, annot: TypeAnnot) -> Self {
         Self { position, annot }
     }
 }
 
-struct SymbolTable<'a>(Vec<HashMap<&'a str, Symbol>>);
+struct SymbolTable<'a>(Vec<HashMap<&'a str, Symbol<'a>>>);
 
 impl<'a> SymbolTable<'a> {
     fn new() -> Self {
@@ -42,13 +42,13 @@ impl<'a> SymbolTable<'a> {
         self.0.iter().rev().find_map(|scope| scope.get(k))
     }
 
-    fn set(&mut self, k: &'a str, symbol: Symbol) {
+    fn set(&mut self, k: &'a str, symbol: Symbol<'a>) {
         if let Some(scope) = self.0.last_mut() {
             scope.insert(k, symbol);
         }
     }
 
-    fn set_global(&mut self, k: &'a str, symbol: Symbol) {
+    fn set_global(&mut self, k: &'a str, symbol: Symbol<'a>) {
         if let Some(scope) = self.0.first_mut() {
             scope.insert(k, symbol);
         }
@@ -58,7 +58,7 @@ impl<'a> SymbolTable<'a> {
 pub struct Parser<'a> {
     tokens: Peekable<Iter<'a, LexItem<'a>>>,
     symbols: SymbolTable<'a>,
-    pos: Position,
+    pos: Position<'a>,
 }
 
 impl<'a> Parser<'a> {
@@ -175,18 +175,20 @@ impl<'a> Parser<'a> {
             Token::True => Expression::TRUE,
             Token::False => Expression::FALSE,
             Token::Identifier(id) if matches!(self.peek(), Some(Token::OpenParen)) => {
-                let Some(symbol) = self.symbols.find(id).cloned() else {
+                let Some(sym) = self.symbols.find(id).cloned() else {
                     Error::syntatic("symbol not found in scope", self.pos)?
                 };
+                let annot = sym.annot;
                 let args = self.parse_callargs()?;
-                Expression::func(id.into(), args, symbol.annot)
+                Expression::func(id.into(), args, annot)
             }
             Token::Identifier(id) if matches!(self.peek(), Some(Token::OpenBracket)) => {
                 self.next_or_err()?; // discard open bracket
-                let Some(symbol) = self.symbols.find(id).cloned() else {
-                    Error::syntatic("symbol not found in scope", self.pos)?
+                let pos = self.pos;
+                let Some(sym) = self.symbols.find(id).cloned() else {
+                    Error::syntatic("symbol not found in scope", pos)?
                 };
-                let symbol_pos = self.pos;
+                let annot = sym.annot;
                 let index = self.parse_expr(1)?;
                 if !index.get_annot().is_int() {
                     Error::syntatic("array index should be int", self.pos)?
@@ -194,14 +196,11 @@ impl<'a> Parser<'a> {
                 let Token::CloseBracket = self.next_or_err()? else {
                     Error::syntatic("expected close bracket", self.pos)?
                 };
-                if !symbol.annot.is_ref() {
-                    Error::syntatic(
-                        "indexing can only be applied to arrays and pointers",
-                        symbol_pos,
-                    )?
+                if !annot.is_ref() {
+                    Error::syntatic("indexing can only be applied to arrays and pointers", pos)?
                 }
-                let array = ValueExpr::Identifier(symbol.annot, id.into());
-                let annot = TypeAnnot::new(symbol.annot.inner_type());
+                let array = ValueExpr::Identifier(annot, id.into());
+                let annot = TypeAnnot::new(annot.inner_type());
                 Expression::index(array, index, annot)
             }
             Token::Identifier(id) => {

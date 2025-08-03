@@ -8,13 +8,13 @@ pub struct Lexer<'a> {
     input: &'a str,
     chars: Peekable<Chars<'a>>,
     ended: bool,
-    position: Position,
+    position: Position<'a>,
 }
 
 #[derive(Debug)]
 pub struct LexItem<'a> {
     token: Token<'a>,
-    position: Position,
+    position: Position<'a>,
 }
 
 impl<'a> LexItem<'a> {
@@ -29,12 +29,12 @@ impl<'a> LexItem<'a> {
     }
 
     #[inline]
-    pub fn new(token: Token<'a>, position: Position) -> Self {
+    pub fn new(token: Token<'a>, position: Position<'a>) -> Self {
         Self { token, position }
     }
 
     #[inline]
-    pub fn eof(position: Position) -> Self {
+    pub fn eof(position: Position<'a>) -> Self {
         let token = Token::Eof;
         Self { token, position }
     }
@@ -46,13 +46,13 @@ impl<'a> LexItem<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(file: &'a str, input: &'a str) -> Self {
         let chars = input.chars().peekable();
         Self {
             input,
             chars,
             ended: false,
-            position: Position::new(),
+            position: Position::new(file),
         }
     }
 
