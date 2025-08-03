@@ -1,4 +1,4 @@
-use io;
+extern func printf(fmt: char*, arg: int);
 
 func main(): int do
     real sum = 0.0;
@@ -11,6 +11,6 @@ func main(): int do
         i += 1.0;
     end
     
-    printInt(sum * 4.0);
+    printf("PI = %d", (sum * 4.0 * 100.0) as int);
     return 0;
 end

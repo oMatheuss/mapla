@@ -1,0 +1,12 @@
+extern func printf(fmt: char*);
+extern func scanf(fmt: char*, buf: char*);
+
+func main(): int do
+    char[124] buffer;
+
+    printf("What's your name?\n");
+    scanf("%s", buffer);
+    printf("Hello, %s\n", buffer);
+
+    return 0;
+end

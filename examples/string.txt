@@ -1,6 +1,0 @@
-extern func printf(str: char*);
-
-func main(): int do
-    printf("Hello, World!\n");
-    return 0;
-end

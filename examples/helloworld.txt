@@ -1,17 +1,6 @@
-use io;
+extern func printf(fmt: char*);
 
-func main() do
-    printChar( 72);
-    printChar(101);
-    printChar(108);
-    printChar(108);
-    printChar(111);
-    printChar( 44);
-    printChar( 32);
-    printChar( 87);
-    printChar(111);
-    printChar(114);
-    printChar(108);
-    printChar(100);
-    printChar( 33);
+func main(): int do
+    printf("Hello, World!\n");
+    return 0;
 end

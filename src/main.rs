@@ -11,7 +11,6 @@ mod asm;
 mod ast;
 mod compiler;
 mod error;
-mod intrinsic;
 mod lexer;
 mod parser;
 mod position;

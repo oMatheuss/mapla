@@ -11,7 +11,6 @@ use crate::ast::{
     Identifier, Indexing, Operator, TypeAnnot, TypeCast, UnaryOp, UnaryOperator, ValueExpr,
     VarType,
 };
-use crate::intrinsic::intrisic;
 use crate::target::CompilerTarget;
 use crate::utils::HexSlice;
 
@@ -187,7 +186,7 @@ impl Compiler {
     pub fn compile(mut self, ast: Ast) -> Self {
         for node in ast.iter() {
             match node {
-                AstRoot::Use(ident) => intrisic(&ident, &mut self.code, self.target),
+                AstRoot::Use(..) => todo!(),
                 AstRoot::Func(ident, args, _, ast_nodes) => {
                     compile_func(&mut self, ident, args, ast_nodes);
                 }

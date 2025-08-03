@@ -21,28 +21,13 @@ impl Symbol {
     fn new(position: Position, annot: TypeAnnot) -> Self {
         Self { position, annot }
     }
-
-    const fn intrinsic(ty: VarType) -> Self {
-        Self {
-            position: Position::ZERO,
-            annot: TypeAnnot::new(ty),
-        }
-    }
 }
 
 struct SymbolTable<'a>(Vec<HashMap<&'a str, Symbol>>);
 
-const GLOBALS: [(&'static str, Symbol); 4] = [
-    ("printInt", Symbol::intrinsic(VarType::Void)),
-    ("printChar", Symbol::intrinsic(VarType::Void)),
-    ("printString", Symbol::intrinsic(VarType::Void)),
-    ("readString", Symbol::intrinsic(VarType::Int)),
-];
-
 impl<'a> SymbolTable<'a> {
     fn new() -> Self {
-        let global = HashMap::from(GLOBALS);
-        Self(vec![global])
+        Self(vec![HashMap::new()])
     }
 
     fn enter_scope(&mut self) {

@@ -1,9 +1,8 @@
-use io;
+extern func putchar(ch: int);
 
-func main() do
-    int i = 32;
-    while i < 128 do
-        printChar(i);
-        i += 1;
+func main(): int do
+    for i = 32 to 128 do
+        putchar(i);
     end
+    return 0;
 end
