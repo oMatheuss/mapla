@@ -1,6 +1,10 @@
 # My Lang
 
-This repository contains the source code for the My Lang compiler. The current version can only output assembly code for the [Netwide Assembler (NASM)](https://www.nasm.us/).
+This repository contains the source code for the My Lang compiler.
+
+## Overview
+
+My Lang is a toy language, designed for simplicity and low-level operations. Its syntax is highly inspired by [lua](https://www.lua.org/) for its simplicity, but instead of being interpreted, it aims to be a low-level, system language.
 
 ## Features
 
@@ -8,13 +12,20 @@ The following types are supported for creating variables:
 
 - `int`: 32-bit integer number (dword size);
 - `real`: 32-bit floating precision number (dword size);
-- `bool`: boolean value (word size) (not yet supported);
-- `char`: utf-8 code point (word size) (not yet supported)
+- `bool`: boolean value (word size);
+- `char`: utf-8 code point (word size);
+
+Intial support for arrays and pointers are also implemented with the following syntax:
+
+- `int[10]`: a type for creating a 32-bit * 10 sized array (the result is a int*);
+- `int*`: a type that represents a pointer to an integer;
+- `&x`: creates a pointer to the variable x;
+- `x[10]`: access the value at the given position;
 
 The following statements are supported:
 
 - `if`: conditional block (else block is not yet supported);
-- `while`: conditional block loop (do loops are not yet supported);
+- `while`: conditional block loop;
 - `for`: conditional block loop with integer variable;
 
 Functions can be created using the `func` keyword, they also can take `N` arguments between parentheses separeted by comma. Below is an example for the fibonacci recursive algorithm:
@@ -39,28 +50,31 @@ cargo build --bin my-lang
 
 ## How to use
 
-The first step, is to compile your code into assembly using the following command:
+The my-lang program can be compiled in a three step way:
+
+1. Translating the source code into assembly instructions;
+2. Generating an object file (bytecode);
+3. Linking with the GCC Runtime (executable);
+
+For this steps you will need the following tools:
+
+- [The Netwide Assembler (NASM)](https://www.nasm.us/)
+- [GNU Compiler Collection (GCC)](https://gcc.gnu.org/)
+
+After downloading and installing, you can compile any program with the following commands:
 
 ```shell
-target/debug/my-lang examples/helloworld.txt
+target/debug/my-lang.exe -t windows examples/helloworld.txt
+nasm -fwin64 examples/helloworld.asm
+cc examples/helloworld.obj -o examples/helloworld.exe
 ```
 
-From this point on, you will need nasm to assemble your code into machine code. The Netwide Assembler (NASM) can be found [here](https://www.nasm.us/).
-
-### Linux
-If you is running linux, you can assemble the code directly, using the following command:
+After compiling the code into an executable, you can run the result program:
 
 ```shell
-nasm out.asm
+examples/helloworld.exe
 ```
 
-### Windows
-On windows you will not be able to assemble the code directly, instead you can generate an object and link it using [gcc](https://gcc.gnu.org/). Using the commands below will generate an exe file on windows:
+## Examples
 
-```shell
-nasm -fwin64 out.asm
-```
-
-```shell
-gcc out.obj -o out.exe
-```
+For more examples on how the syntax works, you should look at [`examples`](/examples/) folder.
