@@ -825,12 +825,10 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                 panic!("operator Dereference can only be used on vars");
             };
             let mem = c.scope.get(id);
+            let size = annot.inner_type().mem_size();
             let reg = c.regs.take_any(MemSize::QWord).expect("register available");
-            let tmp = c.scope.new_temp(annot.mem_size());
             asm::code!(c.code, Mov, reg, mem);
-            asm::code!(c.code, Mov, tmp, Mem::reg(reg, annot.mem_size()));
-            c.regs.push(reg);
-            Operand::Mem(tmp)
+            Operand::Mem(Mem::reg(reg, size))
         }
         UnaryOperator::Minus => {
             let expr_ty = operand.get_annot();
