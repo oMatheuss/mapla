@@ -710,7 +710,8 @@ impl<'a> Parser<'a> {
             | Token::IntLiteral(..)
             | Token::FloatLiteral(..)
             | Token::StrLiteral(..)
-            | Token::Identifier(..) => self.consume_expr(),
+            | Token::Identifier(..)
+            | Token::Mul => self.consume_expr(),
 
             Token::Return => self.consume_ret(),
 
