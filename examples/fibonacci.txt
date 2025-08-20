@@ -1,4 +1,4 @@
-use io;
+extern func printf(fmt: char*, arg: int);
 
 func fib(num: int): int do
     if num < 2 then return num; end
@@ -7,6 +7,6 @@ end
 
 func main(): int do
     int r = fib(10);
-    printInt(r);
+    printf("fibonacci of 10 is %d\n", r);
     return 0;
 end
