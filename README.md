@@ -1,10 +1,10 @@
-# My Lang
+# Mapla Lang
 
-This repository contains the source code for the My Lang compiler.
+This repository contains the source code for the Mapla compiler.
 
 ## Overview
 
-My Lang is a toy language, designed for simplicity and low-level operations. Its syntax is highly inspired by [lua](https://www.lua.org/) for its simplicity, but instead of being interpreted, it aims to be a low-level, system language.
+Mapla is language, designed for simplicity and low-level operations. Its syntax is highly inspired by [lua](https://www.lua.org/) for its simplicity, but instead of being interpreted, it aims to be a low-level, system language.
 
 ## Features
 
@@ -45,12 +45,12 @@ end
 To build the compiler, first you need to have [Rust](https://www.rust-lang.org) installed, then you can use the following command:
 
 ```shell
-cargo build --bin my-lang
+cargo build --bin mapla
 ```
 
 ## How to use
 
-The my-lang program can be compiled in a three step way:
+The mapla program can be compiled in a three step way:
 
 1. Translating the source code into assembly instructions;
 2. Generating an object file (bytecode);
@@ -64,7 +64,7 @@ For this steps you will need the following tools:
 After downloading and installing, you can compile any program with the following commands:
 
 ```shell
-target/debug/my-lang.exe -t windows examples/helloworld.txt
+target/debug/mapla.exe -t windows examples/helloworld.txt
 nasm -fwin64 examples/helloworld.asm
 cc examples/helloworld.obj -o examples/helloworld.exe
 ```

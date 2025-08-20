@@ -1,11 +1,11 @@
 BUILD=target
 EXMPL=examples
 
-$(BUILD)/debug/my-lang.exe:
+$(BUILD)/debug/mapla.exe:
 	cargo build
 
-$(EXMPL)/%.asm: $(BUILD)/debug/my-lang.exe
-	$(BUILD)/debug/my-lang.exe -t windows $(EXMPL)/$*.txt -o $(EXMPL)/$*.asm
+$(EXMPL)/%.asm: $(BUILD)/debug/mapla.exe
+	$(BUILD)/debug/mapla.exe -t windows $(EXMPL)/$*.txt -o $(EXMPL)/$*.asm
 
 $(EXMPL)/%.obj: $(EXMPL)/%.asm
 	nasm -fwin64 $(EXMPL)/$*.asm
