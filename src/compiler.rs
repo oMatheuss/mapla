@@ -150,7 +150,7 @@ impl MemSized for TypeAnnot {
     fn mem_size(&self) -> MemSize {
         match self.annotation() {
             Annotation::Value => self.inner_type().mem_size(),
-            Annotation::Pointer | Annotation::Array(..) => MemSize::QWord,
+            Annotation::Pointer(..) | Annotation::Array(..) => MemSize::QWord,
         }
     }
 }
@@ -387,7 +387,7 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
             false => Operand::Imm(Imm::FALSE),
         },
         ValueExpr::Identifier(annot, id) => match annot.annotation() {
-            Annotation::Value | Annotation::Pointer => Operand::Mem(c.scope.get(id)),
+            Annotation::Value | Annotation::Pointer(..) => Operand::Mem(c.scope.get(id)),
             Annotation::Array(..) => {
                 let mem = c.scope.get(id);
                 let reg = c.regs.take_any(MemSize::QWord).expect("register available");
@@ -821,14 +821,18 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             Operand::Reg(reg)
         }
         UnaryOperator::Dereference => {
-            let Expression::Value(ValueExpr::Identifier(annot, id)) = operand else {
-                panic!("operator Dereference can only be used on vars");
-            };
-            let mem = c.scope.get(id);
-            let size = annot.inner_type().mem_size();
-            let reg = c.regs.take_any(MemSize::QWord).expect("register available");
-            asm::code!(c.code, Mov, reg, mem);
-            Operand::Mem(Mem::reg(reg, size))
+            let expr_ty = operand.get_annot().deref();
+            let size = expr_ty.mem_size();
+            let operand = compile_expr_rec(c, operand);
+            match operand {
+                Operand::Reg(reg) => Operand::Mem(Mem::reg(reg, size)),
+                Operand::Mem(mem) => {
+                    let reg = c.regs.take_any(MemSize::QWord).expect("register available");
+                    asm::code!(c.code, Mov, reg, mem);
+                    Operand::Mem(Mem::reg(reg, size))
+                },
+                _ => panic!("invalid operand type for dereference"),
+            }
         }
         UnaryOperator::Minus => {
             let expr_ty = operand.get_annot();

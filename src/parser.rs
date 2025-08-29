@@ -200,8 +200,7 @@ impl<'a> Parser<'a> {
                     Error::syntatic("indexing can only be applied to arrays and pointers", pos)?
                 }
                 let array = ValueExpr::Identifier(annot, id.into());
-                let annot = TypeAnnot::new(annot.inner_type());
-                Expression::index(array, index, annot)
+                Expression::index(array, index, annot.deref())
             }
             Token::Identifier(id) => {
                 let Some(symbol) = self.symbols.find(id) else {
@@ -269,12 +268,10 @@ impl<'a> Parser<'a> {
     fn check_unaexpr(&mut self, op: UnaryOperator, operand: &Expression) -> Result<TypeAnnot> {
         let annot = operand.get_annot();
         match op {
-            UnaryOperator::AddressOf if annot.is_ref() => {
-                Error::syntatic("double references are not supported", self.pos)
+            UnaryOperator::AddressOf if annot.is_max_indirection() => {
+                Error::syntatic("too much indirection", self.pos)
             }
-            UnaryOperator::AddressOf if operand.is_ident() => {
-                Ok(TypeAnnot::new_ptr(annot.inner_type()))
-            }
+            UnaryOperator::AddressOf if operand.is_ident() => Ok(annot.create_ref()),
             UnaryOperator::AddressOf => {
                 Error::syntatic("a ref can only be taken from a var", self.pos)
             }
@@ -282,7 +279,7 @@ impl<'a> Parser<'a> {
             UnaryOperator::Minus if annot.is_number() => Ok(annot),
             UnaryOperator::Minus => Error::syntatic("cannot apply unary minus here", self.pos),
 
-            UnaryOperator::Dereference if annot.is_ref() => Ok(TypeAnnot::new(annot.inner_type())),
+            UnaryOperator::Dereference if annot.is_ref() => Ok(annot.deref()),
             UnaryOperator::Dereference if annot.is_int() => Ok(TypeAnnot::VOID),
             UnaryOperator::Dereference => {
                 Error::syntatic("can only dereference addresses", self.pos)
@@ -350,7 +347,8 @@ impl<'a> Parser<'a> {
         let mut lhs = match self.peek_unaop() {
             Some(op) => {
                 self.next_or_err()?;
-                let operand = self.parse_atom()?;
+                let prec = op.precedence();
+                let operand = self.parse_expr(prec)?;
                 let result = self.check_unaexpr(op, &operand)?;
 
                 Expression::una_op(op, operand, result)
@@ -453,7 +451,12 @@ impl<'a> Parser<'a> {
             }
             Some(Token::Mul) => {
                 self.next_or_err()?; // discard asterisk
-                Ok(TypeAnnot::new_ptr(ty))
+                let mut indirection = 1;
+                while let Some(Token::Mul) = self.peek() {
+                    self.next_or_err()?; // discard asterisk
+                    indirection += 1;
+                }
+                Ok(TypeAnnot::new_ptr(ty, indirection))
             }
             _ => Ok(TypeAnnot::new(ty)),
         }
@@ -515,13 +518,7 @@ impl<'a> Parser<'a> {
             Token::Bool => VarType::Bool,
             _ => Error::syntatic("expected type annotation", self.pos)?,
         };
-        let annot = if let Some(Token::Mul) = self.peek() {
-            self.next_or_err()?; // discard asterisk
-            TypeAnnot::new_ptr(ty)
-        } else {
-            TypeAnnot::new(ty)
-        };
-        Ok(annot)
+        self.parse_decl(ty)
     }
 
     fn parse_args(&mut self) -> Result<Vec<Argument>> {

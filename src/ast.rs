@@ -48,15 +48,15 @@ impl std::fmt::Display for VarType {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Annotation {
     Value,
-    Pointer,
-    Array(u32),
+    Pointer(u8), // u8 is the amount of indirection
+    Array(u32),  // u32 is the size of the array
 }
 
 impl std::fmt::Display for Annotation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Annotation::Value => Ok(()),
-            Annotation::Pointer => write!(f, "*"),
+            Annotation::Pointer(ind) => write!(f, "{e:*>w$}", e = "", w = *ind as usize),
             Annotation::Array(size) => write!(f, "[{size}]"),
         }
     }
@@ -88,10 +88,10 @@ impl TypeAnnot {
         }
     }
 
-    pub const fn new_ptr(inner: VarType) -> Self {
+    pub const fn new_ptr(inner: VarType, indirection: u8) -> Self {
         TypeAnnot {
             inner,
-            annot: Annotation::Pointer,
+            annot: Annotation::Pointer(indirection),
         }
     }
 
@@ -127,7 +127,7 @@ impl TypeAnnot {
     }
 
     pub fn is_ref(self) -> bool {
-        matches!(self.annot, Annotation::Array(..) | Annotation::Pointer)
+        matches!(self.annot, Annotation::Array(..) | Annotation::Pointer(..))
     }
 
     pub fn inner_type(&self) -> VarType {
@@ -136,6 +136,26 @@ impl TypeAnnot {
 
     pub fn annotation(&self) -> Annotation {
         self.annot
+    }
+
+    pub fn is_max_indirection(self) -> bool {
+        self.annot == Annotation::Pointer(u8::MAX)
+    }
+
+    pub fn deref(self) -> Self {
+        match self.annot {
+            Annotation::Value => self,
+            Annotation::Pointer(1) | Annotation::Array(..) => Self { inner: self.inner, annot: Annotation::Value },
+            Annotation::Pointer(i) => Self { inner: self.inner, annot: Annotation::Pointer(i - 1) },
+        }
+    }
+
+    pub fn create_ref(self) -> Self {
+        match self.annot {
+            Annotation::Value => Self { inner: self.inner, annot: Annotation::Pointer(1) },
+            Annotation::Array(..) => Self { inner: self.inner, annot: Annotation::Pointer(2) },
+            Annotation::Pointer(i) => Self { inner: self.inner, annot: Annotation::Pointer(i + 1) },
+        }
     }
 }
 
@@ -595,4 +615,10 @@ pub enum UnaryOperator {
     Minus,
     Not,
     BitwiseNot,
+}
+
+impl UnaryOperator {
+    pub fn precedence(&self) -> u8 {
+        9
+    }
 }
