@@ -1,0 +1,8 @@
+extern func printf(fmt: char*);
+
+func main(argc: int, argv: char**): int do
+    for i to argc do
+        printf("%d = %s\n", i, argv[i]);
+    end
+    return 0;
+end
