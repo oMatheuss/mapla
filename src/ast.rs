@@ -145,16 +145,31 @@ impl TypeAnnot {
     pub fn deref(self) -> Self {
         match self.annot {
             Annotation::Value => self,
-            Annotation::Pointer(1) | Annotation::Array(..) => Self { inner: self.inner, annot: Annotation::Value },
-            Annotation::Pointer(i) => Self { inner: self.inner, annot: Annotation::Pointer(i - 1) },
+            Annotation::Pointer(1) | Annotation::Array(..) => Self {
+                inner: self.inner,
+                annot: Annotation::Value,
+            },
+            Annotation::Pointer(i) => Self {
+                inner: self.inner,
+                annot: Annotation::Pointer(i - 1),
+            },
         }
     }
 
     pub fn create_ref(self) -> Self {
         match self.annot {
-            Annotation::Value => Self { inner: self.inner, annot: Annotation::Pointer(1) },
-            Annotation::Array(..) => Self { inner: self.inner, annot: Annotation::Pointer(2) },
-            Annotation::Pointer(i) => Self { inner: self.inner, annot: Annotation::Pointer(i + 1) },
+            Annotation::Value => Self {
+                inner: self.inner,
+                annot: Annotation::Pointer(1),
+            },
+            Annotation::Array(..) => Self {
+                inner: self.inner,
+                annot: Annotation::Pointer(2),
+            },
+            Annotation::Pointer(i) => Self {
+                inner: self.inner,
+                annot: Annotation::Pointer(i + 1),
+            },
         }
     }
 }

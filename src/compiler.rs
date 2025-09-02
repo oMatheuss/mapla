@@ -830,7 +830,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     let reg = c.regs.take_any(MemSize::QWord).expect("register available");
                     asm::code!(c.code, Mov, reg, mem);
                     Operand::Mem(Mem::reg(reg, size))
-                },
+                }
                 _ => panic!("invalid operand type for dereference"),
             }
         }
