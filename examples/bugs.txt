@@ -1,0 +1,148 @@
+# Bosco's Rule (also known as Bugs) is a Larger than Life cellular automaton.
+# Reference: https://conwaylife.com/wiki/OCA%3ABosco's_Rule
+# 
+# To compile on windows, run:
+# make -B examples/breaker.obj
+# cc examples/breaker.obj -o examples/breaker.exe -I/path/to/raylib/include -L/path/to/raylib/lib -lraylib -lwinmm -lgdi32 -lopengl32
+
+extern func malloc(size: int): int*;
+extern func memcpy(dst: int*, src: int*, cnt: int): int*;
+
+extern func InitWindow(width: int, height: int, title: char*);
+extern func CloseWindow();
+extern func SetTargetFPS(fps: int);
+extern func GetFrameTime(): real;
+extern func WindowShouldClose(): bool;
+extern func BeginDrawing();
+extern func EndDrawing();
+
+extern func ClearBackground(color: int);
+
+extern func TextFormat(text: char*, args: int): char*;
+extern func TextLength(text: char*): int;
+extern func MeasureText(text: char*, fontSize: int): int;
+
+extern func DrawFPS(posX: int, posY: int);
+extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: int);
+extern func DrawPixel(posX: int, posY: int, color: int);
+extern func DrawLine(startPosX: int, startPosY: int, endPosX: int, endPosY: int, color: int);
+extern func DrawRectangle(posX: int, posY: int, width: int, height: int, color: int);
+extern func DrawCircle(centerX: int, centerY: int, radius: real, color: int);
+
+extern func SetRandomSeed(seed: int); 
+extern func GetRandomValue(min: int, max: int): int;
+
+int WIDTH  = 200;
+int HEIGHT = 200;
+
+int BLACK  = 0xFF140800;
+int WHITE  = 0xFFFFFFFF;
+
+int STABLE_A = 33;
+int STABLE_B = 57;
+
+int BORN_A = 34;
+int BORN_B = 45;
+
+func wrapAround(value: int, maxValue: int): int do
+    if value >= maxValue then value -= maxValue; end
+    if value < 0 then value += maxValue; end
+    return value;
+end
+
+func getCell(board: int*, x: int, y: int): bool do
+    int dxy = (y * WIDTH) + x;
+    int idx = dxy / 32;
+    int ofs = dxy % 32;
+    int cel = board[idx] & (1 << ofs);
+    return cel != 0;
+end
+
+func setCell(board: int*, x: int, y: int, value: bool) do
+    int dxy = (y * WIDTH) + x;
+    int idx = dxy / 32;
+    int ofs = dxy % 32;
+    int mem = board[idx];
+    if value then
+        int msk = 1 << ofs;
+        board[idx] = mem | msk;
+    end
+    if !value then
+        int msk = ~(1 << ofs);
+        board[idx] = mem & msk;
+    end
+end
+
+func checkNeighbors(board: int*, posX: int, posY: int): int do
+    var sum = 0;
+    for j = -5 to 6 do
+        var y = wrapAround(posY + j, HEIGHT);
+        for i = -5 to 6 do
+            if i != 0 || j != 0 then
+                var x = wrapAround(posX + i, WIDTH);
+                var cell = getCell(board, x, y);
+                if cell then sum += 1; end
+            end
+        end
+    end
+    return sum;
+end
+
+func updateBoard(actualState: int*, nextState: int*) do
+    memcpy(nextState, actualState, WIDTH * HEIGHT / 8);
+    for y to HEIGHT do
+        for x to WIDTH do
+            var actual = getCell(actualState, x, y);
+            var alives = checkNeighbors(actualState, x, y);
+            if actual && (alives < STABLE_A || alives > STABLE_B) then
+                setCell(nextState, x, y, 0);
+            end
+            if !actual && alives >= BORN_A && alives <= BORN_B then
+                setCell(nextState, x, y, 1);
+            end
+        end
+    end
+    memcpy(actualState, nextState, WIDTH * HEIGHT / 8);
+end
+
+func randomizeBoard(board: int*) do
+    for y to HEIGHT do
+        for x to WIDTH do
+            int r = GetRandomValue(0, 1);
+            setCell(board, x, y, r);
+        end
+    end
+end
+
+func DisplayBoard(board: int*) do
+    for y to HEIGHT do
+        for x to WIDTH do
+            if getCell(board, x, y) then
+                DrawPixel(x, y, WHITE);
+            end
+        end
+    end
+end
+
+func main(): int do
+    int* board = malloc(WIDTH * HEIGHT / 8);
+    int* buffer = malloc(WIDTH * HEIGHT / 8);
+
+    InitWindow(WIDTH, HEIGHT, "Bugs");
+    SetTargetFPS(30);
+
+    randomizeBoard(board);
+
+    while !WindowShouldClose() do
+        updateBoard(board, buffer);
+
+        BeginDrawing();
+        ClearBackground(BLACK);
+        DisplayBoard(board);
+        EndDrawing();
+    end
+
+    CloseWindow();
+
+    return 0;
+end
