@@ -1,0 +1,17 @@
+extern func printf(fmt: char*, arg: int);
+func main(): int do
+    
+    int x = 1 << 6;
+    printf("1 << 6 = %d\n", x);
+
+    x = 64 >> 2;
+    printf("64 >> 2 = %d\n", x);
+
+    x = ~17;
+    printf("~17 = %d\n", x);
+
+    x = ~17 ^ 5;
+    printf("~17 ^ 5 = %d\n", x);
+
+    return 0;
+end

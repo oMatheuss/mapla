@@ -216,11 +216,14 @@ impl<'a> Lexer<'a> {
                 self.next();
                 Token::And
             }
-            ('&', _) => Token::Ampersand,
+            ('&', _) => Token::Amp,
             ('|', Some('|')) => {
                 self.next();
                 Token::Or
             }
+            ('|', _) => Token::VBar,
+            ('^', _) => Token::Hat,
+            ('~', _) => Token::Til,
             ('%', _) => Token::Mod,
             ('+', Some('=')) => {
                 self.next();

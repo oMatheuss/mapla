@@ -225,10 +225,11 @@ impl<'a> Parser<'a> {
         let token = self.peek()?;
 
         let op = match token {
-            Token::Ampersand => UnaryOperator::AddressOf,
+            Token::Amp => UnaryOperator::AddressOf,
             Token::Sub => UnaryOperator::Minus,
             Token::Mul => UnaryOperator::Dereference,
             Token::Not => UnaryOperator::Not,
+            Token::Til => UnaryOperator::BitwiseNot,
             _ => return None,
         };
 
@@ -246,7 +247,10 @@ impl<'a> Parser<'a> {
             Token::Less => Operator::Less,
             Token::LessEqual => Operator::LessEqual,
             Token::And => Operator::And,
+            Token::Amp => Operator::BitwiseAnd,
             Token::Or => Operator::Or,
+            Token::VBar => Operator::BitwiseOr,
+            Token::Hat => Operator::BitwiseXor,
             Token::Add => Operator::Add,
             Token::Sub => Operator::Sub,
             Token::Mul => Operator::Mul,
@@ -288,7 +292,8 @@ impl<'a> Parser<'a> {
             UnaryOperator::Not if annot.is_bool() => Ok(annot),
             UnaryOperator::Not => Error::syntatic("cannot apply unary not here", self.pos),
 
-            UnaryOperator::BitwiseNot => todo!(),
+            UnaryOperator::BitwiseNot if annot.is_int() => Ok(annot),
+            UnaryOperator::BitwiseNot => Error::syntatic("cannot apply bitwise not here", self.pos),
         }
     }
 
@@ -326,7 +331,16 @@ impl<'a> Parser<'a> {
                 Ok(lhs)
             }
 
-            Operator::Mod | Operator::Shr | Operator::Shl if lhs == rhs && lhs.is_int() => Ok(lhs),
+            Operator::Mod
+            | Operator::Shr
+            | Operator::Shl
+            | Operator::BitwiseAnd
+            | Operator::BitwiseOr
+            | Operator::BitwiseXor
+                if lhs == rhs && lhs.is_int() =>
+            {
+                Ok(lhs)
+            }
 
             _ => Error::syntatic("invalid operation between types", self.pos),
         }

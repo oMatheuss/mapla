@@ -454,12 +454,16 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
             }
             lhs.into()
         }
-        Operator::And => {
+        Operator::And | Operator::BitwiseAnd => {
             asm::code!(c.code, And, lhs, rhs);
             lhs
         }
-        Operator::Or => {
+        Operator::Or | Operator::BitwiseOr => {
             asm::code!(c.code, Or, lhs, rhs);
+            lhs
+        }
+        Operator::BitwiseXor => {
+            asm::code!(c.code, Xor, lhs, rhs);
             lhs
         }
         Operator::Add => {
@@ -548,46 +552,36 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
                 Operand::Reg(lhs)
             }
         }
-        Operator::Shr => match rhs {
-            Operand::Reg(reg) if reg.is_cnt() => {
-                asm::code!(c.code, Shr, lhs, c.regs.switch_size(reg, MemSize::Byte));
-                lhs
-            }
-            Operand::Reg(reg) => {
-                let bkp = backup_reg(c, Reg::Rcx);
-                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
-                asm::code!(c.code, Shr, lhs, Reg::Cl);
-                restore_reg(c, Reg::Rcx, bkp);
-                lhs
-            }
-            _ => {
-                let reg = move_operand_to_reg(c, TypeAnnot::INT, rhs).expect_reg();
-                let bkp = backup_reg(c, Reg::Rcx);
-                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
-                asm::code!(c.code, Shr, lhs, Reg::Cl);
-                restore_reg(c, Reg::Rcx, bkp);
-                lhs
-            }
-        },
-        Operator::Shl => match rhs {
-            Operand::Reg(reg) if reg.is_cnt() => {
-                asm::code!(c.code, Shl, lhs, c.regs.switch_size(reg, MemSize::Byte));
-                lhs
-            }
-            Operand::Reg(reg) => {
-                let bkp = backup_reg(c, Reg::Rcx);
-                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
-                asm::code!(c.code, Shl, lhs, Reg::Cl);
-                restore_reg(c, Reg::Rcx, bkp);
-                lhs
-            }
-            _ => {
-                let reg = move_operand_to_reg(c, TypeAnnot::INT, rhs).expect_reg();
-                let bkp = backup_reg(c, Reg::Rcx);
-                asm::code!(c.code, Mov, Reg::Cl, c.regs.switch_size(reg, MemSize::Byte));
-                asm::code!(c.code, Shl, lhs, Reg::Cl);
-                restore_reg(c, Reg::Rcx, bkp);
-                lhs
+        Operator::Shl | Operator::Shr => {
+            let lhs = match lhs {
+                Operand::Reg(cnt) if cnt.is_cnt() => {
+                    let reg = c.regs.take_any(lhs.mem_size()).expect("register available");
+                    c.regs.push(cnt);
+                    asm::code!(c.code, Mov, reg, cnt);
+                    Operand::Reg(reg)
+                },
+                _ => lhs,
+            };
+            match rhs {
+                Operand::Reg(reg) if reg.is_cnt() => {
+                    match ope {
+                        Operator::Shl => asm::code!(c.code, Shl, lhs, Reg::Cl),
+                        Operator::Shr => asm::code!(c.code, Shr, lhs, Reg::Cl),
+                        _ => unreachable!(),
+                    };
+                    lhs
+                }
+                _ => {
+                    let bkp = backup_reg(c, Reg::Rcx);
+                    asm::code!(c.code, Mov, Reg::cnt(rhs.mem_size()), rhs);
+                    match ope {
+                        Operator::Shl => asm::code!(c.code, Shl, lhs, Reg::Cl),
+                        Operator::Shr => asm::code!(c.code, Shr, lhs, Reg::Cl),
+                        _ => unreachable!(),
+                    };
+                    restore_reg(c, Reg::Rcx, bkp);
+                    lhs
+                }
             }
         },
         Operator::Assign => {
@@ -710,7 +704,14 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
             c.xmms.push(xmm);
             lhs
         }
-        Operator::Shr | Operator::Shl | Operator::And | Operator::Or | Operator::Mod => {
+        Operator::Shr
+        | Operator::Shl
+        | Operator::And
+        | Operator::Or
+        | Operator::Mod
+        | Operator::BitwiseAnd
+        | Operator::BitwiseOr
+        | Operator::BitwiseXor => {
             unimplemented!()
         }
     };

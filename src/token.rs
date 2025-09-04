@@ -51,7 +51,10 @@ pub enum Token<'a> {
     Comma,
     Colon,
     SemiColon,
-    Ampersand,
+    Amp,
+    Til,
+    VBar,
+    Hat, 
     Eof,
 }
 

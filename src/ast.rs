@@ -561,6 +561,9 @@ pub enum Operator {
     Mod,
     Shr,
     Shl,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
     Assign,
     AddAssign,
     SubAssign,
@@ -571,11 +574,14 @@ pub enum Operator {
 impl Operator {
     pub fn precedence(&self) -> u8 {
         match self {
-            Operator::Mul | Operator::Div | Operator::Mod => 8,
-            Operator::Add | Operator::Sub => 7,
-            Operator::Shl | Operator::Shr => 6,
-            Operator::Greater | Operator::GreaterEqual | Operator::Less | Operator::LessEqual => 5,
-            Operator::Equal | Operator::NotEqual => 4,
+            Operator::Mul | Operator::Div | Operator::Mod => 11,
+            Operator::Add | Operator::Sub => 10,
+            Operator::Shl | Operator::Shr => 9,
+            Operator::Greater | Operator::GreaterEqual | Operator::Less | Operator::LessEqual => 8,
+            Operator::Equal | Operator::NotEqual => 7,
+            Operator::BitwiseAnd => 6,
+            Operator::BitwiseXor => 5,
+            Operator::BitwiseOr => 4,
             Operator::And => 3,
             Operator::Or => 2,
             Operator::Assign
@@ -634,6 +640,6 @@ pub enum UnaryOperator {
 
 impl UnaryOperator {
     pub fn precedence(&self) -> u8 {
-        9
+        12
     }
 }
