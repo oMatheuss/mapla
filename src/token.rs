@@ -1,5 +1,6 @@
 #[derive(Debug)]
 pub enum Token<'a> {
+    Var,
     Int,
     Real,
     Char,
@@ -57,6 +58,7 @@ pub enum Token<'a> {
 impl<'a> Token<'a> {
     pub fn from_str(s: &'a str) -> Self {
         match s {
+            "var" => Self::Var,
             "int" => Self::Int,
             "real" => Self::Real,
             "char" => Self::Char,

@@ -437,12 +437,19 @@ impl<'a> Parser<'a> {
         AstNode::If(expr, inner).ok()
     }
 
-    fn parse_decl(&mut self, ty: VarType) -> Result<TypeAnnot> {
+    fn parse_annot(&mut self) -> Result<TypeAnnot> {
+        let ty = match self.next_or_err()? {
+            Token::Int => VarType::Int,
+            Token::Real => VarType::Real,
+            Token::Char => VarType::Char,
+            Token::Bool => VarType::Bool,
+            _ => Error::syntatic("expected type annotation", self.pos)?,
+        };
         match self.peek() {
             Some(Token::OpenBracket) => {
                 self.next_or_err()?; // discard open bracket
                 let ValueExpr::Int(size) = self.parse_value()? else {
-                    Error::syntatic("expected integer value", self.pos)?
+                    Error::syntatic("expected integer literal", self.pos)?
                 };
                 let Token::CloseBracket = self.next_or_err()? else {
                     Error::syntatic("expected close bracket", self.pos)?
@@ -462,33 +469,47 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn consume_var(&mut self, ty: VarType) -> Result<AstNode> {
-        self.next(); // discard var type token
-        let annot = self.parse_decl(ty)?;
-        let Token::Identifier(ident) = *self.next_or_err()? else {
-            Error::syntatic("expected identifier", self.pos)?
-        };
-        let id_pos = self.pos;
-        let expr = if let Some(Token::Assign) = self.peek() {
-            self.next_or_err()?; // discard assign signal
-            let expr_pos = self.pos;
+    fn consume_var(&mut self) -> Result<AstNode> {
+        if let Some(Token::Var) = self.peek() {
+            self.next_or_err()?;
+            let Token::Identifier(ident) = *self.next_or_err()? else {
+                Error::syntatic("expected identifier", self.pos)?
+            };
+            let sym_pos = self.pos;
+            let Token::Assign = self.next_or_err()? else {
+                Error::syntatic("expected assign operator", self.pos)?
+            };
             let expr = self.parse_expr(1)?;
-            let expr_annot = expr.get_annot();
-            if expr_annot != annot {
-                Error::syntatic(&format!("cannot assign {expr_annot} to {annot}"), expr_pos)?
-            }
-            Some(expr)
+            let annot = expr.get_annot();
+            self.consume_semi()?;
+            self.symbols.set(&ident, Symbol::new(sym_pos, annot));
+            AstNode::Var(annot, ident.into(), Some(expr)).ok()
         } else {
-            None
-        };
-        self.consume_semi()?;
-        self.symbols.set(&ident, Symbol::new(id_pos, annot));
-        AstNode::Var(annot, ident.into(), expr).ok()
+            let annot = self.parse_annot()?;
+            let Token::Identifier(ident) = *self.next_or_err()? else {
+                Error::syntatic("expected identifier", self.pos)?
+            };
+            let sym_pos = self.pos;
+            let expr = if let Some(Token::Assign) = self.peek() {
+                self.next_or_err()?; // discard assign signal
+                let expr_pos = self.pos;
+                let expr = self.parse_expr(1)?;
+                let expr_annot = expr.get_annot();
+                if expr_annot != annot {
+                    Error::syntatic(&format!("cannot assign {expr_annot} to {annot}"), expr_pos)?
+                }
+                Some(expr)
+            } else {
+                None
+            };
+            self.consume_semi()?;
+            self.symbols.set(&ident, Symbol::new(sym_pos, annot));
+            AstNode::Var(annot, ident.into(), expr).ok()
+        }
     }
 
-    fn consume_global(&mut self, ty: VarType) -> Result<AstRoot> {
-        self.next(); // discard var type token
-        let annot = self.parse_decl(ty)?;
+    fn consume_global(&mut self) -> Result<AstRoot> {
+        let annot = self.parse_annot()?;
         let Token::Identifier(ident) = *self.next_or_err()? else {
             Error::syntatic("expected identifier", self.pos)?
         };
@@ -508,17 +529,6 @@ impl<'a> Parser<'a> {
         self.consume_semi()?;
         self.symbols.set(&ident, Symbol::new(id_pos, annot));
         AstRoot::Global(annot, ident.into(), expr).ok()
-    }
-
-    fn parse_annot(&mut self) -> Result<TypeAnnot> {
-        let ty = match self.next_or_err()? {
-            Token::Int => VarType::Int,
-            Token::Real => VarType::Real,
-            Token::Char => VarType::Char,
-            Token::Bool => VarType::Bool,
-            _ => Error::syntatic("expected type annotation", self.pos)?,
-        };
-        self.parse_decl(ty)
     }
 
     fn parse_args(&mut self) -> Result<Vec<Argument>> {
@@ -696,10 +706,7 @@ impl<'a> Parser<'a> {
             Token::While => self.consume_while(),
             Token::For => self.consume_for(),
 
-            Token::Int => self.consume_var(VarType::Int),
-            Token::Real => self.consume_var(VarType::Real),
-            Token::Char => self.consume_var(VarType::Char),
-            Token::Bool => self.consume_var(VarType::Bool),
+            Token::Var | Token::Int | Token::Real | Token::Char | Token::Bool => self.consume_var(),
 
             Token::OpenParen
             | Token::True
@@ -746,10 +753,7 @@ impl<'a> Parser<'a> {
         match token {
             Token::Use => self.consume_use(),
 
-            Token::Int => self.consume_global(VarType::Int),
-            Token::Real => self.consume_global(VarType::Real),
-            Token::Char => self.consume_global(VarType::Char),
-            Token::Bool => self.consume_global(VarType::Bool),
+            Token::Int | Token::Real | Token::Char | Token::Bool => self.consume_global(),
 
             Token::Function => self.consume_func(),
             Token::Extern => self.consume_extern(),
