@@ -1,12 +1,12 @@
 use std::process::ExitCode;
-use std::{env, path::PathBuf};
 
 use compiler::Compiler;
-use error::{Error, Result};
+use error::Result;
 use lexer::Lexer;
 use parser::Parser;
-use target::CompilerTarget;
+use source::SourceManager;
 
+mod args;
 mod asm;
 mod ast;
 mod compiler;
@@ -14,80 +14,24 @@ mod error;
 mod lexer;
 mod parser;
 mod position;
+mod source;
 mod target;
 mod token;
 mod utils;
 
-struct ParsedArgs {
-    input: String,
-    output: Option<String>,
-    target: CompilerTarget,
-}
-
-fn parse_args() -> Result<ParsedArgs> {
-    let mut args = env::args();
-
-    let mut input = None;
-    let mut output = None;
-    let mut target = CompilerTarget::Linux;
-
-    args.next().expect("first argument should be program path");
-
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-o" => {
-                let Some(sout) = args.next() else {
-                    return Error::cli("output path must be informed after -o flag");
-                };
-
-                output = Some(sout);
-            }
-            "-t" => {
-                let Some(starget) = args.next() else {
-                    return Error::cli("target must be informed after -t flag");
-                };
-
-                target = starget.parse()?;
-            }
-            _ => input = Some(arg),
-        }
-    }
-
-    let Some(input) = input else {
-        return Error::cli("no input file provided");
-    };
-
-    Ok(ParsedArgs {
-        input,
-        output,
-        target,
-    })
-}
-
 fn run() -> Result<()> {
-    let args = parse_args()?;
-    let cur_dir = env::current_dir()?;
+    let args = args::parse_args()?;
 
-    let in_file = cur_dir.join(&args.input);
-    let out_file = args
-        .output
-        .map(PathBuf::from)
-        .unwrap_or(in_file.with_extension("asm"));
+    let sm = SourceManager::new(&args.input, args.dir.clone());
+    let mut main = sm.main()?;
 
-    let source = &args.input;
-    let code = std::fs::read_to_string(in_file)?;
-
-    let tokens = Lexer::new(source, &code).collect::<Result<Vec<_>>>()?;
-
+    let tokens = Lexer::new(&mut main)
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
     let ast = Parser::new(&tokens).parse()?;
+    let assembly = Compiler::new(args.target).compile(ast);
 
-    let assembly = Compiler::new(args.target)
-        .prolog()
-        .compile(ast)
-        .epilog()
-        .assembly();
-
-    std::fs::write(out_file, assembly)?;
+    std::fs::write(args.output_path(), assembly)?;
 
     Ok(())
 }

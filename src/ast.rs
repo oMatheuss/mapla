@@ -514,7 +514,6 @@ impl Annotated for Argument {
 
 #[derive(Debug)]
 pub enum AstRoot {
-    Use(Identifier),
     Global(TypeAnnot, Identifier, Option<ValueExpr>),
     Func(Identifier, Vec<Argument>, TypeAnnot, Vec<AstNode>),
     ExternFunc(Identifier, Vec<Argument>, TypeAnnot),

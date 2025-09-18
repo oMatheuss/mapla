@@ -710,7 +710,8 @@ impl<'a> Parser<'a> {
             Error::syntatic("expected identifier", self.pos)?
         };
         self.consume_semi()?;
-        AstRoot::Use(ident.into()).ok()
+
+        todo!()
     }
 
     #[inline]

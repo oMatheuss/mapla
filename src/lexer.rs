@@ -1,14 +1,14 @@
 use crate::error::{Error, PositionResult, Result};
 use crate::position::Position;
+use crate::source::Source;
 use crate::token::Token;
 use std::iter::Peekable;
 use std::str::Chars;
 
 pub struct Lexer<'a> {
-    input: &'a str,
-    chars: Peekable<Chars<'a>>,
-    ended: bool,
-    position: Position<'a>,
+    src: &'a str,
+    chs: Peekable<Chars<'a>>,
+    pos: Position<'a>,
 }
 
 #[derive(Debug)]
@@ -46,31 +46,29 @@ impl<'a> LexItem<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(file: &'a str, input: &'a str) -> Self {
-        let chars = input.chars().peekable();
+    pub fn new(input: &'a mut Source<'a>) -> Self {
         Self {
-            input,
-            chars,
-            ended: false,
-            position: Position::new(file),
+            src: input.src.as_str(),
+            chs: input.src.chars().peekable(),
+            pos: Position::new(input.file),
         }
     }
 
     #[inline]
     fn next(&mut self) -> Option<char> {
-        let ch = self.chars.next()?;
-        self.position.next(ch);
+        let ch = self.chs.next()?;
+        self.pos.next(ch);
         Some(ch)
     }
 
     #[inline]
     fn peek(&mut self) -> Option<&char> {
-        self.chars.peek()
+        self.chs.peek()
     }
 
     #[inline]
     fn index(&mut self) -> usize {
-        self.position.index()
+        self.pos.index()
     }
 
     #[inline]
@@ -107,12 +105,12 @@ impl<'a> Lexer<'a> {
             self.next();
         }
         let end = self.index();
-        let idt = Token::from_str(&self.input[start..end]);
+        let idt = Token::from_str(&self.src[start..end]);
         Ok(idt)
     }
 
     fn next_number(&mut self) -> Result<Token<'a>> {
-        let num_pos = self.position.clone();
+        let num_pos = self.pos;
         let start = self.index();
         let mut state = 0;
         while let Some(ch) = self.peek() {
@@ -133,10 +131,10 @@ impl<'a> Lexer<'a> {
             self.next();
         }
 
-        let slice = &self.input[start..self.index()];
+        let slice = &self.src[start..self.index()];
         match state {
             3 => {
-                let slice = &self.input[start + 2..self.index()];
+                let slice = &self.src[start + 2..self.index()];
                 let num = u32::from_str_radix(slice, 16).with_position(num_pos)?;
                 Ok(Token::IntLiteral(num))
             }
@@ -153,14 +151,14 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_string(&mut self) -> Result<Token<'a>> {
-        let str_pos = self.position.clone();
+        let str_pos = self.pos;
         self.next(); // discard quotation mark
         let start = self.index();
         while let Some(ch) = self.next() {
             match ch {
                 '"' => {
                     let end = self.index() - 1;
-                    let string = &self.input[start..end];
+                    let string = &self.src[start..end];
                     return Ok(Token::StrLiteral(string));
                 }
                 '\\' if matches!(self.peek(), Some('"')) => {
@@ -248,7 +246,7 @@ impl<'a> Lexer<'a> {
             (',', _) => Token::Comma,
             (':', _) => Token::Colon,
             (';', _) => Token::SemiColon,
-            _ => Error::lexical("invalid token", self.position)?,
+            _ => Error::lexical("invalid token", self.pos)?,
         };
 
         Ok(token)
@@ -260,7 +258,7 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            let position = self.position;
+            let position = self.pos;
             let token = match ch {
                 'a'..='z' | 'A'..='Z' | '_' => self.next_ident(),
                 '0'..='9' | '.' => self.next_number(),
@@ -271,19 +269,44 @@ impl<'a> Lexer<'a> {
             return LexItem::new(token, position).ok();
         }
 
-        self.ended = true;
-        LexItem::eof(self.position).ok()
+        LexItem::eof(self.pos).ok()
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
+pub struct LexIter<'a> {
+    lexer: Lexer<'a>,
+    ended: bool,
+}
+
+impl<'a> Iterator for LexIter<'a> {
     type Item = Result<LexItem<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.ended {
-            Some(self.next_token())
-        } else {
-            None
+        match self.lexer.next_token() {
+            eof @ Ok(LexItem {
+                token: Token::Eof, ..
+            }) if !self.ended => {
+                self.ended = true;
+                return Some(eof);
+            }
+            Ok(LexItem {
+                token: Token::Eof, ..
+            }) if self.ended => {
+                return None;
+            }
+            any => Some(any),
+        }
+    }
+}
+
+impl<'a> IntoIterator for Lexer<'a> {
+    type Item = Result<LexItem<'a>>;
+    type IntoIter = LexIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        LexIter {
+            lexer: self,
+            ended: false,
         }
     }
 }

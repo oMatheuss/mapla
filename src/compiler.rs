@@ -176,51 +176,15 @@ impl Compiler {
         }
     }
 
-    pub fn prolog(mut self) -> Self {
+    pub fn compile(mut self, ast: Ast) -> String {
         asm::code!(self.code, "bits 64");
         asm::code!(self.code, "section .text");
         asm::code!(self.code, "global main");
-        self
-    }
 
-    pub fn compile(mut self, ast: Ast) -> Self {
         for node in ast.iter() {
-            match node {
-                AstRoot::Use(..) => todo!(),
-                AstRoot::Func(ident, args, _, ast_nodes) => {
-                    compile_func(&mut self, ident, args, ast_nodes);
-                }
-                AstRoot::ExternFunc(name, ..) => asm::code!(self.code, "extern {name}"),
-                AstRoot::Global(annot, ident, value) => {
-                    let label = Lbl::from_label(ident);
-                    self.scope.set(ident, Mem::lbl(label, annot.mem_size()));
-                    match value {
-                        Some(value) => match value {
-                            ValueExpr::String(s) => {
-                                self.data.insert(label, s.as_bytes().to_vec());
-                            }
-                            ValueExpr::Int(i) => {
-                                self.data.insert(label, i.to_le_bytes().to_vec());
-                            }
-                            ValueExpr::Float(f) => {
-                                self.data.insert(label, f.to_le_bytes().to_vec());
-                            }
-                            ValueExpr::Bool(b) => {
-                                self.data.insert(label, [*b as u8].to_vec());
-                            }
-                            ValueExpr::Identifier(..) => {}
-                        },
-                        None => {
-                            todo!("create a entry on .bss section")
-                        }
-                    }
-                }
-            }
+            compile_root(&mut self, node);
         }
-        self
-    }
 
-    pub fn epilog(mut self) -> Self {
         if !self.data.is_empty() {
             asm::code!(self.code, "section .data");
 
@@ -228,10 +192,7 @@ impl Compiler {
                 asm::code!(self.code, "  {label}: db {:x}", HexSlice::new(bytes));
             }
         }
-        self
-    }
 
-    pub fn assembly(self) -> String {
         self.code.to_string()
     }
 }
@@ -559,7 +520,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
                     c.regs.push(cnt);
                     asm::code!(c.code, Mov, reg, cnt);
                     Operand::Reg(reg)
-                },
+                }
                 _ => lhs,
             };
             match rhs {
@@ -583,7 +544,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
                     lhs
                 }
             }
-        },
+        }
         Operator::Assign => {
             asm::code!(c.code, Mov, lhs, rhs);
             lhs
@@ -1260,4 +1221,37 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
     asm::code!(c.code, Mov, Reg::Rsp, Reg::Rbp);
     asm::code!(c.code, Pop, Reg::Rbp);
     asm::code!(c.code, Ret);
+}
+
+fn compile_root(c: &mut Compiler, node: &AstRoot) {
+    match node {
+        AstRoot::Func(ident, args, _, ast_nodes) => {
+            compile_func(c, ident, args, ast_nodes);
+        }
+        AstRoot::ExternFunc(name, ..) => asm::code!(c.code, "extern {name}"),
+        AstRoot::Global(annot, ident, value) => {
+            let label = Lbl::from_label(ident);
+            c.scope.set(ident, Mem::lbl(label, annot.mem_size()));
+            match value {
+                Some(value) => match value {
+                    ValueExpr::String(s) => {
+                        c.data.insert(label, s.as_bytes().to_vec());
+                    }
+                    ValueExpr::Int(i) => {
+                        c.data.insert(label, i.to_le_bytes().to_vec());
+                    }
+                    ValueExpr::Float(f) => {
+                        c.data.insert(label, f.to_le_bytes().to_vec());
+                    }
+                    ValueExpr::Bool(b) => {
+                        c.data.insert(label, [*b as u8].to_vec());
+                    }
+                    ValueExpr::Identifier(..) => {}
+                },
+                None => {
+                    todo!("create a entry on .bss section")
+                }
+            }
+        }
+    }
 }
