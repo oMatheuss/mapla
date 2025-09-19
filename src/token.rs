@@ -54,7 +54,7 @@ pub enum Token<'a> {
     Amp,
     Til,
     VBar,
-    Hat, 
+    Hat,
     Eof,
 }
 
