@@ -1,7 +1,7 @@
 use crate::error::{Error, PositionResult, Result};
 use crate::position::Position;
 use crate::source::Source;
-use crate::token::Token;
+use crate::token::{Token, TokenInfo};
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -11,42 +11,8 @@ pub struct Lexer<'a> {
     pos: Position<'a>,
 }
 
-#[derive(Debug)]
-pub struct LexItem<'a> {
-    token: Token<'a>,
-    position: Position<'a>,
-}
-
-impl<'a> LexItem<'a> {
-    #[inline]
-    pub fn token(&self) -> &Token {
-        &self.token
-    }
-
-    #[inline]
-    pub fn position(&self) -> &Position {
-        &self.position
-    }
-
-    #[inline]
-    pub fn new(token: Token<'a>, position: Position<'a>) -> Self {
-        Self { token, position }
-    }
-
-    #[inline]
-    pub fn eof(position: Position<'a>) -> Self {
-        let token = Token::Eof;
-        Self { token, position }
-    }
-
-    #[inline]
-    pub fn ok(self) -> Result<Self> {
-        Result::Ok(self)
-    }
-}
-
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a mut Source<'a>) -> Self {
+    pub fn new(input: &'a Source) -> Self {
         Self {
             src: input.src.as_str(),
             chs: input.src.chars().peekable(),
@@ -252,7 +218,7 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    pub fn next_token(&mut self) -> Result<LexItem<'a>> {
+    pub fn next_token(&mut self) -> Result<TokenInfo<'a>> {
         while let Some(&ch) = self.peek() {
             if self.skip_whitespace() || self.skip_comment() {
                 continue;
@@ -266,10 +232,10 @@ impl<'a> Lexer<'a> {
                 _ => self.next_symbol(),
             }?;
 
-            return LexItem::new(token, position).ok();
+            return TokenInfo::new(token, position).ok();
         }
 
-        LexItem::eof(self.pos).ok()
+        TokenInfo::eof(self.pos).ok()
     }
 }
 
@@ -279,19 +245,15 @@ pub struct LexIter<'a> {
 }
 
 impl<'a> Iterator for LexIter<'a> {
-    type Item = Result<LexItem<'a>>;
+    type Item = Result<TokenInfo<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.lexer.next_token() {
-            eof @ Ok(LexItem {
-                token: Token::Eof, ..
-            }) if !self.ended => {
+            Ok(token) if token.is_eof() && !self.ended => {
                 self.ended = true;
-                return Some(eof);
+                return Some(Ok(token));
             }
-            Ok(LexItem {
-                token: Token::Eof, ..
-            }) if self.ended => {
+            Ok(token) if token.is_eof() && self.ended => {
                 return None;
             }
             any => Some(any),
@@ -300,7 +262,7 @@ impl<'a> Iterator for LexIter<'a> {
 }
 
 impl<'a> IntoIterator for Lexer<'a> {
-    type Item = Result<LexItem<'a>>;
+    type Item = Result<TokenInfo<'a>>;
     type IntoIter = LexIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {

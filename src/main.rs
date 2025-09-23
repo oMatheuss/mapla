@@ -1,8 +1,5 @@
-use std::process::ExitCode;
-
 use compiler::Compiler;
 use error::Result;
-use lexer::Lexer;
 use parser::Parser;
 use source::SourceManager;
 
@@ -23,12 +20,8 @@ fn run() -> Result<()> {
     let args = args::parse_args()?;
 
     let sm = SourceManager::new(&args.input, args.dir.clone());
-    let mut main = sm.main()?;
+    let ast = Parser::new(sm).parse()?;
 
-    let tokens = Lexer::new(&mut main)
-        .into_iter()
-        .collect::<Result<Vec<_>>>()?;
-    let ast = Parser::new(&tokens).parse()?;
     let assembly = Compiler::new(args.target).compile(ast);
 
     std::fs::write(args.output_path(), assembly)?;
@@ -36,10 +29,11 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn main() -> ExitCode {
-    if run().inspect_err(|err| eprintln!("{err}")).is_ok() {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
+fn main() -> std::process::ExitCode {
+    if let Err(err) = run() {
+        eprintln!("{err}");
+        return std::process::ExitCode::FAILURE;
     }
+
+    return std::process::ExitCode::SUCCESS;
 }
