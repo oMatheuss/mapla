@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 
 use crate::position::Position;
@@ -5,7 +6,7 @@ use crate::position::Position;
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
-    message: String,
+    message: Cow<'static, str>,
 }
 
 impl std::error::Error for Error {}
@@ -20,35 +21,36 @@ pub enum ErrorKind {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+impl<T> From<Error> for Result<T> {
+    fn from(value: Error) -> Self {
+        Self::Err(value)
+    }
+}
+
 impl Error {
+    pub fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
     pub fn lexical<T>(message: &str, position: Position) -> Result<T> {
-        Err(Error {
-            kind: ErrorKind::LexicalError,
-            message: format!("{position} -> {message}"),
-        })
+        Self::new(ErrorKind::LexicalError, format!("{position} -> {message}")).into()
     }
 
     pub fn syntatic<T>(message: &str, position: Position) -> Result<T> {
-        Err(Error {
-            kind: ErrorKind::SyntaxError,
-            message: format!("{position} -> {message}"),
-        })
+        Self::new(ErrorKind::SyntaxError, format!("{position} -> {message}")).into()
     }
 
-    pub fn cli<T>(message: &str) -> Result<T> {
-        Err(Error {
-            kind: ErrorKind::CliError,
-            message: message.to_string(),
-        })
+    pub fn cli<T>(message: impl Into<Cow<'static, str>>) -> Result<T> {
+        Self::new(ErrorKind::CliError, message).into()
     }
 }
 
 impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
-        Self {
-            kind: ErrorKind::IoError,
-            message: value.to_string(),
-        }
+    fn from(err: std::io::Error) -> Self {
+        Self::new(ErrorKind::IoError, format!("{err}"))
     }
 }
 
@@ -63,10 +65,7 @@ where
     fn with_position(self, position: Position) -> Result<T> {
         match self {
             Ok(ok) => Ok(ok),
-            Err(err) => Err(Error {
-                kind: ErrorKind::LexicalError,
-                message: format!("{position} -> {err}"),
-            }),
+            Err(err) => Error::lexical(&err.to_string(), position),
         }
     }
 }
