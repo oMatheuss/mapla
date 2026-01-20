@@ -2,8 +2,9 @@ use std::str::FromStr;
 
 use crate::error::Error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub enum CompilerTarget {
+    #[default]
     Linux,
     Windows,
 }

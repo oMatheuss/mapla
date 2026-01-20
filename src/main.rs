@@ -1,12 +1,9 @@
-use compiler::Compiler;
 use error::Result;
 use parser::Parser;
 use source::SourceManager;
 
 mod args;
-mod asm;
 mod ast;
-mod compiler;
 mod error;
 mod lexer;
 mod parser;
@@ -15,6 +12,7 @@ mod source;
 mod target;
 mod token;
 mod utils;
+mod codegen;
 
 fn run() -> Result<()> {
     let args = args::parse_args()?;
@@ -22,7 +20,7 @@ fn run() -> Result<()> {
     let sm = SourceManager::new(&args.input, args.dir.clone());
     let ast = Parser::new(sm).parse()?;
 
-    let assembly = Compiler::new(args.target).compile(ast);
+    let assembly = codegen::compile(args.target, ast);
 
     std::fs::write(args.output_path(), assembly)?;
 

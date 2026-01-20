@@ -9,8 +9,5 @@ readme = "README.md"
 keywords = ["compiler", "language"]
 categories = ["compilers"]
 
-[dependencies]
-
-
 [lints.rust]
 unsafe_code = "forbid"

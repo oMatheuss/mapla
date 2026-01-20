@@ -1,11 +1,12 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+mod scope;
+mod asm;
+mod regs;
 
-use crate::asm::{
-    self, AsmBuilder, BaseOperandManager, Imm, Lbl, Mem, MemSize, MemSized, Operand,
-    OperandManager, Reg, RegManager, Xmm,
-};
+use std::collections::HashMap;
+
+use asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, MemSized, Operand, Reg, Xmm};
+use regs::{OperandManager, RegManager};
+use scope::Scope;
 use crate::ast::{
     Annotated, Annotation, Argument, Ast, AstNode, AstRoot, BinaryOp, Expression, FunctionCall,
     Identifier, Indexing, Operator, TypeAnnot, TypeCast, UnaryOp, UnaryOperator, ValueExpr,
@@ -13,126 +14,6 @@ use crate::ast::{
 };
 use crate::target::CompilerTarget;
 use crate::utils::HexSlice;
-
-#[derive(Debug, Clone, Copy, Default)]
-struct ScopeContext {
-    // actual stack offset of local variables
-    local_off: isize,
-
-    // actual stack offset of temp variables
-    temp_off: isize,
-
-    // max stack size needed for a function call
-    max_func: usize,
-
-    // max stack offset needed temp variables
-    max_temp_off: isize,
-
-    // label count used for jumps
-    lbl_count: usize,
-}
-
-impl ScopeContext {
-    pub fn get_max(&self) -> u64 {
-        self.local_off.abs() as u64 + self.max_temp_off.abs() as u64 + self.max_func as u64
-    }
-}
-
-#[derive(Debug, Default)]
-struct Scope {
-    var: HashMap<String, Mem>,
-    ctx: Rc<RefCell<ScopeContext>>,
-    sup: Option<Box<Scope>>,
-}
-
-impl Scope {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn new_inner(&mut self) {
-        let cur = std::mem::take(self);
-        let mut src = Self::new();
-        src.sup = Some(Box::new(cur));
-        let _ = std::mem::replace(self, src);
-    }
-
-    fn continue_on(&mut self) {
-        let cur = std::mem::take(self);
-        let src = Self {
-            var: HashMap::new(),
-            ctx: cur.ctx.clone(),
-            sup: Some(Box::new(cur)),
-        };
-        let _ = std::mem::replace(self, src);
-    }
-
-    fn exit(&mut self) {
-        let cur = std::mem::take(self);
-        let outer = cur.sup.expect("at least global scope should exist");
-        let _ = std::mem::replace(self, *outer);
-    }
-
-    fn get(&self, ident: &str) -> Mem {
-        if let Some(local) = self.var.get(ident) {
-            *local
-        } else if let Some(sup) = &self.sup {
-            sup.get(ident)
-        } else {
-            panic!("'{ident}' was not found: variable does not exist")
-        }
-    }
-
-    #[inline]
-    fn set(&mut self, ident: &str, operand: Mem) -> Option<Mem> {
-        self.var.insert(String::from(ident), operand)
-    }
-
-    fn new_local(&mut self, ident: &str, mem_size: MemSize) -> Operand {
-        let mut mem = self.ctx.borrow_mut();
-        mem.local_off -= mem_size as isize;
-        let mem = Mem::offset(Reg::Rbp, mem.local_off, mem_size);
-        self.var.insert(String::from(ident), mem);
-        Operand::Mem(mem)
-    }
-
-    fn new_array(&mut self, ident: &str, size: u32, mem_size: MemSize) -> Operand {
-        let mut mem = self.ctx.borrow_mut();
-        mem.local_off -= mem_size as isize * size as isize;
-        let mem = Mem::offset(Reg::Rbp, mem.local_off, MemSize::QWord);
-        self.var.insert(String::from(ident), mem);
-        Operand::Mem(mem)
-    }
-
-    fn new_temp(&mut self, mem_size: MemSize) -> Mem {
-        let mut mem = self.ctx.borrow_mut();
-        mem.temp_off -= mem_size as isize;
-        if mem.temp_off < mem.max_temp_off {
-            mem.max_temp_off = mem.temp_off;
-        }
-        let offset = mem.local_off + mem.temp_off;
-        Mem::offset(Reg::Rbp, offset, mem_size)
-    }
-
-    fn new_call(&mut self, call_size: usize) {
-        let mut mem = self.ctx.borrow_mut();
-        if call_size > mem.max_func {
-            mem.max_func = call_size;
-        }
-    }
-
-    #[inline]
-    fn reset_temps(&mut self) {
-        self.ctx.borrow_mut().temp_off = 0;
-    }
-
-    #[inline]
-    fn new_label(&mut self) -> String {
-        let mut ctx = self.ctx.borrow_mut();
-        ctx.lbl_count += 1;
-        format!(".L{cnt}", cnt = ctx.lbl_count)
-    }
-}
 
 type AsmData = HashMap<Lbl, Vec<u8>>;
 
@@ -155,49 +36,23 @@ impl MemSized for TypeAnnot {
     }
 }
 
-pub struct Compiler {
+#[derive(Default)]
+struct CodeGen {
+    target: CompilerTarget,
     code: AsmBuilder,
     scope: Scope,
     data: AsmData,
-    target: CompilerTarget,
     regs: RegManager<Reg>,
     xmms: RegManager<Xmm>,
 }
 
-impl Compiler {
+impl CodeGen {
     pub fn new(target: CompilerTarget) -> Self {
-        Compiler {
-            code: AsmBuilder::new(),
-            scope: Scope::new(),
-            data: AsmData::new(),
-            target,
-            regs: RegManager::new(),
-            xmms: RegManager::new(),
-        }
-    }
-
-    pub fn compile(mut self, ast: Ast) -> String {
-        asm::code!(self.code, "bits 64");
-        asm::code!(self.code, "section .text");
-        asm::code!(self.code, "global main");
-
-        for node in ast.iter() {
-            compile_root(&mut self, node);
-        }
-
-        if !self.data.is_empty() {
-            asm::code!(self.code, "section .data");
-
-            for (label, bytes) in self.data.iter() {
-                asm::code!(self.code, "  {label}: db {:x}", HexSlice::new(bytes));
-            }
-        }
-
-        self.code.to_string()
+        Self { target, ..Default::default() }
     }
 }
 
-fn cdecl(c: &mut Compiler, arg_num: usize, mem_size: MemSize) -> Option<Reg> {
+fn cdecl(c: &mut CodeGen, arg_num: usize, mem_size: MemSize) -> Option<Reg> {
     let reg = match (c.target, arg_num) {
         (CompilerTarget::Linux, 0) => Reg::dst(mem_size),
         (CompilerTarget::Linux, 1) => Reg::src(mem_size),
@@ -216,7 +71,7 @@ fn cdecl(c: &mut Compiler, arg_num: usize, mem_size: MemSize) -> Option<Reg> {
     Some(reg)
 }
 
-fn cdecl_f(c: &mut Compiler, arg_num: usize, mem_size: MemSize) -> Option<Xmm> {
+fn cdecl_f(c: &mut CodeGen, arg_num: usize, mem_size: MemSize) -> Option<Xmm> {
     let xmm = match (c.target, arg_num) {
         (CompilerTarget::Linux | CompilerTarget::Windows, 0) => Xmm::xmm(0, mem_size),
         (CompilerTarget::Linux | CompilerTarget::Windows, 1) => Xmm::xmm(1, mem_size),
@@ -239,47 +94,47 @@ fn cdecl_regs(target: CompilerTarget) -> &'static [Reg] {
     }
 }
 
-fn reserve_cdecl(c: &mut Compiler) {
+fn reserve_cdecl(c: &mut CodeGen) {
     for reg in cdecl_regs(c.target) {
         c.regs.take(*reg);
     }
 }
 
-fn release_cdecl(c: &mut Compiler) {
+fn release_cdecl(c: &mut CodeGen) {
     for reg in cdecl_regs(c.target) {
         c.regs.push(*reg);
     }
 }
 
-fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
+fn move_operand_to_reg(c: &mut CodeGen, annot: TypeAnnot, operand: Operand) -> Operand {
     match operand {
         Operand::Mem(mem) if annot.is_float() => {
             c.regs.try_push(operand);
-            let xmm = c.xmms.take_any(mem.mem_size()).expect("register available");
+            let xmm = c.xmms.take_any(mem.mem_size());
             asm::code!(c.code, Movss, xmm, mem);
             Operand::Xmm(xmm)
         }
         Operand::Reg(reg) if annot.is_float() => {
             c.regs.push(reg);
-            let xmm = c.xmms.take_any(reg.mem_size()).expect("register available");
+            let xmm = c.xmms.take_any(reg.mem_size());
             asm::code!(c.code, Movd, xmm, reg);
             Operand::Xmm(xmm)
         }
         Operand::Imm(imm) if annot.is_float() => {
-            let xmm = c.xmms.take_any(imm.mem_size()).expect("register available");
+            let xmm = c.xmms.take_any(imm.mem_size());
             let tmp = c.scope.new_temp(imm.mem_size());
             asm::code!(c.code, Mov, tmp, imm);
             asm::code!(c.code, Movss, xmm, tmp);
             Operand::Xmm(xmm)
         }
         Operand::Mem(mem) => {
-            let reg = c.regs.take_any(mem.mem_size()).expect("register available");
+            let reg = c.regs.take_any(mem.mem_size());
             c.regs.try_push(operand);
             asm::code!(c.code, Mov, reg, mem);
             Operand::Reg(reg)
         }
         Operand::Imm(imm) => {
-            let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+            let reg = c.regs.take_any(imm.mem_size());
             asm::code!(c.code, Mov, reg, imm);
             Operand::Reg(reg)
         }
@@ -287,7 +142,7 @@ fn move_operand_to_reg(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> 
     }
 }
 
-fn move_reg_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Operand {
+fn move_reg_to_mem(c: &mut CodeGen, annot: TypeAnnot, operand: Operand) -> Operand {
     match operand {
         Operand::Reg(reg) => {
             c.regs.push(reg);
@@ -301,7 +156,7 @@ fn move_reg_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Oper
                 let reg = c
                     .regs
                     .take_any(annot.mem_size())
-                    .expect("register available");
+                    ;
                 asm::code!(c.code, Mov, reg, mem);
                 asm::code!(c.code, Mov, tmp, reg);
                 c.regs.push(reg);
@@ -314,9 +169,9 @@ fn move_reg_to_mem(c: &mut Compiler, annot: TypeAnnot, operand: Operand) -> Oper
     }
 }
 
-fn backup_reg(c: &mut Compiler, reg: Reg) -> Option<Reg> {
+fn backup_reg(c: &mut CodeGen, reg: Reg) -> Option<Reg> {
     if !c.regs.ensure(reg) {
-        let bkp = c.regs.take_any(MemSize::QWord).expect("register available");
+        let bkp = c.regs.take_any(MemSize::QWord);
         let reg = c.regs.switch_size(reg, MemSize::QWord);
         asm::code!(c.code, Mov, bkp, reg);
         Some(bkp)
@@ -325,19 +180,19 @@ fn backup_reg(c: &mut Compiler, reg: Reg) -> Option<Reg> {
     }
 }
 
-fn restore_reg(c: &mut Compiler, reg: Reg, bkp: Option<Reg>) {
+fn restore_reg(c: &mut CodeGen, reg: Reg, bkp: Option<Reg>) {
     if let Some(bkp) = bkp {
         asm::code!(c.code, Mov, reg, bkp);
         c.regs.push(bkp);
     }
 }
 
-fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
+fn compile_value(c: &mut CodeGen, value: &ValueExpr) -> Operand {
     match value {
         ValueExpr::String(string) => {
             let label = Lbl::new();
             c.data.insert(label, string.as_bytes().to_vec());
-            let reg = c.regs.take_any(MemSize::QWord).expect("register available");
+            let reg = c.regs.take_any(MemSize::QWord);
             asm::code!(c.code, Lea, reg, Mem::lbl(label, MemSize::QWord));
             Operand::Reg(reg)
         }
@@ -351,7 +206,7 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
             Annotation::Value | Annotation::Pointer(..) => Operand::Mem(c.scope.get(id)),
             Annotation::Array(..) => {
                 let mem = c.scope.get(id);
-                let reg = c.regs.take_any(MemSize::QWord).expect("register available");
+                let reg = c.regs.take_any(MemSize::QWord);
                 asm::code!(c.code, Lea, reg, mem);
                 Operand::Reg(reg)
             }
@@ -359,7 +214,7 @@ fn compile_value(c: &mut Compiler, value: &ValueExpr) -> Operand {
     }
 }
 
-fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
+fn compile_binop(c: &mut CodeGen, bin_op: &BinaryOp) -> Operand {
     let ope = bin_op.operator();
     let lhs_annot = bin_op.lhs().get_annot();
     let rhs_annot = bin_op.rhs().get_annot();
@@ -391,7 +246,7 @@ fn compile_binop(c: &mut Compiler, bin_op: &BinaryOp) -> Operand {
     }
 }
 
-fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> Operand {
+fn compile_iop(c: &mut CodeGen, ope: Operator, lhs: Operand, rhs: Operand) -> Operand {
     assert!(ope.is_assign() == lhs.is_mem());
     assert!(lhs.mem_size() == rhs.mem_size());
 
@@ -516,7 +371,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
         Operator::Shl | Operator::Shr => {
             let lhs = match lhs {
                 Operand::Reg(cnt) if cnt.is_cnt() => {
-                    let reg = c.regs.take_any(lhs.mem_size()).expect("register available");
+                    let reg = c.regs.take_any(lhs.mem_size());
                     c.regs.push(cnt);
                     asm::code!(c.code, Mov, reg, cnt);
                     Operand::Reg(reg)
@@ -558,7 +413,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
             lhs
         }
         Operator::MulAssign => {
-            let reg = c.regs.take_any(lhs.mem_size()).expect("register available");
+            let reg = c.regs.take_any(lhs.mem_size());
             asm::code!(c.code, Mov, reg, lhs);
             asm::code!(c.code, Imul, reg, rhs);
             asm::code!(c.code, Mov, lhs, reg);
@@ -566,7 +421,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
             lhs
         }
         Operator::DivAssign => {
-            let reg = c.regs.take_any(lhs.mem_size()).expect("register available");
+            let reg = c.regs.take_any(lhs.mem_size());
             asm::code!(c.code, Mov, reg, lhs); // quotient (lhs)
             asm::code!(c.code, Mov, Reg::Edx, Imm::Dword(0)); // remainder
             asm::code!(c.code, Idiv, rhs); // divisor (rhs)
@@ -581,7 +436,7 @@ fn compile_iop(c: &mut Compiler, ope: Operator, lhs: Operand, rhs: Operand) -> O
     result
 }
 
-fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
+fn compile_fop(c: &mut CodeGen, ope: Operator, lhs: Operand, mut rhs: Operand) -> Operand {
     if let Operand::Imm(imm) = rhs {
         rhs = c.scope.new_temp(imm.mem_size()).into();
         asm::code!(c.code, Mov, rhs, imm);
@@ -596,7 +451,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         | Operator::GreaterEqual
         | Operator::Less
         | Operator::LessEqual => {
-            let reg = c.regs.take_any(MemSize::Byte).expect("register available");
+            let reg = c.regs.take_any(MemSize::Byte);
             asm::code!(c.code, Comiss, lhs, rhs);
 
             match ope {
@@ -642,7 +497,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         }
         Operator::SubAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
+            let xmm = c.xmms.take_any(lhs.mem_size());
             asm::code!(c.code, Movss, xmm, lhs);
             asm::code!(c.code, Subss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
@@ -658,7 +513,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
         }
         Operator::DivAssign => {
             assert!(lhs.is_mem() && rhs.is_xmm());
-            let xmm = c.xmms.take_any(lhs.mem_size()).expect("register available");
+            let xmm = c.xmms.take_any(lhs.mem_size());
             asm::code!(c.code, Movss, xmm, lhs);
             asm::code!(c.code, Divss, xmm, rhs);
             asm::code!(c.code, Movss, lhs, xmm);
@@ -682,7 +537,7 @@ fn compile_fop(c: &mut Compiler, ope: Operator, lhs: Operand, mut rhs: Operand) 
     result
 }
 
-fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
+fn compile_call(c: &mut CodeGen, func: &FunctionCall) -> Operand {
     reserve_cdecl(c);
 
     let args_len = func.args().len() as isize;
@@ -715,7 +570,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
             match arg {
                 Operand::Xmm(arg) if arg == xmm => {}
                 Operand::Imm(imm) => {
-                    let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                    let reg = c.regs.take_any(imm.mem_size());
                     asm::code!(c.code, Mov, reg, imm);
                     asm::code!(c.code, Movd, xmm, reg);
                     c.regs.push(reg);
@@ -739,7 +594,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
                     asm::code!(c.code, Mov, mem, reg);
                 }
                 Operand::Mem(..) => {
-                    let reg = c.regs.take_any(mem_size).expect("register available");
+                    let reg = c.regs.take_any(mem_size);
                     asm::code!(c.code, Mov, reg, arg);
                     asm::code!(c.code, Mov, mem, reg);
                     c.regs.push(reg);
@@ -770,7 +625,7 @@ fn compile_call(c: &mut Compiler, func: &FunctionCall) -> Operand {
     }
 }
 
-fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
+fn compile_unaop(c: &mut CodeGen, una_op: &UnaryOp) -> Operand {
     let operand = una_op.operand();
     match una_op.operator() {
         UnaryOperator::AddressOf => {
@@ -778,7 +633,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                 panic!("operator AddressOf can only be used on vars");
             };
             let mem = c.scope.get(id);
-            let reg = c.regs.take_any(MemSize::QWord).expect("register available");
+            let reg = c.regs.take_any(MemSize::QWord);
             asm::code!(c.code, Lea, reg, mem);
             Operand::Reg(reg)
         }
@@ -789,7 +644,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
             match operand {
                 Operand::Reg(reg) => Operand::Mem(Mem::reg(reg, size)),
                 Operand::Mem(mem) => {
-                    let reg = c.regs.take_any(MemSize::QWord).expect("register available");
+                    let reg = c.regs.take_any(MemSize::QWord);
                     asm::code!(c.code, Mov, reg, mem);
                     Operand::Mem(Mem::reg(reg, size))
                 }
@@ -809,7 +664,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                         let reg = c
                             .regs
                             .take_any(operand.mem_size())
-                            .expect("register available");
+                            ;
                         asm::code!(c.code, Mov, reg, operand);
                         asm::code!(c.code, Neg, reg);
                         Operand::Reg(reg)
@@ -848,7 +703,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     operand
                 }
                 Operand::Imm(imm) => {
-                    let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                    let reg = c.regs.take_any(imm.mem_size());
                     asm::code!(c.code, Mov, reg, imm);
                     asm::code!(c.code, Xor, reg, Imm::Byte(0xFF));
                     asm::code!(c.code, And, reg, Imm::Byte(0x01));
@@ -865,7 +720,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
                     operand
                 }
                 Operand::Imm(imm) => {
-                    let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                    let reg = c.regs.take_any(imm.mem_size());
                     asm::code!(c.code, Mov, reg, imm);
                     asm::code!(c.code, Not, reg);
                     Operand::Reg(reg)
@@ -881,7 +736,7 @@ fn compile_unaop(c: &mut Compiler, una_op: &UnaryOp) -> Operand {
     }
 }
 
-fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
+fn compile_index(c: &mut CodeGen, index: &Indexing) -> Operand {
     let size = index.get_annot().mem_size();
 
     let array = compile_value(c, index.array());
@@ -891,7 +746,7 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
             let reg = c
                 .regs
                 .take_any(offset.mem_size())
-                .expect("register available");
+                ;
             c.regs.try_push(offset);
             asm::code!(c.code, Mov, reg, offset);
             reg
@@ -906,7 +761,7 @@ fn compile_index(c: &mut Compiler, index: &Indexing) -> Operand {
     Operand::Mem(Mem::reg(reg, size))
 }
 
-fn compile_cast(c: &mut Compiler, cast: &TypeCast) -> Operand {
+fn compile_cast(c: &mut CodeGen, cast: &TypeCast) -> Operand {
     let value = cast.value();
     let cast_from = value.get_annot();
     let cast_to = cast.get_annot();
@@ -918,7 +773,7 @@ fn compile_cast(c: &mut Compiler, cast: &TypeCast) -> Operand {
                 let reg = c
                     .regs
                     .take_any(operand.mem_size())
-                    .expect("register available");
+                    ;
                 asm::code!(c.code, Cvtss2si, reg, operand);
                 Operand::Reg(reg)
             }
@@ -927,7 +782,7 @@ fn compile_cast(c: &mut Compiler, cast: &TypeCast) -> Operand {
                 let reg = c
                     .regs
                     .take_any(operand.mem_size())
-                    .expect("register available");
+                    ;
                 asm::code!(c.code, Mov, tmp, imm);
                 asm::code!(c.code, Cvtss2si, reg, tmp);
                 Operand::Reg(reg)
@@ -945,7 +800,7 @@ fn compile_cast(c: &mut Compiler, cast: &TypeCast) -> Operand {
                 let xmm = c
                     .xmms
                     .take_any(operand.mem_size())
-                    .expect("register available");
+                    ;
                 asm::code!(c.code, Cvtsi2ss, xmm, operand);
                 Operand::Xmm(xmm)
             }
@@ -954,7 +809,7 @@ fn compile_cast(c: &mut Compiler, cast: &TypeCast) -> Operand {
                 let xmm = c
                     .xmms
                     .take_any(operand.mem_size())
-                    .expect("register available");
+                    ;
                 asm::code!(c.code, Mov, tmp, imm);
                 asm::code!(c.code, Cvtsi2ss, xmm, tmp);
                 Operand::Xmm(xmm)
@@ -966,7 +821,7 @@ fn compile_cast(c: &mut Compiler, cast: &TypeCast) -> Operand {
     }
 }
 
-fn compile_expr_rec(c: &mut Compiler, expr: &Expression) -> Operand {
+fn compile_expr_rec(c: &mut CodeGen, expr: &Expression) -> Operand {
     match expr {
         Expression::Value(value) => compile_value(c, value),
         Expression::UnaOp(una_op) => compile_unaop(c, una_op),
@@ -977,13 +832,13 @@ fn compile_expr_rec(c: &mut Compiler, expr: &Expression) -> Operand {
     }
 }
 
-fn compile_expr(c: &mut Compiler, expr: &Expression) -> Operand {
+fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
     let operand = compile_expr_rec(c, expr);
     c.scope.reset_temps();
     return operand;
 }
 
-fn compile_node(c: &mut Compiler, node: &AstNode) {
+fn compile_node(c: &mut CodeGen, node: &AstNode) {
     match node {
         AstNode::Var(annot, ident, expr) => {
             let local = if let Annotation::Array(size) = annot.annotation() {
@@ -1005,7 +860,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
                         asm::code!(c.code, Movss, local, xmm);
                     }
                     Operand::Mem(mem) => {
-                        let reg = c.regs.take_any(mem.mem_size()).expect("register available");
+                        let reg = c.regs.take_any(mem.mem_size());
                         asm::code!(c.code, Mov, reg, mem);
                         asm::code!(c.code, Mov, local, reg);
                         c.regs.push(reg);
@@ -1022,7 +877,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             let mut result = compile_expr(c, expr);
             if let Operand::Imm(imm) = result {
-                let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                let reg = c.regs.take_any(imm.mem_size());
                 result = Operand::Reg(reg);
                 asm::code!(c.code, Mov, result, imm);
             }
@@ -1049,7 +904,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
 
             let mut result = compile_expr(c, expr);
             if let Operand::Imm(imm) = result {
-                let reg = c.regs.take_any(imm.mem_size()).expect("register available");
+                let reg = c.regs.take_any(imm.mem_size());
                 result = Operand::Reg(reg);
                 asm::code!(c.code, Mov, result, imm);
             }
@@ -1172,7 +1027,7 @@ fn compile_node(c: &mut Compiler, node: &AstNode) {
     }
 }
 
-fn compile_args(c: &mut Compiler, args: &[Argument]) {
+fn compile_args(c: &mut CodeGen, args: &[Argument]) {
     let mut mem_offset = match c.target {
         CompilerTarget::Linux => 16,   // rip + rbp
         CompilerTarget::Windows => 48, // rip + rbp + shadow space
@@ -1191,7 +1046,7 @@ fn compile_args(c: &mut Compiler, args: &[Argument]) {
     }
 }
 
-fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
+fn compile_func(c: &mut CodeGen, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
     asm::code!(c.code, "{ident}:");
     asm::code!(c.code, Push, Reg::Rbp);
     asm::code!(c.code, Mov, Reg::Rbp, Reg::Rsp);
@@ -1223,7 +1078,7 @@ fn compile_func(c: &mut Compiler, ident: &Identifier, args: &Vec<Argument>, node
     asm::code!(c.code, Ret);
 }
 
-fn compile_root(c: &mut Compiler, node: &AstRoot) {
+fn compile_root(c: &mut CodeGen, node: &AstRoot) {
     match node {
         AstRoot::Func(ident, args, _, ast_nodes) => {
             compile_func(c, ident, args, ast_nodes);
@@ -1254,4 +1109,25 @@ fn compile_root(c: &mut Compiler, node: &AstRoot) {
             }
         }
     }
+}
+
+pub fn compile(target: CompilerTarget, ast: Ast) -> String {
+    let mut gen = CodeGen::new(target);
+    asm::code!(gen.code, "bits 64");
+    asm::code!(gen.code, "section .text");
+    asm::code!(gen.code, "global main");
+
+    for node in ast.iter() {
+        compile_root(&mut gen, node);
+    }
+
+    if !gen.data.is_empty() {
+        asm::code!(gen.code, "section .data");
+
+        for (label, bytes) in gen.data.iter() {
+            asm::code!(gen.code, "  {label}: db {:x}", HexSlice::new(bytes));
+        }
+    }
+
+    gen.code.to_string()
 }
