@@ -4,7 +4,9 @@ use source::SourceManager;
 
 mod args;
 mod ast;
+mod codegen;
 mod error;
+mod ir;
 mod lexer;
 mod parser;
 mod position;
@@ -12,7 +14,6 @@ mod source;
 mod target;
 mod token;
 mod utils;
-mod codegen;
 
 fn run() -> Result<()> {
     let args = args::parse_args()?;

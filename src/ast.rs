@@ -178,7 +178,7 @@ pub trait Annotated {
     fn get_annot(&self) -> TypeAnnot;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Identifier(String);
 
 impl From<&str> for Identifier {
@@ -207,7 +207,7 @@ impl std::fmt::Display for Identifier {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ValueExpr {
     String(String),
     Int(i32),
@@ -589,17 +589,6 @@ impl Operator {
             | Operator::MulAssign
             | Operator::DivAssign => 1,
         }
-    }
-
-    pub fn is_right(&self) -> bool {
-        matches!(
-            self,
-            Operator::Assign
-                | Operator::AddAssign
-                | Operator::SubAssign
-                | Operator::MulAssign
-                | Operator::DivAssign
-        )
     }
 
     pub fn is_assign(&self) -> bool {

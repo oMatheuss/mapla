@@ -262,11 +262,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn check_cast(value: &Expression, target: TypeAnnot, pos: Position) -> Result<TypeAnnot> {
+    fn check_cast(value: &Expression, target: TypeAnnot, pos: Position) -> Result<()> {
         let annot = value.get_annot();
 
         if annot.is_number() && target.is_number() {
-            Ok(target)
+            Ok(())
         } else {
             let msg = format!("cannot cast from {annot} to {target}");
             Error::syntatic(&msg, pos)
@@ -289,7 +289,7 @@ impl<'a> Parser<'a> {
         if let Some(Token::As) = ts.peek() {
             self.next_or_err(ts)?;
             let target = self.parse_annot(ts)?;
-            let target = Parser::check_cast(&lhs, target, ts.position)?;
+            Parser::check_cast(&lhs, target, ts.position)?;
 
             lhs = Expression::cast(lhs, target);
         }
@@ -303,7 +303,7 @@ impl<'a> Parser<'a> {
             if prec < min_prec {
                 break;
             }
-            let min_prec = if op.is_right() { prec } else { prec + 1 };
+            let min_prec = if op.is_assign() { prec } else { prec + 1 };
 
             ts.next(); // consume operator
 

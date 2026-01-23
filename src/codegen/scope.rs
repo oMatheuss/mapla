@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::asm::{Mem, Operand, Reg, MemSize};
+use super::asm::{Mem, MemSize, Operand, Reg};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScopeContext {

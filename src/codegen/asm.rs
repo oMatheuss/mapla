@@ -816,7 +816,7 @@ impl Operand {
     pub fn expect_reg(self) -> Reg {
         match self {
             Operand::Reg(reg) => reg,
-            _ => panic!("expected that operand was a register"),
+            _ => panic!("expected that operand was a register, but it was: {self}"),
         }
     }
 }

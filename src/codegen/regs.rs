@@ -1,5 +1,5 @@
+use super::asm::{MemBase, MemSize, Operand, Reg, Xmm, XmmReg};
 use std::fmt::Display;
-use super::asm::{MemSize, Operand, Reg, XmmReg, Xmm, MemBase};
 
 #[derive(Debug)]
 pub struct RegManager<T> {
@@ -52,7 +52,11 @@ where
     }
 
     pub fn take_any(&mut self, mem_size: MemSize) -> T {
-        let reg = self.registers.iter_mut().find(|r| !*r.1).expect("register available");
+        let reg = self
+            .registers
+            .iter_mut()
+            .find(|r| !*r.1)
+            .expect("register available");
 
         *reg.1 = true;
         Self::get_reg(reg.0, mem_size)
@@ -73,7 +77,7 @@ where
 impl<T> Default for RegManager<T>
 where
     RegManager<T>: OperandManager<T>,
-    T: Copy + Display
+    T: Copy + Display,
 {
     fn default() -> Self {
         Self::new()
