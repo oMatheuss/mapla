@@ -13,7 +13,7 @@ $(EXMPL)/%.win.obj: $(EXMPL)/%.win.asm
 	nasm -fwin64 $(EXMPL)/$*.win.asm -o $(EXMPL)/$*.win.obj
 
 $(EXMPL)/%.exe: $(EXMPL)/%.win.obj
-	cc $(EXMPL)/$*.win.obj -o $(EXMPL)/$*.exe
+	cc $(EXMPL)/$*.win.obj -o $(EXMPL)/$*.exe $(CFLAGS)
 
 # Linus Builds
 
@@ -27,4 +27,4 @@ $(EXMPL)/%.linux.obj: $(EXMPL)/%.linux.asm
 	nasm -felf64 $(EXMPL)/$*.linux.asm -o $(EXMPL)/$*.linux.obj
 
 $(EXMPL)/%: $(EXMPL)/%.linux.obj
-	cc $(EXMPL)/$*.linux.obj -o $(EXMPL)/$* -no-pie -z noexecstack
+	cc $(EXMPL)/$*.linux.obj -o $(EXMPL)/$* -no-pie -z noexecstack $(CFLAGS)
