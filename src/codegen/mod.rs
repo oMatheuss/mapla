@@ -774,6 +774,8 @@ fn compile_cast(
             }
             Operand::Xmm(..) => unimplemented!(),
         }
+    } else if cast_from.is_void_ptr() && cast_to.is_ref() {
+        operand
     } else {
         todo!("conversion between {cast_from} to {cast_to} not implemented yet");
     }

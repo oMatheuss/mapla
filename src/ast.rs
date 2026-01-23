@@ -126,6 +126,14 @@ impl TypeAnnot {
         self == TypeAnnot::VOID
     }
 
+    pub fn is_void_ptr(self) -> bool {
+        matches!(self.inner, VarType::Void) && self.is_ptr()
+    }
+
+    pub fn is_ptr(self) -> bool {
+        matches!(self.annot, Annotation::Pointer(..))
+    }
+
     pub fn is_ref(self) -> bool {
         matches!(self.annot, Annotation::Array(..) | Annotation::Pointer(..))
     }

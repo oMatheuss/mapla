@@ -233,6 +233,7 @@ impl<'a> Parser<'a> {
             Operator::And | Operator::Or if lhs == rhs && lhs.is_bool() => Ok(TypeAnnot::BOOL),
 
             Operator::Assign if lhs == rhs => Ok(lhs),
+            Operator::Assign if lhs.is_ref() && rhs.is_void_ptr() => Ok(lhs),
 
             Operator::Add
             | Operator::Sub
@@ -266,6 +267,8 @@ impl<'a> Parser<'a> {
         let annot = value.get_annot();
 
         if annot.is_number() && target.is_number() {
+            Ok(())
+        } else if annot.is_void_ptr() && target.is_ref() {
             Ok(())
         } else {
             let msg = format!("cannot cast from {annot} to {target}");
@@ -373,6 +376,7 @@ impl<'a> Parser<'a> {
             Token::Real => VarType::Real,
             Token::Char => VarType::Char,
             Token::Bool => VarType::Bool,
+            Token::Void => VarType::Void,
             _ => Error::syntatic("expected type annotation", ts.position)?,
         };
         match ts.peek() {
@@ -425,7 +429,7 @@ impl<'a> Parser<'a> {
                 let expr_pos = ts.position;
                 let expr = self.parse_expr(ts, 1)?;
                 let expr_annot = expr.get_annot();
-                if expr_annot != annot {
+                if !(expr_annot == annot || annot.is_ref() && expr_annot.is_void_ptr()) {
                     Error::syntatic(&format!("cannot assign {expr_annot} to {annot}"), expr_pos)?
                 }
                 Some(expr)
