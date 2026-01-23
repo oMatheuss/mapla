@@ -710,8 +710,8 @@ fn compile_unaop(
     }
 }
 
-fn compile_index(c: &mut CodeGen, array: Operand, index: Operand) -> Operand {
-    let size = index.mem_size();
+fn compile_index(c: &mut CodeGen, array: Operand, index: Operand, annot: TypeAnnot) -> Operand {
+    let size = annot.mem_size();
 
     let reg = match index {
         Operand::Reg(reg) => reg,
@@ -803,7 +803,7 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
             }
             Index { array, index } => {
                 let array = compile_value(c, &array);
-                compile_index(c, array, mems[index])
+                compile_index(c, array, mems[index], ir.annot)
             }
             Cast { value, cast_from } => compile_cast(c, mems[value], cast_from, ir.annot),
         };
