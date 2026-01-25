@@ -5,8 +5,8 @@ mod scope;
 use std::collections::HashMap;
 
 use crate::ast::{
-    Annotated, Annotation, Argument, Ast, AstNode, AstRoot, Expression, Identifier, Operator,
-    TypeAnnot, UnaryOperator, ValueExpr, VarType,
+    Annotated, Argument, Ast, AstNode, AstRoot, Expression, Identifier, Operator, TypeAnnot,
+    UnaryOperator, ValueExpr,
 };
 use crate::target::CompilerTarget;
 use crate::utils::HexSlice;
@@ -16,21 +16,18 @@ use scope::Scope;
 
 type AsmData = HashMap<Lbl, Vec<u8>>;
 
-impl MemSized for VarType {
-    fn mem_size(&self) -> MemSize {
-        match self {
-            VarType::Int | VarType::Real => MemSize::DWord,
-            VarType::Bool | VarType::Char => MemSize::Byte,
-            VarType::Void => panic!("void does not have a known size"),
-        }
-    }
-}
-
 impl MemSized for TypeAnnot {
     fn mem_size(&self) -> MemSize {
-        match self.annotation() {
-            Annotation::Value => self.inner_type().mem_size(),
-            Annotation::Pointer(..) | Annotation::Array(..) => MemSize::QWord,
+        if self.indir > 0 {
+            MemSize::QWord
+        } else {
+            match self.size {
+                1 => MemSize::Byte,
+                2 => MemSize::Word,
+                4 => MemSize::DWord,
+                8 => MemSize::QWord,
+                _ => todo!(),
+            }
         }
     }
 }
@@ -89,7 +86,7 @@ fn cdecl_f(c: &mut CodeGen, arg_num: usize, mem_size: MemSize) -> Option<Xmm> {
     Some(xmm)
 }
 
-fn move_operand_to_reg(c: &mut CodeGen, annot: TypeAnnot, operand: Operand) -> Operand {
+fn move_operand_to_reg(c: &mut CodeGen, annot: &TypeAnnot, operand: Operand) -> Operand {
     match operand {
         Operand::Mem(mem) if annot.is_float() => {
             c.regs.try_push(operand);
@@ -182,15 +179,16 @@ fn compile_value(c: &mut CodeGen, value: &ValueExpr) -> Operand {
             asm::code!(c.code, Lea, reg, Mem::lbl(label, MemSize::QWord));
             Operand::Reg(reg)
         }
+        ValueExpr::Byte(value) => Operand::Imm(Imm::Byte(*value)),
         ValueExpr::Int(value) => Operand::Imm(Imm::from_i32(*value)),
         ValueExpr::Float(value) => Operand::Imm(Imm::from_f32(*value)),
         ValueExpr::Bool(value) => match value {
             true => Operand::Imm(Imm::TRUE),
             false => Operand::Imm(Imm::FALSE),
         },
-        ValueExpr::Identifier(annot, id) => match annot.annotation() {
-            Annotation::Value | Annotation::Pointer(..) => Operand::Mem(c.scope.get(id)),
-            Annotation::Array(..) => {
+        ValueExpr::Identifier(annot, id) => match annot.array {
+            0 => Operand::Mem(c.scope.get(id)),
+            1.. => {
                 let mem = c.scope.get(id);
                 let reg = c.regs.take_any(MemSize::QWord);
                 asm::code!(c.code, Lea, reg, mem);
@@ -208,12 +206,12 @@ fn compile_binop(
     annot: TypeAnnot,
 ) -> Operand {
     let (lhs, rhs) = if ope.is_assign() {
-        let rhs = move_operand_to_reg(c, annot, rhs);
+        let rhs = move_operand_to_reg(c, &annot, rhs);
         assert!(lhs.is_mem());
 
         (lhs, rhs)
     } else {
-        let lhs = move_operand_to_reg(c, annot, lhs);
+        let lhs = move_operand_to_reg(c, &annot, lhs);
         (lhs, rhs)
     };
 
@@ -517,8 +515,8 @@ fn compile_fop(c: &mut CodeGen, ope: Operator, lhs: Operand, mut rhs: Operand) -
 fn compile_call(
     c: &mut CodeGen,
     name: &str,
-    args: Vec<(Operand, TypeAnnot)>,
-    annot: TypeAnnot,
+    args: Vec<(Operand, &TypeAnnot)>,
+    annot: &TypeAnnot,
 ) -> Operand {
     let args_len = args.len() as isize;
     let word_size = MemSize::QWord as isize;
@@ -613,7 +611,7 @@ fn compile_unaop(
     c: &mut CodeGen,
     una_op: UnaryOperator,
     operand: Operand,
-    expr_ty: TypeAnnot,
+    expr_ty: &TypeAnnot,
 ) -> Operand {
     match una_op {
         UnaryOperator::AddressOf => {
@@ -710,7 +708,7 @@ fn compile_unaop(
     }
 }
 
-fn compile_index(c: &mut CodeGen, array: Operand, index: Operand, annot: TypeAnnot) -> Operand {
+fn compile_index(c: &mut CodeGen, array: Operand, index: Operand, annot: &TypeAnnot) -> Operand {
     let size = annot.mem_size();
 
     let reg = match index {
@@ -734,8 +732,8 @@ fn compile_index(c: &mut CodeGen, array: Operand, index: Operand, annot: TypeAnn
 fn compile_cast(
     c: &mut CodeGen,
     operand: Operand,
-    cast_from: TypeAnnot,
-    cast_to: TypeAnnot,
+    cast_from: &TypeAnnot,
+    cast_to: &TypeAnnot,
 ) -> Operand {
     if cast_from.is_float() && cast_to.is_int() {
         match operand {
@@ -774,11 +772,27 @@ fn compile_cast(
             }
             Operand::Xmm(..) => unimplemented!(),
         }
-    } else if cast_from.is_void_ptr() && cast_to.is_ref() {
+    } else if cast_from.is_void_ptr() && cast_to.is_ptr() {
         operand
     } else {
         todo!("conversion between {cast_from} to {cast_to} not implemented yet");
     }
+}
+
+fn compile_alloc(c: &mut CodeGen, args: Vec<(Operand, &TypeAnnot)>, annot: &TypeAnnot) -> Operand {
+    let base_mem = c.scope.new_temp(annot.mem_size());
+    let base_reg = c.regs.take_any(MemSize::QWord);
+    asm::code!(c.code, Lea, base_reg, base_mem);
+    let mut offset = 0;
+    for (operand, annot) in args {
+        let operand_reg = move_operand_to_reg(c, annot, operand);
+        let offset_mem = Mem::offset(base_reg, offset, annot.mem_size());
+        asm::code!(c.code, Mov, offset_mem, operand_reg);
+        c.regs.try_push(operand_reg);
+        offset += annot.size as isize;
+    }
+    c.regs.push(base_reg);
+    Operand::Mem(base_mem)
 }
 
 fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
@@ -791,7 +805,7 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
         last = ir.id;
         mems[ir.id] = match ir.ope.clone() {
             Value { value } => compile_value(c, &value),
-            UnaOp { operator, operand } => compile_unaop(c, operator, mems[operand], ir.annot),
+            UnaOp { operator, operand } => compile_unaop(c, operator, mems[operand], &ir.annot),
             BinOp {
                 operator,
                 lhs,
@@ -799,15 +813,18 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
                 annot,
             } => compile_binop(c, operator, mems[lhs], mems[rhs], annot),
             Func { name, args } => {
-                let args = args.iter().map(|(id, annot)| (mems[*id], *annot)).collect();
-
-                compile_call(c, &name, args, ir.annot)
+                let args = args.iter().map(|(id, annot)| (mems[*id], annot)).collect();
+                compile_call(c, &name, args, &ir.annot)
             }
             Index { array, index } => {
                 let array = compile_value(c, &array);
-                compile_index(c, array, mems[index], ir.annot)
+                compile_index(c, array, mems[index], &ir.annot)
             }
-            Cast { value, cast_from } => compile_cast(c, mems[value], cast_from, ir.annot),
+            Cast { value, cast_from } => compile_cast(c, mems[value], &cast_from, &ir.annot),
+            Alloc { args } => {
+                let args = args.iter().map(|(id, annot)| (mems[*id], annot)).collect();
+                compile_alloc(c, args, &ir.annot)
+            }
         };
 
         if !ir.assign {
@@ -823,9 +840,9 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
 fn compile_node(c: &mut CodeGen, node: &AstNode) {
     match node {
         AstNode::Var(annot, ident, expr) => {
-            let local = if let Annotation::Array(size) = annot.annotation() {
-                let mem_size = annot.inner_type().mem_size();
-                c.scope.new_array(ident, size, mem_size)
+            let local = if annot.array > 0 {
+                let mem_size = annot.clone().deref().mem_size();
+                c.scope.new_array(ident, annot.array, mem_size)
             } else {
                 let mem_size = annot.mem_size();
                 c.scope.new_local(ident, mem_size)
@@ -916,7 +933,7 @@ fn compile_node(c: &mut CodeGen, node: &AstNode) {
             let init = match init {
                 Some(expr) => {
                     let value = compile_value(c, expr);
-                    move_operand_to_reg(c, expr.get_annot(), value)
+                    move_operand_to_reg(c, &expr.get_annot(), value)
                 }
                 None => Imm::Dword(0).into(),
             };
@@ -1073,6 +1090,9 @@ fn compile_root(c: &mut CodeGen, node: &AstRoot) {
                 Some(value) => match value {
                     ValueExpr::String(s) => {
                         c.data.insert(label, s.as_bytes().to_vec());
+                    }
+                    ValueExpr::Byte(b) => {
+                        c.data.insert(label, [*b as u8].to_vec());
                     }
                     ValueExpr::Int(i) => {
                         c.data.insert(label, i.to_le_bytes().to_vec());

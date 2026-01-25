@@ -27,6 +27,9 @@ pub enum IrExprOpe {
         value: usize,
         cast_from: ast::TypeAnnot,
     },
+    Alloc {
+        args: Vec<(usize, ast::TypeAnnot)>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +118,17 @@ fn parse_expr(expr: &ast::Expression, exprs: &mut Vec<IrExpr>, max: usize, assig
                 cast_from: value.get_annot(),
             };
             IrExpr::new(id, cast.get_annot(), ope, false)
+        }
+        Alloc(alloc) => {
+            let mut args = Vec::new();
+            let mut max = max;
+            for arg in alloc.args() {
+                max += 1;
+                parse_expr(arg, exprs, max, false);
+                args.push((max, arg.get_annot()));
+            }
+            let ope = IrExprOpe::Alloc { args };
+            IrExpr::new(id, alloc.get_annot(), ope, false)
         }
     };
 

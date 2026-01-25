@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::ast::{
     Annotated, Argument, Ast, AstNode, AstRoot, Expression, Operator, TypeAnnot, UnaryOperator,
-    ValueExpr, VarType,
+    ValueExpr,
 };
 use crate::error::{Error, PositionResult, Result};
 use crate::position::Position;
@@ -10,18 +10,44 @@ use crate::source::SourceManager;
 use crate::token::{Token, TokenStream};
 
 #[derive(Debug, Clone)]
+enum SymbolKind {
+    Var,
+    Func(Vec<TypeAnnot>),
+    Type(Vec<Argument>),
+}
+
+#[derive(Debug, Clone)]
 struct Symbol {
+    kind: SymbolKind,
     // TODO: add position back in the future for error reporting
     // position: Position<'a>,
     annot: TypeAnnot,
 }
 
 impl Symbol {
-    fn new(_: Position<'_>, annot: TypeAnnot) -> Self {
-        Self { annot }
+    fn new(_: Position, annot: TypeAnnot) -> Self {
+        Self {
+            kind: SymbolKind::Var,
+            annot,
+        }
+    }
+
+    fn func(_: Position, args: Vec<TypeAnnot>, annot: TypeAnnot) -> Self {
+        Self {
+            kind: SymbolKind::Func(args),
+            annot,
+        }
+    }
+
+    fn new_type(_: Position, fields: Vec<Argument>, annot: TypeAnnot) -> Self {
+        Self {
+            kind: SymbolKind::Type(fields),
+            annot,
+        }
     }
 }
 
+#[derive(Debug)]
 struct SymbolTable(Vec<HashMap<String, Symbol>>);
 
 impl SymbolTable {
@@ -117,7 +143,7 @@ impl<'a> Parser<'a> {
                 let Some(symbol) = self.symbols.find(id) else {
                     Error::syntatic("symbol not found in scope", ts.position)?
                 };
-                ValueExpr::Identifier(symbol.annot, id.into())
+                ValueExpr::Identifier(symbol.annot.clone(), id.into())
             }
             Token::StrLiteral(string) => self.parse_str(ts, string)?,
             Token::IntLiteral(int) => ValueExpr::Int(int as i32),
@@ -135,6 +161,46 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
+    fn smart_cast(&self, value: Expression, target: &TypeAnnot) -> Option<Expression> {
+        let value_annot = value.get_annot();
+
+        if value_annot == *target || (value_annot.is_void_ptr() && target.is_ref()) {
+            return Some(value);
+        }
+
+        match value {
+            Expression::Value(value) => match value {
+                ValueExpr::Int(value) if target.is_byte() => Some(Expression::byte(value as u8)),
+                ValueExpr::Int(value) if target.is_float() => Some(Expression::float(value as f32)),
+                ValueExpr::Int(value) if target.is_bool() => Some(Expression::bool(value != 0)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn check_callexpr(
+        &self,
+        ts: &mut TokenStream,
+        annots: Vec<TypeAnnot>,
+        args: Vec<Expression>,
+    ) -> Result<Vec<Expression>> {
+        if annots.len() != args.len() {
+            let msg = format!("wrong number of arguments, expected {}", annots.len());
+            Error::syntatic(&msg, ts.position)?
+        }
+        let mut values = Vec::new();
+        for (annot, expr) in annots.iter().zip(args) {
+            let value_annot = expr.get_annot();
+            let Some(expr) = self.smart_cast(expr, annot) else {
+                let msg = format!("wrong value, expected {}, but found {}", annot, value_annot);
+                Error::syntatic(&msg, ts.position)?
+            };
+            values.push(expr);
+        }
+        Ok(values)
+    }
+
     fn parse_atom(&self, ts: &mut TokenStream) -> Result<Expression> {
         let expr = match self.next_or_err(ts)? {
             Token::StrLiteral(string) => self.parse_str(ts, string)?.into(),
@@ -143,12 +209,22 @@ impl<'a> Parser<'a> {
             Token::True => Expression::TRUE,
             Token::False => Expression::FALSE,
             Token::Identifier(id) if matches!(ts.peek(), Some(Token::OpenParen)) => {
+                let args = self.parse_callargs(ts)?;
                 let Some(sym) = self.symbols.find(id).cloned() else {
                     Error::syntatic("symbol not found in scope", ts.position)?
                 };
-                let annot = sym.annot;
-                let args = self.parse_callargs(ts)?;
-                Expression::func(id.into(), args, annot)
+                match sym.kind {
+                    SymbolKind::Var => Error::syntatic("symbol is not a function", ts.position)?,
+                    SymbolKind::Func(annots) => {
+                        let args = self.check_callexpr(ts, annots, args)?;
+                        Expression::func(id.into(), args, sym.annot)
+                    }
+                    SymbolKind::Type(fields) => {
+                        let annots = fields.into_iter().map(|f| f.annot).collect();
+                        let args = self.check_callexpr(ts, annots, args)?;
+                        Expression::alloc(args, sym.annot)
+                    }
+                }
             }
             Token::Identifier(id) if matches!(ts.peek(), Some(Token::OpenBracket)) => {
                 self.next_or_err(ts)?; // discard open bracket
@@ -164,17 +240,17 @@ impl<'a> Parser<'a> {
                 let Token::CloseBracket = self.next_or_err(ts)? else {
                     Error::syntatic("expected close bracket", ts.position)?
                 };
-                if !annot.is_ref() {
+                if !annot.is_ptr() {
                     Error::syntatic("indexing can only be applied to arrays and pointers", pos)?
                 }
-                let array = ValueExpr::Identifier(annot, id.into());
+                let array = ValueExpr::Identifier(annot.clone(), id.into());
                 Expression::index(array, index, annot.deref())
             }
             Token::Identifier(id) => {
                 let Some(symbol) = self.symbols.find(id) else {
                     Error::syntatic("symbol not found in scope", ts.position)?
                 };
-                Expression::identifier(symbol.annot, id)
+                Expression::identifier(symbol.annot.clone(), id)
             }
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(ts, 1)?;
@@ -201,7 +277,7 @@ impl<'a> Parser<'a> {
             UnaryOperator::Minus if annot.is_number() => Ok(annot),
             UnaryOperator::Minus => Error::syntatic("cannot apply unary minus here", pos),
 
-            UnaryOperator::Dereference if annot.is_ref() => Ok(annot.deref()),
+            UnaryOperator::Dereference if annot.is_ptr() => Ok(annot.deref()),
             UnaryOperator::Dereference if annot.is_int() => Ok(TypeAnnot::VOID),
             UnaryOperator::Dereference => Error::syntatic("can only dereference addresses", pos),
 
@@ -233,7 +309,7 @@ impl<'a> Parser<'a> {
             Operator::And | Operator::Or if lhs == rhs && lhs.is_bool() => Ok(TypeAnnot::BOOL),
 
             Operator::Assign if lhs == rhs => Ok(lhs),
-            Operator::Assign if lhs.is_ref() && rhs.is_void_ptr() => Ok(lhs),
+            Operator::Assign if lhs.is_ptr() && rhs.is_void_ptr() => Ok(lhs),
 
             Operator::Add
             | Operator::Sub
@@ -263,12 +339,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn check_cast(value: &Expression, target: TypeAnnot, pos: Position) -> Result<()> {
+    fn check_cast(value: &Expression, target: &TypeAnnot, pos: Position) -> Result<()> {
         let annot = value.get_annot();
 
         if annot.is_number() && target.is_number() {
             Ok(())
-        } else if annot.is_void_ptr() && target.is_ref() {
+        } else if annot.is_void_ptr() && target.is_ptr() {
             Ok(())
         } else {
             let msg = format!("cannot cast from {annot} to {target}");
@@ -292,7 +368,7 @@ impl<'a> Parser<'a> {
         if let Some(Token::As) = ts.peek() {
             self.next_or_err(ts)?;
             let target = self.parse_annot(ts)?;
-            Parser::check_cast(&lhs, target, ts.position)?;
+            Parser::check_cast(&lhs, &target, ts.position)?;
 
             lhs = Expression::cast(lhs, target);
         }
@@ -371,12 +447,22 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_annot(&self, ts: &mut TokenStream) -> Result<TypeAnnot> {
-        let ty = match self.next_or_err(ts)? {
-            Token::Int => VarType::Int,
-            Token::Real => VarType::Real,
-            Token::Char => VarType::Char,
-            Token::Bool => VarType::Bool,
-            Token::Void => VarType::Void,
+        let mut ty = match self.next_or_err(ts)? {
+            Token::Int => TypeAnnot::INT,
+            Token::Real => TypeAnnot::REAL,
+            Token::Char => TypeAnnot::CHAR,
+            Token::Byte => TypeAnnot::BYTE,
+            Token::Bool => TypeAnnot::BOOL,
+            Token::Void => TypeAnnot::VOID,
+            Token::Identifier(name) => {
+                let Some(symbol) = self.symbols.find(name) else {
+                    Error::syntatic("symbol not defined", ts.position)?
+                };
+                let SymbolKind::Type(..) = symbol.kind else {
+                    Error::syntatic("expected type", ts.position)?
+                };
+                symbol.annot.clone()
+            }
             _ => Error::syntatic("expected type annotation", ts.position)?,
         };
         match ts.peek() {
@@ -388,7 +474,8 @@ impl<'a> Parser<'a> {
                 let Token::CloseBracket = self.next_or_err(ts)? else {
                     Error::syntatic("expected close bracket", ts.position)?
                 };
-                Ok(TypeAnnot::new_array(ty, size as u32))
+                ty.indir = 1;
+                ty.array = size as u32;
             }
             Some(Token::Mul) => {
                 self.next_or_err(ts)?; // discard asterisk
@@ -397,10 +484,11 @@ impl<'a> Parser<'a> {
                     self.next_or_err(ts)?; // discard asterisk
                     indirection += 1;
                 }
-                Ok(TypeAnnot::new_ptr(ty, indirection))
+                ty.indir = indirection;
             }
-            _ => Ok(TypeAnnot::new(ty)),
+            _ => {}
         }
+        Ok(ty)
     }
 
     fn consume_var(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
@@ -416,7 +504,7 @@ impl<'a> Parser<'a> {
             let expr = self.parse_expr(ts, 1)?;
             let annot = expr.get_annot();
             self.consume_semi(ts)?;
-            self.symbols.set(ident, Symbol::new(sym_pos, annot));
+            self.symbols.set(ident, Symbol::new(sym_pos, annot.clone()));
             AstNode::Var(annot, ident.into(), Some(expr)).ok()
         } else {
             let annot = self.parse_annot(ts)?;
@@ -429,15 +517,17 @@ impl<'a> Parser<'a> {
                 let expr_pos = ts.position;
                 let expr = self.parse_expr(ts, 1)?;
                 let expr_annot = expr.get_annot();
-                if !(expr_annot == annot || annot.is_ref() && expr_annot.is_void_ptr()) {
-                    Error::syntatic(&format!("cannot assign {expr_annot} to {annot}"), expr_pos)?
-                }
+                let Some(expr) = self.smart_cast(expr, &annot) else {
+                    let msg = format!("cannot assign {expr_annot} to {annot}");
+                    Error::syntatic(&msg, expr_pos)?
+                };
                 Some(expr)
             } else {
                 None
             };
             self.consume_semi(ts)?;
-            self.symbols.set(&ident, Symbol::new(sym_pos, annot));
+            self.symbols
+                .set(&ident, Symbol::new(sym_pos, annot.clone()));
             AstNode::Var(annot, ident.into(), expr).ok()
         }
     }
@@ -461,11 +551,11 @@ impl<'a> Parser<'a> {
             None
         };
         self.consume_semi(ts)?;
-        self.symbols.set(ident, Symbol::new(id_pos, annot));
+        self.symbols.set(ident, Symbol::new(id_pos, annot.clone()));
         AstRoot::Global(annot, ident.into(), expr).ok()
     }
 
-    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<Vec<Argument>> {
+    fn parse_args(&mut self, ts: &mut TokenStream, scoped: bool) -> Result<Vec<Argument>> {
         let Token::OpenParen = self.next_or_err(ts)? else {
             Error::syntatic("expected open parenthesis `(`", ts.position)?
         };
@@ -481,9 +571,11 @@ impl<'a> Parser<'a> {
                         Error::syntatic("expected token `:`", ts.position)?
                     };
                     let annot = self.parse_annot(ts)?;
-                    let arg = Argument::new(name, annot);
+                    let arg = Argument::new(name, annot.clone());
                     args.push(arg);
-                    self.symbols.set(name, Symbol::new(arg_pos, annot));
+                    if scoped {
+                        self.symbols.set(name, Symbol::new(arg_pos, annot));
+                    }
                 }
                 (2, Token::Comma) => state = 3,
                 (1 | 2, _) => {
@@ -526,11 +618,11 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn check_func(inner: &Vec<AstNode>, annot: TypeAnnot, fn_pos: Position) -> Result<TypeAnnot> {
+    fn check_func(inner: &Vec<AstNode>, annot: &TypeAnnot, fn_pos: Position) -> Result<TypeAnnot> {
         for node in inner {
             if let AstNode::Ret(expr) = node {
-                if expr.get_annot() == annot {
-                    return Ok(annot);
+                if expr.get_annot() == *annot {
+                    return Ok(annot.clone());
                 } else {
                     return Error::syntatic("return type does not match declaration", fn_pos);
                 }
@@ -543,7 +635,7 @@ impl<'a> Parser<'a> {
                 _ => continue,
             };
 
-            if !block_type.is_void() && block_type != annot {
+            if !block_type.is_void() && block_type != *annot {
                 return Error::syntatic("return type does not match declaration", fn_pos);
             }
         }
@@ -557,9 +649,8 @@ impl<'a> Parser<'a> {
             Error::syntatic("expected name of the function", ts.position)?
         };
         let fn_pos = ts.position;
-
-        self.symbols.enter_scope(); // args
-        let args = self.parse_args(ts)?;
+        self.symbols.enter_scope();
+        let args = self.parse_args(ts, true)?;
 
         let annot = match self.next_or_err(ts)? {
             Token::Colon => {
@@ -573,12 +664,14 @@ impl<'a> Parser<'a> {
             _ => Error::syntatic("expected type annotation or `do`", ts.position)?,
         };
 
-        self.symbols.set_global(name, Symbol::new(fn_pos, annot));
+        let args_types = args.iter().map(|a| a.annot.clone()).collect();
+        self.symbols
+            .set_global(name, Symbol::func(fn_pos, args_types, annot.clone()));
 
         let inner = self.consume_inner(ts)?;
-        self.symbols.exit_scope(); // args
+        self.symbols.exit_scope();
 
-        Parser::check_func(&inner, annot, fn_pos)?;
+        Parser::check_func(&inner, &annot, fn_pos)?;
 
         AstRoot::Func(name.into(), args, annot, inner).ok()
     }
@@ -602,7 +695,7 @@ impl<'a> Parser<'a> {
         let fn_pos = ts.position;
 
         self.symbols.enter_scope();
-        let args = self.parse_args(ts)?;
+        let args = self.parse_args(ts, false)?;
 
         let annot = if let Some(Token::Colon) = ts.peek() {
             self.next_or_err(ts)?;
@@ -614,7 +707,9 @@ impl<'a> Parser<'a> {
         self.consume_semi(ts)?;
         self.symbols.exit_scope();
 
-        self.symbols.set_global(name, Symbol::new(fn_pos, annot));
+        let args_types = args.iter().map(|a| a.annot.clone()).collect();
+        self.symbols
+            .set_global(name, Symbol::func(fn_pos, args_types, annot.clone()));
 
         AstRoot::ExternFunc(name.into(), args, annot).ok()
     }
@@ -630,6 +725,26 @@ impl<'a> Parser<'a> {
         let mut tokens = source.tokenize()?;
 
         return self.consume_root(&mut tokens);
+    }
+
+    fn consume_struct(&mut self, ts: &mut TokenStream) -> Result<()> {
+        ts.next(); // discard struct token
+        let Token::Identifier(name) = self.next_or_err(ts)? else {
+            return Error::syntatic("expected name of the struct", ts.position);
+        };
+        let pos = ts.position;
+
+        let fields = self.parse_args(ts, false)?;
+        self.consume_semi(ts)?;
+
+        let size = fields
+            .iter()
+            .fold(0, |acc, f| acc + f.annot.size + f.annot.align);
+
+        let annot = TypeAnnot::new(name.to_owned(), size, 0);
+        self.symbols.set(name, Symbol::new_type(pos, fields, annot));
+
+        Ok(())
     }
 
     fn consume_inner(&mut self, ts: &mut TokenStream) -> Result<Vec<AstNode>> {
@@ -652,7 +767,7 @@ impl<'a> Parser<'a> {
                 Token::While => self.consume_while(ts),
                 Token::For => self.consume_for(ts),
 
-                Token::Var | Token::Int | Token::Real | Token::Char | Token::Bool => {
+                Token::Var | Token::Int | Token::Real | Token::Char | Token::Bool | Token::Byte => {
                     self.consume_var(ts)
                 }
 
@@ -693,8 +808,15 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            if let Token::Struct = token {
+                self.consume_struct(ts)?;
+                continue;
+            }
+
             let node = match token {
-                Token::Int | Token::Real | Token::Char | Token::Bool => self.consume_global(ts),
+                Token::Int | Token::Real | Token::Char | Token::Bool | Token::Byte => {
+                    self.consume_global(ts)
+                }
 
                 Token::Function => self.consume_func(ts),
                 Token::Extern => self.consume_extern(ts),

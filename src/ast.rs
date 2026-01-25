@@ -24,161 +24,112 @@ impl std::ops::Deref for Ast {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum VarType {
-    Int,
-    Real,
-    Bool,
-    Char,
-    Void,
-}
-
-impl std::fmt::Display for VarType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VarType::Int => write!(f, "int"),
-            VarType::Real => write!(f, "real"),
-            VarType::Bool => write!(f, "bool"),
-            VarType::Char => write!(f, "char"),
-            VarType::Void => write!(f, "void"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Annotation {
-    Value,
-    Pointer(u8), // u8 is the amount of indirection
-    Array(u32),  // u32 is the size of the array
-}
-
-impl std::fmt::Display for Annotation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Annotation::Value => Ok(()),
-            Annotation::Pointer(ind) => write!(f, "{e:*>w$}", e = "", w = *ind as usize),
-            Annotation::Array(size) => write!(f, "[{size}]"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TypeAnnot {
-    inner: VarType,
-    annot: Annotation,
+    pub name: std::borrow::Cow<'static, str>,
+    pub size: u16,
+    pub align: u16,
+    pub indir: u8,
+    pub array: u32,
+}
+
+impl PartialEq for TypeAnnot {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.size == other.size
+            && self.align == other.align
+            && self.indir == other.indir
+    }
 }
 
 impl std::fmt::Display for TypeAnnot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.inner, self.annot)
+        write!(f, "{}{e:*>w$}", self.name, e = "", w = self.indir as usize)
     }
 }
 
 impl TypeAnnot {
-    pub const INT: Self = TypeAnnot::new(VarType::Int);
-    pub const REAL: Self = TypeAnnot::new(VarType::Real);
-    pub const CHAR: Self = TypeAnnot::new(VarType::Char);
-    pub const BOOL: Self = TypeAnnot::new(VarType::Bool);
-    pub const VOID: Self = TypeAnnot::new(VarType::Void);
+    pub const INT: Self = TypeAnnot::new_const("int", 4);
+    pub const REAL: Self = TypeAnnot::new_const("real", 4);
+    pub const BYTE: Self = TypeAnnot::new_const("byte", 1);
+    pub const CHAR: Self = TypeAnnot::new_const("char", 1);
+    pub const BOOL: Self = TypeAnnot::new_const("bool", 1);
+    pub const VOID: Self = TypeAnnot::new_const("void", 0);
 
-    pub const fn new(inner: VarType) -> Self {
+    const fn new_const(name: &'static str, size: u16) -> Self {
         TypeAnnot {
-            inner,
-            annot: Annotation::Value,
+            name: std::borrow::Cow::Borrowed(name),
+            size,
+            align: 0,
+            indir: 0,
+            array: 0,
         }
     }
 
-    pub const fn new_ptr(inner: VarType, indirection: u8) -> Self {
+    pub fn new(name: impl Into<std::borrow::Cow<'static, str>>, size: u16, align: u16) -> Self {
         TypeAnnot {
-            inner,
-            annot: Annotation::Pointer(indirection),
+            name: name.into(),
+            size,
+            align,
+            indir: 0,
+            array: 0,
         }
     }
 
-    pub const fn new_array(inner: VarType, size: u32) -> Self {
-        TypeAnnot {
-            inner,
-            annot: Annotation::Array(size),
+    pub fn is_bool(&self) -> bool {
+        *self == TypeAnnot::BOOL
+    }
+
+    pub fn is_byte(&self) -> bool {
+        *self == TypeAnnot::BYTE
+    }
+
+    pub fn is_number(&self) -> bool {
+        *self == TypeAnnot::INT || *self == TypeAnnot::REAL
+    }
+
+    pub fn is_int(&self) -> bool {
+        *self == TypeAnnot::INT
+    }
+
+    pub fn is_float(&self) -> bool {
+        *self == TypeAnnot::REAL
+    }
+
+    pub fn is_void(&self) -> bool {
+        *self == TypeAnnot::VOID
+    }
+
+    pub fn is_void_ptr(&self) -> bool {
+        matches!(self.name.as_ref(), "void") && self.is_ref()
+    }
+
+    pub fn is_byte_ptr(&self) -> bool {
+        matches!(self.name.as_ref(), "byte") && self.is_ref()
+    }
+
+    pub fn is_ptr(&self) -> bool {
+        self.indir > 0
+    }
+
+    pub fn is_ref(&self) -> bool {
+        self.indir == 1
+    }
+
+    pub fn is_max_indirection(&self) -> bool {
+        self.indir == u8::MAX
+    }
+
+    pub fn deref(mut self) -> Self {
+        if self.indir > 0 {
+            self.indir -= 1;
         }
+        self
     }
 
-    pub fn is_bool(self) -> bool {
-        self == TypeAnnot::BOOL
-    }
-
-    pub fn is_char(self) -> bool {
-        self == TypeAnnot::CHAR
-    }
-
-    pub fn is_number(self) -> bool {
-        self == TypeAnnot::INT || self == TypeAnnot::REAL
-    }
-
-    pub fn is_int(self) -> bool {
-        self == TypeAnnot::INT
-    }
-
-    pub fn is_float(self) -> bool {
-        self == TypeAnnot::REAL
-    }
-
-    pub fn is_void(self) -> bool {
-        self == TypeAnnot::VOID
-    }
-
-    pub fn is_void_ptr(self) -> bool {
-        matches!(self.inner, VarType::Void) && self.is_ptr()
-    }
-
-    pub fn is_ptr(self) -> bool {
-        matches!(self.annot, Annotation::Pointer(..))
-    }
-
-    pub fn is_ref(self) -> bool {
-        matches!(self.annot, Annotation::Array(..) | Annotation::Pointer(..))
-    }
-
-    pub fn inner_type(&self) -> VarType {
-        self.inner
-    }
-
-    pub fn annotation(&self) -> Annotation {
-        self.annot
-    }
-
-    pub fn is_max_indirection(self) -> bool {
-        self.annot == Annotation::Pointer(u8::MAX)
-    }
-
-    pub fn deref(self) -> Self {
-        match self.annot {
-            Annotation::Value => self,
-            Annotation::Pointer(1) | Annotation::Array(..) => Self {
-                inner: self.inner,
-                annot: Annotation::Value,
-            },
-            Annotation::Pointer(i) => Self {
-                inner: self.inner,
-                annot: Annotation::Pointer(i - 1),
-            },
-        }
-    }
-
-    pub fn create_ref(self) -> Self {
-        match self.annot {
-            Annotation::Value => Self {
-                inner: self.inner,
-                annot: Annotation::Pointer(1),
-            },
-            Annotation::Array(..) => Self {
-                inner: self.inner,
-                annot: Annotation::Pointer(2),
-            },
-            Annotation::Pointer(i) => Self {
-                inner: self.inner,
-                annot: Annotation::Pointer(i + 1),
-            },
-        }
+    pub fn create_ref(mut self) -> Self {
+        self.indir += 1;
+        self
     }
 }
 
@@ -218,6 +169,7 @@ impl std::fmt::Display for Identifier {
 #[derive(Debug, Clone)]
 pub enum ValueExpr {
     String(String),
+    Byte(u8),
     Int(i32),
     Float(f32),
     Bool(bool),
@@ -227,11 +179,18 @@ pub enum ValueExpr {
 impl Annotated for ValueExpr {
     fn get_annot(&self) -> TypeAnnot {
         match self {
-            ValueExpr::String(s) => TypeAnnot::new_array(VarType::Char, s.len() as u32),
-            ValueExpr::Int(..) => TypeAnnot::new(VarType::Int),
-            ValueExpr::Float(..) => TypeAnnot::new(VarType::Real),
-            ValueExpr::Bool(..) => TypeAnnot::new(VarType::Bool),
-            ValueExpr::Identifier(annot, ..) => *annot,
+            ValueExpr::String(s) => TypeAnnot {
+                name: TypeAnnot::CHAR.name,
+                size: TypeAnnot::CHAR.size,
+                align: 0,
+                indir: 1,
+                array: s.len() as u32,
+            },
+            ValueExpr::Byte(..) => TypeAnnot::BYTE,
+            ValueExpr::Int(..) => TypeAnnot::INT,
+            ValueExpr::Float(..) => TypeAnnot::REAL,
+            ValueExpr::Bool(..) => TypeAnnot::BOOL,
+            ValueExpr::Identifier(annot, ..) => annot.clone(),
         }
     }
 }
@@ -267,7 +226,7 @@ impl BinaryOp {
 
 impl Annotated for BinaryOp {
     fn get_annot(&self) -> TypeAnnot {
-        self.annot
+        self.annot.clone()
     }
 }
 
@@ -292,7 +251,7 @@ impl FunctionCall {
 
 impl Annotated for FunctionCall {
     fn get_annot(&self) -> TypeAnnot {
-        self.annot
+        self.annot.clone()
     }
 }
 
@@ -317,7 +276,7 @@ impl UnaryOp {
 
 impl Annotated for UnaryOp {
     fn get_annot(&self) -> TypeAnnot {
-        self.annot
+        self.annot.clone()
     }
 }
 
@@ -342,7 +301,7 @@ impl Indexing {
 
 impl Annotated for Indexing {
     fn get_annot(&self) -> TypeAnnot {
-        self.annot
+        self.annot.clone()
     }
 }
 
@@ -361,7 +320,26 @@ impl TypeCast {
 
 impl Annotated for TypeCast {
     fn get_annot(&self) -> TypeAnnot {
-        self.annot
+        self.annot.clone()
+    }
+}
+
+#[derive(Debug)]
+pub struct AllocType {
+    args: Vec<Expression>,
+    annot: TypeAnnot,
+}
+
+impl AllocType {
+    #[inline]
+    pub fn args(&self) -> &[Expression] {
+        &self.args
+    }
+}
+
+impl Annotated for AllocType {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot.clone()
     }
 }
 
@@ -373,6 +351,7 @@ pub enum Expression {
     Func(FunctionCall),
     Index(Indexing),
     Cast(TypeCast),
+    Alloc(AllocType),
 }
 
 impl From<ValueExpr> for Expression {
@@ -405,6 +384,12 @@ impl From<Indexing> for Expression {
     }
 }
 
+impl From<AllocType> for Expression {
+    fn from(value: AllocType) -> Self {
+        Self::Alloc(value)
+    }
+}
+
 impl Expression {
     pub const TRUE: Self = Self::Value(ValueExpr::Bool(true));
     pub const FALSE: Self = Self::Value(ValueExpr::Bool(false));
@@ -420,6 +405,11 @@ impl Expression {
     }
 
     #[inline]
+    pub fn byte(b: u8) -> Self {
+        Self::Value(ValueExpr::Byte(b))
+    }
+
+    #[inline]
     pub fn identifier(annot: TypeAnnot, id: &str) -> Self {
         Self::Value(ValueExpr::Identifier(annot, id.into()))
     }
@@ -427,6 +417,11 @@ impl Expression {
     #[inline]
     pub fn string(s: &str) -> Self {
         Self::Value(ValueExpr::String(String::from(s)))
+    }
+
+    #[inline]
+    pub fn bool(b: bool) -> Self {
+        Self::Value(ValueExpr::Bool(b))
     }
 
     #[inline]
@@ -471,6 +466,11 @@ impl Expression {
     }
 
     #[inline]
+    pub fn alloc(args: Vec<Expression>, annot: TypeAnnot) -> Self {
+        Self::Alloc(AllocType { args, annot })
+    }
+
+    #[inline]
     pub fn is_value(&self) -> bool {
         matches!(self, Self::Value(..))
     }
@@ -495,11 +495,12 @@ impl Annotated for Expression {
             Expression::Func(func) => func.get_annot(),
             Expression::Index(index) => index.get_annot(),
             Expression::Cast(cast) => cast.get_annot(),
+            Expression::Alloc(alloc) => alloc.get_annot(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Argument {
     pub name: Identifier,
     pub annot: TypeAnnot,
@@ -516,7 +517,7 @@ impl Argument {
 
 impl Annotated for Argument {
     fn get_annot(&self) -> TypeAnnot {
-        self.annot
+        self.annot.clone()
     }
 }
 
