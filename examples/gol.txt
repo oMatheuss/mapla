@@ -59,18 +59,13 @@ end
 
 func updateBoard(actualState: int*) do
     int* nextState = createBoard();
+    memcpy(nextState, actualState, WIDTH * HEIGHT * 4);
     for y to HEIGHT do
         int dy = y * WIDTH;
         for x to WIDTH do
             int actual = actualState[dy + x];
             int alives = checkNeighbors(actualState, x, y);
-            if actual == ALIVE_CELL && alives < 2 then
-                nextState[dy + x] = DEAD_CELL;
-            end
-            if actual == ALIVE_CELL && alives == 2 || alives == 3 then
-                nextState[dy + x] = ALIVE_CELL;
-            end
-            if actual == ALIVE_CELL && alives > 3 then
+            if actual == ALIVE_CELL && alives < 2 || alives > 3 then
                 nextState[dy + x] = DEAD_CELL;
             end
             if actual == DEAD_CELL && alives == 3 then

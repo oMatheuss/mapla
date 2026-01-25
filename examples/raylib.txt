@@ -1,18 +1,16 @@
-extern func __main();
+struct Color(r: byte, g: byte, b: byte, a: byte);
 
 extern func InitWindow(width: int, height: int, title: char*);
 extern func SetTargetFPS(fps: int);
 extern func WindowShouldClose(): bool;
 extern func BeginDrawing();
-extern func ClearBackground(color: int);
-extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: int);
+extern func ClearBackground(color: Color);
+extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: Color);
 extern func EndDrawing();
 
-int BLACK = 0xFF000000;
-int RED   = 0xFF0000FF;
-
 func main(): int do
-    __main();
+    var BLACK = Color(0, 0, 0, 0xFF);
+    var RED   = Color(0xFF, 0, 0, 0xFF);
 
     InitWindow(800, 450, "RayLib Example");
     SetTargetFPS(60);

@@ -1,5 +1,3 @@
-extern func __main();
-
 extern func InitWindow(width: int, height: int, title: char*);
 extern func CloseWindow();
 extern func SetTargetFPS(fps: int);
@@ -315,8 +313,6 @@ func ClearLines(board: int*): int do
 end
 
 func main(): int do
-    __main();
-    
     int[200] board;
     int[004] piece;
 

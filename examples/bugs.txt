@@ -95,10 +95,10 @@ func updateBoard(actualState: int*, nextState: int*) do
             var actual = getCell(actualState, x, y);
             var alives = checkNeighbors(actualState, x, y);
             if actual && (alives < STABLE_A || alives > STABLE_B) then
-                setCell(nextState, x, y, 0);
+                setCell(nextState, x, y, false);
             end
             if !actual && alives >= BORN_A && alives <= BORN_B then
-                setCell(nextState, x, y, 1);
+                setCell(nextState, x, y, true);
             end
         end
     end
@@ -109,7 +109,7 @@ func randomizeBoard(board: int*) do
     for y to HEIGHT do
         for x to WIDTH do
             int r = GetRandomValue(0, 1);
-            setCell(board, x, y, r);
+            setCell(board, x, y, r == 1);
         end
     end
 end
