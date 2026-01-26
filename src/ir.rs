@@ -1,4 +1,5 @@
-use crate::ast::{self, Annotated};
+use crate::ast;
+use crate::types::{Annotated, TypeAnnot};
 
 #[derive(Debug, Clone)]
 pub enum IrExprOpe {
@@ -13,11 +14,11 @@ pub enum IrExprOpe {
         operator: ast::Operator,
         lhs: usize,
         rhs: usize,
-        annot: ast::TypeAnnot,
+        annot: TypeAnnot,
     },
     Func {
         name: ast::Identifier,
-        args: Vec<(usize, ast::TypeAnnot)>,
+        args: Vec<(usize, TypeAnnot)>,
     },
     Index {
         array: ast::ValueExpr,
@@ -25,23 +26,23 @@ pub enum IrExprOpe {
     },
     Cast {
         value: usize,
-        cast_from: ast::TypeAnnot,
+        cast_from: TypeAnnot,
     },
     Alloc {
-        args: Vec<(usize, ast::TypeAnnot)>,
+        args: Vec<(usize, TypeAnnot)>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct IrExpr {
     pub id: usize,
-    pub annot: ast::TypeAnnot,
+    pub annot: TypeAnnot,
     pub ope: IrExprOpe,
     pub assign: bool,
 }
 
 impl IrExpr {
-    fn new(id: usize, annot: ast::TypeAnnot, ope: IrExprOpe, assign: bool) -> Self {
+    fn new(id: usize, annot: TypeAnnot, ope: IrExprOpe, assign: bool) -> Self {
         IrExpr {
             id,
             annot,

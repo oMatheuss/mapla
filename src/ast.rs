@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::error::Result;
+use crate::types::{Annotated, TypeAnnot};
 
 #[derive(Debug)]
 pub struct Ast(Vec<AstRoot>);
@@ -22,119 +23,6 @@ impl std::ops::Deref for Ast {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct TypeAnnot {
-    pub name: std::borrow::Cow<'static, str>,
-    pub size: u16,
-    pub align: u16,
-    pub indir: u8,
-    pub array: u32,
-}
-
-impl PartialEq for TypeAnnot {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.size == other.size
-            && self.align == other.align
-            && self.indir == other.indir
-    }
-}
-
-impl std::fmt::Display for TypeAnnot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{e:*>w$}", self.name, e = "", w = self.indir as usize)
-    }
-}
-
-impl TypeAnnot {
-    pub const INT: Self = TypeAnnot::new_const("int", 4);
-    pub const REAL: Self = TypeAnnot::new_const("real", 4);
-    pub const BYTE: Self = TypeAnnot::new_const("byte", 1);
-    pub const CHAR: Self = TypeAnnot::new_const("char", 1);
-    pub const BOOL: Self = TypeAnnot::new_const("bool", 1);
-    pub const VOID: Self = TypeAnnot::new_const("void", 0);
-
-    const fn new_const(name: &'static str, size: u16) -> Self {
-        TypeAnnot {
-            name: std::borrow::Cow::Borrowed(name),
-            size,
-            align: 0,
-            indir: 0,
-            array: 0,
-        }
-    }
-
-    pub fn new(name: impl Into<std::borrow::Cow<'static, str>>, size: u16, align: u16) -> Self {
-        TypeAnnot {
-            name: name.into(),
-            size,
-            align,
-            indir: 0,
-            array: 0,
-        }
-    }
-
-    pub fn is_bool(&self) -> bool {
-        *self == TypeAnnot::BOOL
-    }
-
-    pub fn is_byte(&self) -> bool {
-        *self == TypeAnnot::BYTE
-    }
-
-    pub fn is_number(&self) -> bool {
-        *self == TypeAnnot::INT || *self == TypeAnnot::REAL
-    }
-
-    pub fn is_int(&self) -> bool {
-        *self == TypeAnnot::INT
-    }
-
-    pub fn is_float(&self) -> bool {
-        *self == TypeAnnot::REAL
-    }
-
-    pub fn is_void(&self) -> bool {
-        *self == TypeAnnot::VOID
-    }
-
-    pub fn is_void_ptr(&self) -> bool {
-        matches!(self.name.as_ref(), "void") && self.is_ref()
-    }
-
-    pub fn is_byte_ptr(&self) -> bool {
-        matches!(self.name.as_ref(), "byte") && self.is_ref()
-    }
-
-    pub fn is_ptr(&self) -> bool {
-        self.indir > 0
-    }
-
-    pub fn is_ref(&self) -> bool {
-        self.indir == 1
-    }
-
-    pub fn is_max_indirection(&self) -> bool {
-        self.indir == u8::MAX
-    }
-
-    pub fn deref(mut self) -> Self {
-        if self.indir > 0 {
-            self.indir -= 1;
-        }
-        self
-    }
-
-    pub fn create_ref(mut self) -> Self {
-        self.indir += 1;
-        self
-    }
-}
-
-pub trait Annotated {
-    fn get_annot(&self) -> TypeAnnot;
 }
 
 #[derive(Debug, Clone)]
@@ -180,9 +68,7 @@ impl Annotated for ValueExpr {
     fn get_annot(&self) -> TypeAnnot {
         match self {
             ValueExpr::String(s) => TypeAnnot {
-                name: TypeAnnot::CHAR.name,
-                size: TypeAnnot::CHAR.size,
-                align: 0,
+                base: TypeAnnot::CHAR.base,
                 indir: 1,
                 array: s.len() as u32,
             },

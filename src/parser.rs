@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
-use crate::ast::{
-    Annotated, Argument, Ast, AstNode, AstRoot, Expression, Operator, TypeAnnot, UnaryOperator,
-    ValueExpr,
-};
+use crate::ast::{Argument, Ast, AstNode, AstRoot, Expression, Operator, UnaryOperator, ValueExpr};
 use crate::error::{Error, PositionResult, Result};
 use crate::position::Position;
 use crate::source::SourceManager;
 use crate::token::{Token, TokenStream};
+use crate::types::{Annotated, TypeAnnot};
 
 #[derive(Debug, Clone)]
 enum SymbolKind {
@@ -737,11 +735,9 @@ impl<'a> Parser<'a> {
         let fields = self.parse_args(ts, false)?;
         self.consume_semi(ts)?;
 
-        let size = fields
-            .iter()
-            .fold(0, |acc, f| acc + f.annot.size + f.annot.align);
+        let size = fields.iter().fold(0, |acc, f| acc + f.size());
 
-        let annot = TypeAnnot::new(name.to_owned(), size, 0);
+        let annot = TypeAnnot::new(name.to_owned(), size);
         self.symbols.set(name, Symbol::new_type(pos, fields, annot));
 
         Ok(())

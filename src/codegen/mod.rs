@@ -5,10 +5,10 @@ mod scope;
 use std::collections::HashMap;
 
 use crate::ast::{
-    Annotated, Argument, Ast, AstNode, AstRoot, Expression, Identifier, Operator, TypeAnnot,
-    UnaryOperator, ValueExpr,
+    Argument, Ast, AstNode, AstRoot, Expression, Identifier, Operator, UnaryOperator, ValueExpr,
 };
 use crate::target::CompilerTarget;
+use crate::types::{Annotated, TypeAnnot};
 use crate::utils::HexSlice;
 use asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use regs::{OperandManager, RegManager};
@@ -18,16 +18,12 @@ type AsmData = HashMap<Lbl, Vec<u8>>;
 
 impl MemSized for TypeAnnot {
     fn mem_size(&self) -> MemSize {
-        if self.indir > 0 {
-            MemSize::QWord
-        } else {
-            match self.size {
-                1 => MemSize::Byte,
-                2 => MemSize::Word,
-                4 => MemSize::DWord,
-                8 => MemSize::QWord,
-                _ => todo!(),
-            }
+        match self.size() {
+            1 => MemSize::Byte,
+            2 => MemSize::Word,
+            4 => MemSize::DWord,
+            8 => MemSize::QWord,
+            _ => MemSize::QWord,
         }
     }
 }
@@ -122,7 +118,7 @@ fn move_operand_to_reg(c: &mut CodeGen, annot: &TypeAnnot, operand: Operand) -> 
     }
 }
 
-fn move_reg_to_mem(c: &mut CodeGen, operand: Operand) -> Operand {
+fn move_operand_to_mem(c: &mut CodeGen, operand: Operand) -> Operand {
     match operand {
         Operand::Reg(reg) => {
             c.regs.push(reg);
@@ -277,7 +273,7 @@ fn compile_iop(c: &mut CodeGen, ope: Operator, lhs: Operand, rhs: Operand) -> Op
                     asm::code!(c.code, Mov, tmp, imm);
                     tmp
                 }
-                _ => move_reg_to_mem(c, rhs),
+                _ => move_operand_to_mem(c, rhs),
             };
 
             if lhs.is_acc() {
@@ -314,7 +310,7 @@ fn compile_iop(c: &mut CodeGen, ope: Operator, lhs: Operand, rhs: Operand) -> Op
                     asm::code!(c.code, Mov, tmp, imm);
                     tmp
                 }
-                _ => move_reg_to_mem(c, rhs),
+                _ => move_operand_to_mem(c, rhs),
             };
 
             if lhs.is_acc() {
@@ -789,7 +785,7 @@ fn compile_alloc(c: &mut CodeGen, args: Vec<(Operand, &TypeAnnot)>, annot: &Type
         let offset_mem = Mem::offset(base_reg, offset, annot.mem_size());
         asm::code!(c.code, Mov, offset_mem, operand_reg);
         c.regs.try_push(operand_reg);
-        offset += annot.size as isize;
+        offset += annot.size() as isize;
     }
     c.regs.push(base_reg);
     Operand::Mem(base_mem)
@@ -829,7 +825,7 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
 
         if !ir.assign {
             // TODO: register management is a mess, so we allways move to stack
-            mems[ir.id] = move_reg_to_mem(c, mems[ir.id]);
+            mems[ir.id] = move_operand_to_mem(c, mems[ir.id]);
         }
     }
 
@@ -1077,39 +1073,48 @@ fn compile_func(c: &mut CodeGen, ident: &Identifier, args: &Vec<Argument>, nodes
     asm::code!(c.code, Ret);
 }
 
+fn compile_global(
+    c: &mut CodeGen,
+    annot: &TypeAnnot,
+    ident: &Identifier,
+    value: &Option<ValueExpr>,
+) {
+    let label = Lbl::from_label(ident);
+    c.scope.set(ident, Mem::lbl(label, annot.mem_size()));
+    match value {
+        Some(value) => match value {
+            ValueExpr::String(s) => {
+                c.data.insert(label, s.as_bytes().to_vec());
+            }
+            ValueExpr::Byte(b) => {
+                c.data.insert(label, [*b as u8].to_vec());
+            }
+            ValueExpr::Int(i) => {
+                c.data.insert(label, i.to_le_bytes().to_vec());
+            }
+            ValueExpr::Float(f) => {
+                c.data.insert(label, f.to_le_bytes().to_vec());
+            }
+            ValueExpr::Bool(b) => {
+                c.data.insert(label, [*b as u8].to_vec());
+            }
+            ValueExpr::Identifier(..) => {}
+        },
+        None => {
+            todo!("create a entry on .bss section")
+        }
+    }
+}
+
 fn compile_root(c: &mut CodeGen, node: &AstRoot) {
     match node {
         AstRoot::Func(ident, args, _, ast_nodes) => {
             compile_func(c, ident, args, ast_nodes);
         }
-        AstRoot::ExternFunc(name, ..) => asm::code!(c.code, "extern {name}"),
         AstRoot::Global(annot, ident, value) => {
-            let label = Lbl::from_label(ident);
-            c.scope.set(ident, Mem::lbl(label, annot.mem_size()));
-            match value {
-                Some(value) => match value {
-                    ValueExpr::String(s) => {
-                        c.data.insert(label, s.as_bytes().to_vec());
-                    }
-                    ValueExpr::Byte(b) => {
-                        c.data.insert(label, [*b as u8].to_vec());
-                    }
-                    ValueExpr::Int(i) => {
-                        c.data.insert(label, i.to_le_bytes().to_vec());
-                    }
-                    ValueExpr::Float(f) => {
-                        c.data.insert(label, f.to_le_bytes().to_vec());
-                    }
-                    ValueExpr::Bool(b) => {
-                        c.data.insert(label, [*b as u8].to_vec());
-                    }
-                    ValueExpr::Identifier(..) => {}
-                },
-                None => {
-                    todo!("create a entry on .bss section")
-                }
-            }
+            compile_global(c, annot, ident, value);
         }
+        AstRoot::ExternFunc(name, ..) => asm::code!(c.code, "extern {name}"),
     }
 }
 

@@ -13,6 +13,7 @@ mod position;
 mod source;
 mod target;
 mod token;
+mod types;
 mod utils;
 
 fn run() -> Result<()> {
