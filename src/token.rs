@@ -62,6 +62,7 @@ pub enum Token<'a> {
     Til,
     VBar,
     Hat,
+    Dot,
     Eof,
 }
 

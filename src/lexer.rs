@@ -212,6 +212,7 @@ impl<'a> Lexer<'a> {
             (',', _) => Token::Comma,
             (':', _) => Token::Colon,
             (';', _) => Token::SemiColon,
+            ('.', _) => Token::Dot,
             _ => Error::lexical("invalid token", self.pos)?,
         };
 
@@ -227,7 +228,7 @@ impl<'a> Lexer<'a> {
             let position = self.pos;
             let token = match ch {
                 'a'..='z' | 'A'..='Z' | '_' => self.next_ident(),
-                '0'..='9' | '.' => self.next_number(),
+                '0'..='9' => self.next_number(),
                 '"' => self.next_string(),
                 _ => self.next_symbol(),
             }?;
