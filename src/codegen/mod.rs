@@ -1,6 +1,8 @@
 mod asm;
+mod linux;
 mod regs;
 mod scope;
+mod windows;
 
 use std::collections::HashMap;
 
@@ -8,7 +10,7 @@ use crate::ast::{
     Argument, Ast, AstNode, AstRoot, Expression, Identifier, Operator, UnaryOperator, ValueExpr,
 };
 use crate::target::CompilerTarget;
-use crate::types::{Annotated, TypeAnnot};
+use crate::types::{Annotated, Type, TypeAnnot};
 use crate::utils::HexSlice;
 use asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use regs::{OperandManager, RegManager};
@@ -45,41 +47,28 @@ impl CodeGen {
             ..Default::default()
         }
     }
-}
 
-fn cdecl(c: &mut CodeGen, arg_num: usize, mem_size: MemSize) -> Option<Reg> {
-    let reg = match (c.target, arg_num) {
-        (CompilerTarget::Linux, 0) => Reg::dst(mem_size),
-        (CompilerTarget::Linux, 1) => Reg::src(mem_size),
-        (CompilerTarget::Linux, 2) => Reg::dta(mem_size),
-        (CompilerTarget::Linux, 3) => Reg::cnt(mem_size),
-        (CompilerTarget::Linux, 4) => Reg::r8(mem_size),
-        (CompilerTarget::Linux, 5) => Reg::r9(mem_size),
+    pub fn copy_bytes_inline(&mut self, base_dst: Reg, base_src: Reg, aux_reg: Reg, size: usize) {
+        let mut offset = 0;
+        loop {
+            let remaining = size - offset;
+            let copy_size = match remaining {
+                8.. => MemSize::QWord,
+                4.. => MemSize::DWord,
+                2.. => MemSize::DWord,
+                1.. => MemSize::Byte,
+                _ => break,
+            };
 
-        (CompilerTarget::Windows, 0) => Reg::cnt(mem_size),
-        (CompilerTarget::Windows, 1) => Reg::dta(mem_size),
-        (CompilerTarget::Windows, 2) => Reg::r8(mem_size),
-        (CompilerTarget::Windows, 3) => Reg::r9(mem_size),
+            let mem_src = Mem::offset(base_src, offset as isize, copy_size);
+            let mem_dst = Mem::offset(base_dst, offset as isize, copy_size);
 
-        (_, _) => return None,
-    };
-    Some(reg)
-}
-
-fn cdecl_f(c: &mut CodeGen, arg_num: usize, mem_size: MemSize) -> Option<Xmm> {
-    let xmm = match (c.target, arg_num) {
-        (CompilerTarget::Linux | CompilerTarget::Windows, 0) => Xmm::xmm(0, mem_size),
-        (CompilerTarget::Linux | CompilerTarget::Windows, 1) => Xmm::xmm(1, mem_size),
-        (CompilerTarget::Linux | CompilerTarget::Windows, 2) => Xmm::xmm(2, mem_size),
-        (CompilerTarget::Linux | CompilerTarget::Windows, 3) => Xmm::xmm(3, mem_size),
-        (CompilerTarget::Linux, 4) => Xmm::xmm(4, mem_size),
-        (CompilerTarget::Linux, 5) => Xmm::xmm(5, mem_size),
-        (CompilerTarget::Linux, 6) => Xmm::xmm(6, mem_size),
-        (CompilerTarget::Linux, 7) => Xmm::xmm(7, mem_size),
-
-        (_, _) => return None,
-    };
-    Some(xmm)
+            let aux_reg = self.regs.switch_size(aux_reg, copy_size);
+            asm::code!(self.code, Mov, aux_reg, mem_src);
+            asm::code!(self.code, Mov, mem_dst, aux_reg);
+            offset += copy_size as usize;
+        }
+    }
 }
 
 fn move_operand_to_reg(c: &mut CodeGen, annot: &TypeAnnot, operand: Operand) -> Operand {
@@ -508,101 +497,6 @@ fn compile_fop(c: &mut CodeGen, ope: Operator, lhs: Operand, mut rhs: Operand) -
     result
 }
 
-fn compile_call(
-    c: &mut CodeGen,
-    name: &str,
-    args: Vec<(Operand, &TypeAnnot)>,
-    annot: &TypeAnnot,
-) -> Operand {
-    let args_len = args.len() as isize;
-    let word_size = MemSize::QWord as isize;
-
-    let mut stack_offset = match c.target {
-        CompilerTarget::Linux => 0.max(args_len - 6) * word_size,
-        CompilerTarget::Windows => 32 + 0.max(args_len - 4) * word_size,
-    };
-
-    c.scope.new_call(stack_offset as usize);
-
-    for (arg_num, (arg, annot)) in args.iter().enumerate().rev() {
-        let reg = cdecl(c, arg_num, arg.mem_size());
-        let xmm = cdecl_f(c, arg_num, arg.mem_size());
-
-        if let Some(reg) = reg {
-            assert!(c.regs.take(reg), "arg register should be free");
-            match arg {
-                Operand::Reg(arg) if reg == *arg => {}
-                Operand::Xmm(xmm) => asm::code!(c.code, Movd, reg, xmm),
-                _ => asm::code!(c.code, Mov, reg, arg),
-            }
-        } else {
-            let mem_size = arg.mem_size();
-            stack_offset -= word_size;
-            let mem = Mem::offset(Reg::Rsp, stack_offset, mem_size);
-
-            match arg {
-                Operand::Xmm(xmm) => asm::code!(c.code, Movss, mem, xmm),
-                Operand::Reg(reg) => asm::code!(c.code, Mov, mem, reg),
-                Operand::Mem(..) => {
-                    let reg = c.regs.take_any(mem_size);
-                    asm::code!(c.code, Mov, reg, arg);
-                    asm::code!(c.code, Mov, mem, reg);
-                    c.regs.push(reg);
-                }
-                _ => asm::code!(c.code, Mov, mem, arg),
-            }
-        }
-
-        if annot.is_float() && xmm.is_some() {
-            // if expression is float also copy to xmm registers
-            let xmm = xmm.unwrap();
-            assert!(c.xmms.take(xmm), "arg register (xmm) should be free");
-            match arg {
-                Operand::Xmm(arg) if *arg == xmm => {}
-                Operand::Imm(imm) => {
-                    let reg = c.regs.take_any(imm.mem_size());
-                    asm::code!(c.code, Mov, reg, imm);
-                    asm::code!(c.code, Movd, xmm, reg);
-                    c.regs.push(reg);
-                }
-                Operand::Xmm(..) | Operand::Mem(..) => {
-                    asm::code!(c.code, Movss, xmm, arg);
-                }
-                Operand::Reg(reg) => asm::code!(c.code, Movd, xmm, reg),
-            }
-        }
-
-        c.regs.try_push(*arg);
-        c.xmms.try_push(*arg);
-    }
-
-    asm::code!(c.code, Call, name);
-
-    for (arg_num, (arg, _)) in args.iter().enumerate() {
-        if let Some(reg) = cdecl(c, arg_num, arg.mem_size()) {
-            c.regs.push(reg);
-        }
-        if let Some(xmm) = cdecl_f(c, arg_num, arg.mem_size()) {
-            c.xmms.push(xmm);
-        }
-    }
-
-    if annot.is_float() {
-        let xmm = Xmm::xmm0(annot.mem_size());
-        assert!(
-            c.xmms.take(xmm),
-            "return register (xmm) should be available"
-        );
-        Operand::Xmm(xmm)
-    } else if !annot.is_void() {
-        let reg = Reg::acc(annot.mem_size());
-        assert!(c.regs.take(reg), "return register should be available");
-        Operand::Reg(reg)
-    } else {
-        Operand::Imm(Imm::Dword(0))
-    }
-}
-
 fn compile_unaop(
     c: &mut CodeGen,
     una_op: UnaryOperator,
@@ -810,7 +704,10 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
             } => compile_binop(c, operator, mems[lhs], mems[rhs], annot),
             Func { name, args } => {
                 let args = args.iter().map(|(id, annot)| (mems[*id], annot)).collect();
-                compile_call(c, &name, args, &ir.annot)
+                match c.target {
+                    CompilerTarget::Linux => linux::compile_call(c, &name, args, &ir.annot),
+                    CompilerTarget::Windows => windows::compile_call(c, &name, args, &ir.annot),
+                }
             }
             Index { array, index } => {
                 let array = compile_value(c, &array);
@@ -969,7 +866,16 @@ fn compile_node(c: &mut CodeGen, node: &AstNode) {
         }
         AstNode::Ret(expr) => {
             let result = compile_expr(c, expr);
-            if expr.get_annot().is_float() {
+            let annot = expr.get_annot();
+            if !annot.is_ptr()
+                && let Type::Custom { name: _, size } = annot.base
+                && size > MemSize::QWord as usize
+            {
+                match c.target {
+                    CompilerTarget::Linux => linux::compile_ret_struct(c, result, size),
+                    CompilerTarget::Windows => windows::compile_ret_struct(c, result, size),
+                }
+            } else if annot.is_float() {
                 let xmm0 = Xmm::xmm0(result.mem_size());
                 if !matches!(result, Operand::Xmm(xmm) if xmm.is_xmm0()) {
                     match result {
@@ -1022,26 +928,13 @@ fn compile_node(c: &mut CodeGen, node: &AstNode) {
     }
 }
 
-fn compile_args(c: &mut CodeGen, args: &[Argument]) {
-    let mut mem_offset = match c.target {
-        CompilerTarget::Linux => 16,   // rip + rbp
-        CompilerTarget::Windows => 48, // rip + rbp + shadow space
-    };
-    for (arg_num, arg) in args.iter().enumerate() {
-        let Argument { name, annot } = arg;
-        let mem_size = annot.mem_size();
-        if let Some(reg) = cdecl(c, arg_num, mem_size) {
-            let addr = c.scope.new_local(name, mem_size);
-            asm::code!(c.code, Mov, addr, reg);
-        } else {
-            let addr = Mem::offset(Reg::Rbp, mem_offset, mem_size);
-            mem_offset += MemSize::QWord as isize;
-            c.scope.set(name, addr);
-        }
-    }
-}
-
-fn compile_func(c: &mut CodeGen, ident: &Identifier, args: &Vec<Argument>, nodes: &Vec<AstNode>) {
+fn compile_func(
+    c: &mut CodeGen,
+    ident: &Identifier,
+    args: &Vec<Argument>,
+    annot: &TypeAnnot,
+    nodes: &Vec<AstNode>,
+) {
     asm::code!(c.code, "{ident}:");
     asm::code!(c.code, Push, Reg::Rbp);
     asm::code!(c.code, Mov, Reg::Rbp, Reg::Rsp);
@@ -1049,7 +942,11 @@ fn compile_func(c: &mut CodeGen, ident: &Identifier, args: &Vec<Argument>, nodes
     let mut code = std::mem::take(&mut c.code);
 
     c.scope.new_inner();
-    compile_args(c, args);
+
+    match c.target {
+        CompilerTarget::Linux => linux::compile_args(c, args, annot),
+        CompilerTarget::Windows => windows::compile_args(c, args, annot),
+    };
 
     for inner in nodes {
         compile_node(c, inner);
@@ -1108,8 +1005,8 @@ fn compile_global(
 
 fn compile_root(c: &mut CodeGen, node: &AstRoot) {
     match node {
-        AstRoot::Func(ident, args, _, ast_nodes) => {
-            compile_func(c, ident, args, ast_nodes);
+        AstRoot::Func(ident, args, annot, ast_nodes) => {
+            compile_func(c, ident, args, annot, ast_nodes);
         }
         AstRoot::Global(annot, ident, value) => {
             compile_global(c, annot, ident, value);
@@ -1119,22 +1016,22 @@ fn compile_root(c: &mut CodeGen, node: &AstRoot) {
 }
 
 pub fn compile(target: CompilerTarget, ast: Ast) -> String {
-    let mut gen = CodeGen::new(target);
-    asm::code!(gen.code, "bits 64");
-    asm::code!(gen.code, "section .text");
-    asm::code!(gen.code, "global main");
+    let mut c = CodeGen::new(target);
+    asm::code!(c.code, "bits 64");
+    asm::code!(c.code, "section .text");
+    asm::code!(c.code, "global main");
 
     for node in ast.iter() {
-        compile_root(&mut gen, node);
+        compile_root(&mut c, node);
     }
 
-    if !gen.data.is_empty() {
-        asm::code!(gen.code, "section .data");
+    if !c.data.is_empty() {
+        asm::code!(c.code, "section .data");
 
-        for (label, bytes) in gen.data.iter() {
-            asm::code!(gen.code, "  {label}: db {:x}", HexSlice::new(bytes));
+        for (label, bytes) in c.data.iter() {
+            asm::code!(c.code, "  {label}: db {:x}", HexSlice::new(bytes));
         }
     }
 
-    gen.code.to_string()
+    c.code.to_string()
 }

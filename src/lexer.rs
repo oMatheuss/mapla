@@ -131,7 +131,7 @@ impl<'a> Lexer<'a> {
                     self.next();
                 }
                 _ if ch.is_control() => {
-                    return Error::lexical("control characters are not allowed", str_pos)
+                    return Error::lexical("control characters are not allowed", str_pos);
                 }
                 _ => (),
             }

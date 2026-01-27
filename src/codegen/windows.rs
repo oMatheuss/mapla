@@ -1,0 +1,167 @@
+use crate::codegen::asm;
+use crate::codegen::asm::{Imm, Mem, MemSize, MemSized, Operand, Reg, Xmm};
+use crate::codegen::regs::OperandManager;
+use crate::types::{Type, TypeAnnot};
+
+use super::CodeGen;
+
+fn call_regs(reg_num: usize, mem_size: MemSize) -> Option<Reg> {
+    let reg = match reg_num {
+        0 => Reg::cnt(mem_size),
+        1 => Reg::dta(mem_size),
+        2 => Reg::r8(mem_size),
+        3 => Reg::r9(mem_size),
+        _ => return None,
+    };
+    Some(reg)
+}
+
+fn call_xmms(xmm_num: usize, mem_size: MemSize) -> Option<Xmm> {
+    let xmm = match xmm_num {
+        0 => Xmm::xmm(0, mem_size),
+        1 => Xmm::xmm(1, mem_size),
+        2 => Xmm::xmm(2, mem_size),
+        3 => Xmm::xmm(3, mem_size),
+        _ => return None,
+    };
+    Some(xmm)
+}
+
+fn release_call_regs(c: &mut CodeGen) {
+    let mut i = 0;
+    while let Some(reg) = call_regs(i, MemSize::QWord) {
+        c.regs.push(reg);
+        i += 1;
+    }
+    i = 0;
+    while let Some(xmm) = call_xmms(i, MemSize::QWord) {
+        c.xmms.push(xmm);
+        i += 1;
+    }
+}
+
+pub fn compile_call(
+    c: &mut CodeGen,
+    name: &str,
+    args: Vec<(Operand, &TypeAnnot)>,
+    annot: &TypeAnnot,
+) -> Operand {
+    let stack_space = 32 + 0.max(args.len() as isize - 4) as usize * MemSize::QWord as usize;
+    c.scope.new_call(stack_space);
+
+    let mut i = 0;
+    let mut offset = 32;
+    let mut arg_iter = args.iter();
+
+    if let Type::Custom { name: _, size } = annot.base
+        && size > MemSize::QWord as usize
+    {
+        let reg = call_regs(i, MemSize::QWord).unwrap();
+        let tmp = c.scope.alloc_temp(size);
+        let mem = Mem::offset(Reg::Rbp, tmp, MemSize::Byte);
+        asm::code!(c.code, Lea, reg, mem);
+        i += 1;
+    }
+
+    while let Some((arg, annot)) = arg_iter.next() {
+        let mem_size = annot.mem_size();
+        let is_float = annot.is_float();
+
+        if is_float && let Some(xmm) = call_xmms(i, mem_size) {
+            assert!(c.xmms.take(xmm), "arg register (xmm) should be free");
+            match arg {
+                Operand::Xmm(arg) if *arg == xmm => {}
+                Operand::Imm(imm) => {
+                    let reg = c.regs.take_any(imm.mem_size());
+                    asm::code!(c.code, Mov, reg, imm);
+                    asm::code!(c.code, Movd, xmm, reg);
+                    c.regs.push(reg);
+                }
+                Operand::Xmm(..) | Operand::Mem(..) => {
+                    asm::code!(c.code, Movss, xmm, arg);
+                }
+                Operand::Reg(reg) => asm::code!(c.code, Movd, xmm, reg),
+            }
+        } else if !is_float && let Some(reg) = call_regs(i, mem_size) {
+            assert!(c.regs.take(reg), "arg register should be free");
+            match arg {
+                Operand::Reg(arg) if reg == *arg => {}
+                Operand::Xmm(xmm) => asm::code!(c.code, Movd, reg, xmm),
+                _ => asm::code!(c.code, Mov, reg, arg),
+            }
+        } else {
+            offset += MemSize::QWord as isize;
+            let mem = Mem::offset(Reg::Rsp, offset, mem_size);
+            match arg {
+                Operand::Xmm(xmm) => asm::code!(c.code, Movss, mem, xmm),
+                Operand::Reg(reg) => asm::code!(c.code, Mov, mem, reg),
+                Operand::Mem(..) => {
+                    let reg = c.regs.take_any(mem_size);
+                    asm::code!(c.code, Mov, reg, arg);
+                    asm::code!(c.code, Mov, mem, reg);
+                    c.regs.push(reg);
+                }
+                _ => asm::code!(c.code, Mov, mem, arg),
+            }
+        }
+
+        c.regs.try_push(*arg);
+        c.xmms.try_push(*arg);
+
+        i += 1;
+    }
+
+    asm::code!(c.code, Call, name);
+    release_call_regs(c);
+
+    if annot.is_float() {
+        let xmm = Xmm::xmm0(annot.mem_size());
+        assert!(
+            c.xmms.take(xmm),
+            "return register (xmm) should be available"
+        );
+        Operand::Xmm(xmm)
+    } else if !annot.is_void() {
+        let reg = Reg::acc(annot.mem_size());
+        assert!(c.regs.take(reg), "return register should be available");
+        Operand::Reg(reg)
+    } else {
+        Operand::Imm(Imm::Dword(0))
+    }
+}
+
+pub fn compile_args(c: &mut CodeGen, args: &[crate::ast::Argument], fn_annot: &TypeAnnot) {
+    let mut i = 0;
+    let mut mem_offset = 48; // rip + rbp + shadow space
+    if !fn_annot.is_ptr()
+        && let Type::Custom { name: _, size } = fn_annot.base
+        && size > 8
+    {
+        let reg = call_regs(i, MemSize::QWord).unwrap();
+        let mem = c.scope.new_local("return", MemSize::QWord);
+        asm::code!(c.code, Mov, mem, reg);
+        i += 1; // first register will be allocated to the return value
+    }
+    for crate::ast::Argument { name, annot } in args.iter() {
+        let mem_size = annot.mem_size();
+        if let Some(reg) = call_regs(i, mem_size) {
+            let mem = c.scope.new_local(name, mem_size);
+            asm::code!(c.code, Mov, mem, reg);
+        } else {
+            let mem = Mem::offset(Reg::Rbp, mem_offset, mem_size);
+            mem_offset += MemSize::QWord as isize;
+            c.scope.set(name, mem);
+        }
+        i += 1;
+    }
+}
+
+pub fn compile_ret_struct(c: &mut CodeGen, ret: Operand, size: usize) {
+    assert!(ret.is_mem());
+    let dst = Reg::acc(MemSize::QWord);
+    let mem = c.scope.get("return");
+    asm::code!(c.code, Mov, dst, mem);
+    let src = Reg::src(MemSize::QWord);
+    asm::code!(c.code, Lea, src, ret);
+    c.copy_bytes_inline(dst, src, Reg::Rcx, size);
+}

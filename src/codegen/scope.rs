@@ -94,13 +94,17 @@ impl Scope {
         Operand::Mem(mem)
     }
 
-    pub fn new_temp(&mut self, mem_size: MemSize) -> Mem {
+    pub fn alloc(&mut self, size: usize) -> isize {
         let mut mem = self.ctx.borrow_mut();
-        mem.temp_off -= mem_size as isize;
+        mem.temp_off -= size as isize;
         if mem.temp_off < mem.max_temp_off {
             mem.max_temp_off = mem.temp_off;
         }
-        let offset = mem.local_off + mem.temp_off;
+        mem.local_off + mem.temp_off
+    }
+
+    pub fn new_temp(&mut self, mem_size: MemSize) -> Mem {
+        let offset = self.alloc(mem_size as usize);
         Mem::offset(Reg::Rbp, offset, mem_size)
     }
 
