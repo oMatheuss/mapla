@@ -1,7 +1,7 @@
 use crate::codegen::asm;
 use crate::codegen::asm::{Imm, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use crate::codegen::regs::OperandManager;
-use crate::types::{Type, TypeAnnot};
+use crate::types::{Annotated, Type, TypeAnnot};
 
 use super::CodeGen;
 
@@ -90,8 +90,8 @@ pub fn compile_call(
                 _ => asm::code!(c.code, Mov, reg, arg),
             }
         } else {
-            offset += MemSize::QWord as isize;
             let mem = Mem::offset(Reg::Rsp, offset, mem_size);
+            offset += MemSize::QWord as isize;
             match arg {
                 Operand::Xmm(xmm) => asm::code!(c.code, Movss, mem, xmm),
                 Operand::Reg(reg) => asm::code!(c.code, Mov, mem, reg),
@@ -114,7 +114,11 @@ pub fn compile_call(
     asm::code!(c.code, Call, name);
     release_call_regs(c);
 
-    if annot.is_float() {
+    if annot.type_size() > 8 {
+        let reg = Reg::acc(MemSize::QWord);
+        assert!(c.regs.take(reg), "return register should be available");
+        Operand::Reg(reg)
+    } else if annot.is_float() {
         let xmm = Xmm::xmm0(annot.mem_size());
         assert!(
             c.xmms.take(xmm),
@@ -144,7 +148,11 @@ pub fn compile_args(c: &mut CodeGen, args: &[crate::ast::Argument], fn_annot: &T
     }
     for crate::ast::Argument { name, annot } in args.iter() {
         let mem_size = annot.mem_size();
-        if let Some(reg) = call_regs(i, mem_size) {
+        let is_float = annot.is_float();
+        if is_float && let Some(xmm) = call_xmms(i, mem_size) {
+            let mem = c.scope.new_local(name, mem_size);
+            asm::code!(c.code, Movss, mem, xmm);
+        } else if !is_float && let Some(reg) = call_regs(i, mem_size) {
             let mem = c.scope.new_local(name, mem_size);
             asm::code!(c.code, Mov, mem, reg);
         } else {
