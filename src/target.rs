@@ -2,11 +2,20 @@ use std::str::FromStr;
 
 use crate::error::Error;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum CompilerTarget {
-    #[default]
     Linux,
     Windows,
+}
+
+impl Default for CompilerTarget {
+    fn default() -> Self {
+        #[cfg(any(unix, not(windows)))]
+        return Self::Linux;
+
+        #[cfg(windows)]
+        return Self::Windows;
+    }
 }
 
 impl FromStr for CompilerTarget {

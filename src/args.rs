@@ -3,56 +3,50 @@ use std::path::PathBuf;
 use crate::error::{Error, Result};
 use crate::target::CompilerTarget;
 
-pub struct ParsedArgs {
+#[derive(Debug, Default)]
+pub struct CompilerConfig {
     pub dir: PathBuf,
     pub input: String,
     pub output: Option<String>,
     pub target: CompilerTarget,
 }
 
-pub fn parse_args() -> Result<ParsedArgs> {
+pub fn parse_args() -> Result<CompilerConfig> {
     let mut args = std::env::args();
-    let dir = std::env::current_dir()?;
 
     let mut input = None;
-    let mut output = None;
-    let mut target = CompilerTarget::Linux;
+    let mut config = CompilerConfig::default();
 
+    config.dir = std::env::current_dir()?;
     args.next().expect("first argument should be program path");
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "-o" => {
-                let Some(sout) = args.next() else {
-                    return Error::cli("output path must be informed after -o flag");
-                };
-
-                output = Some(sout);
+            "-o" | "--output" => {
+                config.output = match args.next() {
+                    Some(output) => Some(output),
+                    None => Error::cli("output path must be informed after -o flag")?,
+                }
             }
-            "-t" => {
-                let Some(starget) = args.next() else {
-                    return Error::cli("target must be informed after -t flag");
-                };
-
-                target = starget.parse()?;
+            "-t" | "--target" => {
+                config.target = match args.next() {
+                    Some(target) => target.parse()?,
+                    None => Error::cli("target must be informed after -t flag")?,
+                }
             }
             _ => input = Some(arg),
         }
     }
 
-    let Some(input) = input else {
-        return Error::cli("no input file provided");
+    config.input = match input {
+        Some(input) => input,
+        None => Error::cli("no input file provided")?,
     };
 
-    Ok(ParsedArgs {
-        dir,
-        input,
-        output,
-        target,
-    })
+    Ok(config)
 }
 
-impl ParsedArgs {
+impl CompilerConfig {
     pub fn output_path(&self) -> PathBuf {
         self.output
             .as_ref()
