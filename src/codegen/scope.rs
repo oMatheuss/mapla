@@ -78,23 +78,19 @@ impl Scope {
         self.var.insert(String::from(ident), operand)
     }
 
-    pub fn new_local(&mut self, ident: &str, mem_size: MemSize) -> Operand {
+    pub fn alloc(&mut self, ident: &str, size: usize, mem_size: MemSize) -> Operand {
         let mut mem = self.ctx.borrow_mut();
-        mem.local_off -= mem_size as isize;
+        mem.local_off -= size as isize;
         let mem = Mem::offset(Reg::Rbp, mem.local_off, mem_size);
         self.var.insert(String::from(ident), mem);
         Operand::Mem(mem)
     }
 
-    pub fn new_array(&mut self, ident: &str, size: u32, mem_size: MemSize) -> Operand {
-        let mut mem = self.ctx.borrow_mut();
-        mem.local_off -= mem_size as isize * size as isize;
-        let mem = Mem::offset(Reg::Rbp, mem.local_off, MemSize::QWord);
-        self.var.insert(String::from(ident), mem);
-        Operand::Mem(mem)
+    pub fn new_local(&mut self, ident: &str, mem_size: MemSize) -> Operand {
+        self.alloc(ident, mem_size as usize, mem_size)
     }
 
-    pub fn alloc(&mut self, size: usize) -> isize {
+    pub fn alloc_temp(&mut self, size: usize) -> isize {
         let mut mem = self.ctx.borrow_mut();
         mem.temp_off -= size as isize;
         if mem.temp_off < mem.max_temp_off {
@@ -104,7 +100,7 @@ impl Scope {
     }
 
     pub fn new_temp(&mut self, mem_size: MemSize) -> Mem {
-        let offset = self.alloc(mem_size as usize);
+        let offset = self.alloc_temp(mem_size as usize);
         Mem::offset(Reg::Rbp, offset, mem_size)
     }
 

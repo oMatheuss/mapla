@@ -10,7 +10,7 @@ use crate::ast::{
     Argument, Ast, AstNode, AstRoot, Expression, Identifier, Operator, UnaryOperator, ValueExpr,
 };
 use crate::target::CompilerTarget;
-use crate::types::{Annotated, Type, TypeAnnot};
+use crate::types::{Annotated, Primitive, Type, TypeAnnot, TypeMeta};
 use crate::utils::HexSlice;
 use asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use regs::{OperandManager, RegManager};
@@ -20,12 +20,15 @@ type AsmData = HashMap<Lbl, Vec<u8>>;
 
 impl MemSized for TypeAnnot {
     fn mem_size(&self) -> MemSize {
-        match self.size() {
-            1 => MemSize::Byte,
-            2 => MemSize::Word,
-            4 => MemSize::DWord,
-            8 => MemSize::QWord,
-            _ => MemSize::QWord,
+        match self.meta {
+            TypeMeta::Value => match self.type_size() {
+                1 => MemSize::Byte,
+                2 => MemSize::Word,
+                ..=4 => MemSize::DWord,
+                ..=8 => MemSize::QWord,
+                _ => MemSize::QWord,
+            },
+            TypeMeta::Array(_) | TypeMeta::Pointer(_) => MemSize::QWord,
         }
     }
 }
@@ -171,38 +174,41 @@ fn compile_value(c: &mut CodeGen, value: &ValueExpr) -> Operand {
             true => Operand::Imm(Imm::TRUE),
             false => Operand::Imm(Imm::FALSE),
         },
-        ValueExpr::Identifier(annot, id) => match annot.array {
-            0 => Operand::Mem(c.scope.get(id)),
-            1.. => {
-                let mem = c.scope.get(id);
-                let reg = c.regs.take_any(MemSize::QWord);
-                asm::code!(c.code, Lea, reg, mem);
-                Operand::Reg(reg)
-            }
-        },
+        ValueExpr::Identifier(annot, id) if annot.is_array() => {
+            let mem = c.scope.get(id);
+            let reg = c.regs.take_any(MemSize::QWord);
+            asm::code!(c.code, Lea, reg, mem);
+            Operand::Reg(reg)
+        }
+        ValueExpr::Identifier(.., id) => Operand::Mem(c.scope.get(id)),
     }
 }
 
 fn compile_binop(
     c: &mut CodeGen,
     ope: Operator,
-    lhs: Operand,
-    rhs: Operand,
+    mut lhs: Operand,
+    mut rhs: Operand,
     annot: TypeAnnot,
 ) -> Operand {
-    let (lhs, rhs) = if ope.is_assign() {
-        let rhs = move_operand_to_reg(c, &annot, rhs);
+    if ope.is_assign() {
+        rhs = move_operand_to_reg(c, &annot, rhs);
         assert!(lhs.is_mem());
-
-        (lhs, rhs)
     } else {
-        let lhs = move_operand_to_reg(c, &annot, lhs);
-        (lhs, rhs)
+        lhs = move_operand_to_reg(c, &annot, lhs);
     };
 
-    match annot.is_float() {
-        true => compile_fop(c, ope, lhs, rhs),
-        false => compile_iop(c, ope, lhs, rhs),
+    if annot.is_ptr() {
+        compile_iop(c, ope, lhs, rhs)
+    } else {
+        match annot.base {
+            Type::Primitive(primitive) => match primitive {
+                Primitive::Real => compile_fop(c, ope, lhs, rhs),
+                Primitive::Void => unimplemented!(),
+                _ => compile_iop(c, ope, lhs, rhs),
+            },
+            Type::Custom { .. } => unimplemented!(),
+        }
     }
 }
 
@@ -670,28 +676,30 @@ fn compile_cast(
 }
 
 fn compile_alloc(c: &mut CodeGen, args: Vec<(Operand, &TypeAnnot)>, annot: &TypeAnnot) -> Operand {
-    let base_mem = c.scope.new_temp(annot.mem_size());
-    let base_reg = c.regs.take_any(MemSize::QWord);
-    asm::code!(c.code, Lea, base_reg, base_mem);
+    let base_offset = c.scope.alloc_temp(annot.type_size());
     let mut offset = 0;
     for (operand, annot) in args {
         let operand_reg = move_operand_to_reg(c, annot, operand);
-        let offset_mem = Mem::offset(base_reg, offset, annot.mem_size());
+        let offset_mem = Mem::offset(Reg::Rbp, base_offset + offset, annot.mem_size());
         asm::code!(c.code, Mov, offset_mem, operand_reg);
         c.regs.try_push(operand_reg);
-        offset += annot.size() as isize;
+        offset += annot.type_size() as isize;
     }
-    c.regs.push(base_reg);
-    Operand::Mem(base_mem)
+    Operand::Mem(Mem::offset(Reg::Rbp, base_offset, annot.mem_size()))
+}
+
+fn compile_field(c: &mut CodeGen, value: Operand, offset: usize, annot: &TypeAnnot) -> Operand {
+    let reg = move_operand_to_reg(c, annot, value).expect_reg();
+    Operand::Mem(Mem::offset(reg, offset as isize, annot.mem_size()))
 }
 
 fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
-    let flat_expr = crate::ir::IrExpr::from_expr(expr);
+    let mut flat_expr = crate::ir::IrExpr::from_expr(expr).into_iter().peekable();
     let mut mems = vec![Operand::Imm(Imm::Byte(0)); flat_expr.len()];
     let mut last = 0;
 
     use crate::ir::IrExprOpe::*;
-    for ir in &flat_expr {
+    while let Some(ir) = flat_expr.next() {
         last = ir.id;
         mems[ir.id] = match ir.ope.clone() {
             Value { value } => compile_value(c, &value),
@@ -709,19 +717,17 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
                     CompilerTarget::Windows => windows::compile_call(c, &name, args, &ir.annot),
                 }
             }
-            Index { array, index } => {
-                let array = compile_value(c, &array);
-                compile_index(c, array, mems[index], &ir.annot)
-            }
+            Index { array, index } => compile_index(c, mems[array], mems[index], &ir.annot),
             Cast { value, cast_from } => compile_cast(c, mems[value], &cast_from, &ir.annot),
             Alloc { args } => {
                 let args = args.iter().map(|(id, annot)| (mems[*id], annot)).collect();
                 compile_alloc(c, args, &ir.annot)
             }
+            Field { value, offset } => compile_field(c, mems[value], offset, &ir.annot),
         };
 
-        if !ir.assign {
-            // TODO: register management is a mess, so we allways move to stack
+        if !ir.assign && flat_expr.peek().is_some() {
+            // TODO: register management is a mess, so we always move to stack
             mems[ir.id] = move_operand_to_mem(c, mems[ir.id]);
         }
     }
@@ -733,23 +739,21 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
 fn compile_node(c: &mut CodeGen, node: &AstNode) {
     match node {
         AstNode::Var(annot, ident, expr) => {
-            let local = if annot.array > 0 {
-                let mem_size = annot.clone().deref().mem_size();
-                c.scope.new_array(ident, annot.array, mem_size)
-            } else {
-                let mem_size = annot.mem_size();
-                c.scope.new_local(ident, mem_size)
+            let size = annot.type_size();
+            let local = c.scope.alloc(ident, size, annot.mem_size());
+            let Some(expr) = expr else {
+                return;
             };
-            if let Some(expr) = expr {
-                let result = compile_expr(c, expr);
-                match result {
+            let result = compile_expr(c, expr);
+            match size {
+                ..=8 => match result {
                     Operand::Reg(reg) => {
                         asm::code!(c.code, Mov, local, reg);
                         c.regs.push(reg);
                     }
                     Operand::Xmm(xmm) => {
-                        c.xmms.push(xmm);
                         asm::code!(c.code, Movss, local, xmm);
+                        c.xmms.push(xmm);
                     }
                     Operand::Mem(mem) => {
                         let reg = c.regs.take_any(mem.mem_size());
@@ -761,7 +765,37 @@ fn compile_node(c: &mut CodeGen, node: &AstNode) {
                     Operand::Imm(..) => {
                         asm::code!(c.code, Mov, local, result);
                     }
-                }
+                },
+                9.. => match result {
+                    Operand::Reg(src) => {
+                        // assume src contains a pointer to the struct
+                        let dst = c.regs.take_any(MemSize::QWord);
+                        let aux = c.regs.take_any(MemSize::QWord);
+                        asm::code!(c.code, Lea, dst, local);
+
+                        c.copy_bytes_inline(dst, src, aux, size);
+
+                        c.regs.push(dst);
+                        c.regs.push(src);
+                        c.regs.push(aux);
+                    }
+                    Operand::Mem(ret) => {
+                        // assume ret points to the start of the struct
+                        let dst = c.regs.take_any(MemSize::QWord);
+                        let src = c.regs.take_any(MemSize::QWord);
+                        let aux = c.regs.take_any(MemSize::QWord);
+                        asm::code!(c.code, Lea, dst, local);
+                        asm::code!(c.code, Mov, src, ret);
+
+                        c.copy_bytes_inline(dst, src, aux, size);
+
+                        c.regs.push(dst);
+                        c.regs.push(src);
+                        c.regs.push(aux);
+                        c.regs.try_push(ret.into());
+                    }
+                    Operand::Xmm(..) | Operand::Imm(..) => unimplemented!(),
+                },
             }
         }
         AstNode::If(expr, nodes) => {

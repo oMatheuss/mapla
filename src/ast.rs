@@ -67,11 +67,7 @@ pub enum ValueExpr {
 impl Annotated for ValueExpr {
     fn get_annot(&self) -> TypeAnnot {
         match self {
-            ValueExpr::String(s) => TypeAnnot {
-                base: TypeAnnot::CHAR.base,
-                indir: 1,
-                array: s.len() as u32,
-            },
+            ValueExpr::String(s) => TypeAnnot::new_string(s.len() as u32),
             ValueExpr::Byte(..) => TypeAnnot::BYTE,
             ValueExpr::Int(..) => TypeAnnot::INT,
             ValueExpr::Float(..) => TypeAnnot::REAL,
@@ -168,14 +164,14 @@ impl Annotated for UnaryOp {
 
 #[derive(Debug)]
 pub struct Indexing {
-    array: ValueExpr,
+    array: Box<Expression>,
     index: Box<Expression>,
     annot: TypeAnnot,
 }
 
 impl Indexing {
     #[inline]
-    pub fn array(&self) -> &ValueExpr {
+    pub fn array(&self) -> &Expression {
         &self.array
     }
 
@@ -230,6 +226,31 @@ impl Annotated for AllocType {
 }
 
 #[derive(Debug)]
+pub struct FieldAccess {
+    value: Box<Expression>,
+    offset: usize,
+    annot: TypeAnnot,
+}
+
+impl FieldAccess {
+    #[inline]
+    pub fn value(&self) -> &Expression {
+        &self.value
+    }
+
+    #[inline]
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+}
+
+impl Annotated for FieldAccess {
+    fn get_annot(&self) -> TypeAnnot {
+        self.annot.clone()
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Value(ValueExpr),
     UnaOp(UnaryOp),
@@ -238,6 +259,7 @@ pub enum Expression {
     Index(Indexing),
     Cast(TypeCast),
     Alloc(AllocType),
+    Field(FieldAccess),
 }
 
 impl From<ValueExpr> for Expression {
@@ -273,6 +295,12 @@ impl From<Indexing> for Expression {
 impl From<AllocType> for Expression {
     fn from(value: AllocType) -> Self {
         Self::Alloc(value)
+    }
+}
+
+impl From<FieldAccess> for Expression {
+    fn from(value: FieldAccess) -> Self {
+        Self::Field(value)
     }
 }
 
@@ -335,9 +363,9 @@ impl Expression {
     }
 
     #[inline]
-    pub fn index(array: ValueExpr, index: Expression, annot: TypeAnnot) -> Self {
+    pub fn index(array: Expression, index: Expression, annot: TypeAnnot) -> Self {
         Self::Index(Indexing {
-            array,
+            array: Box::new(array),
             index: Box::new(index),
             annot,
         })
@@ -354,6 +382,15 @@ impl Expression {
     #[inline]
     pub fn alloc(args: Vec<Expression>, annot: TypeAnnot) -> Self {
         Self::Alloc(AllocType { args, annot })
+    }
+
+    #[inline]
+    pub fn field(expr: Expression, offset: usize, annot: TypeAnnot) -> Self {
+        Self::Field(FieldAccess {
+            value: Box::new(expr),
+            offset,
+            annot,
+        })
     }
 
     #[inline]
@@ -382,6 +419,7 @@ impl Annotated for Expression {
             Expression::Index(index) => index.get_annot(),
             Expression::Cast(cast) => cast.get_annot(),
             Expression::Alloc(alloc) => alloc.get_annot(),
+            Expression::Field(field) => field.get_annot(),
         }
     }
 }

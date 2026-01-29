@@ -21,7 +21,7 @@ pub enum IrExprOpe {
         args: Vec<(usize, TypeAnnot)>,
     },
     Index {
-        array: ast::ValueExpr,
+        array: usize,
         index: usize,
     },
     Cast {
@@ -30,6 +30,10 @@ pub enum IrExprOpe {
     },
     Alloc {
         args: Vec<(usize, TypeAnnot)>,
+    },
+    Field {
+        value: usize,
+        offset: usize,
     },
 }
 
@@ -75,7 +79,7 @@ fn parse_expr(expr: &ast::Expression, exprs: &mut Vec<IrExpr>, max: usize, assig
                 operator: unary.operator(),
                 operand: max + 1,
             };
-            IrExpr::new(id, unary.get_annot(), ope, false)
+            IrExpr::new(id, unary.get_annot(), ope, assign)
         }
         BinOp(binary) => {
             let operator = binary.operator();
@@ -105,8 +109,9 @@ fn parse_expr(expr: &ast::Expression, exprs: &mut Vec<IrExpr>, max: usize, assig
         }
         Index(index) => {
             parse_expr(index.index(), exprs, max + 1, false);
+            parse_expr(index.array(), exprs, max + 2, false);
             let ope = IrExprOpe::Index {
-                array: index.array().clone(),
+                array: max + 2,
                 index: max + 1,
             };
             IrExpr::new(id, index.get_annot(), ope, assign)
@@ -118,7 +123,7 @@ fn parse_expr(expr: &ast::Expression, exprs: &mut Vec<IrExpr>, max: usize, assig
                 value: max + 1,
                 cast_from: value.get_annot(),
             };
-            IrExpr::new(id, cast.get_annot(), ope, false)
+            IrExpr::new(id, cast.get_annot(), ope, assign)
         }
         Alloc(alloc) => {
             let mut args = Vec::new();
@@ -130,6 +135,15 @@ fn parse_expr(expr: &ast::Expression, exprs: &mut Vec<IrExpr>, max: usize, assig
             }
             let ope = IrExprOpe::Alloc { args };
             IrExpr::new(id, alloc.get_annot(), ope, false)
+        }
+        Field(field) => {
+            let value = field.value();
+            parse_expr(value, exprs, max + 1, false);
+            let ope = IrExprOpe::Field {
+                value: max + 1,
+                offset: field.offset(),
+            };
+            IrExpr::new(id, field.get_annot(), ope, assign)
         }
     };
 

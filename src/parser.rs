@@ -5,7 +5,7 @@ use crate::error::{Error, PositionResult, Result};
 use crate::position::Position;
 use crate::source::SourceManager;
 use crate::token::{Token, TokenStream};
-use crate::types::{Annotated, TypeAnnot};
+use crate::types::{Annotated, Primitive, Type, TypeAnnot};
 
 #[derive(Debug, Clone)]
 enum SymbolKind {
@@ -224,26 +224,6 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            Token::Identifier(id) if matches!(ts.peek(), Some(Token::OpenBracket)) => {
-                self.next_or_err(ts)?; // discard open bracket
-                let pos = ts.position;
-                let Some(sym) = self.symbols.find(id).cloned() else {
-                    Error::syntatic("symbol not found in scope", pos)?
-                };
-                let annot = sym.annot;
-                let index = self.parse_expr(ts, 1)?;
-                if !index.get_annot().is_int() {
-                    Error::syntatic("array index should be int", ts.position)?
-                }
-                let Token::CloseBracket = self.next_or_err(ts)? else {
-                    Error::syntatic("expected close bracket", ts.position)?
-                };
-                if !annot.is_ptr() {
-                    Error::syntatic("indexing can only be applied to arrays and pointers", pos)?
-                }
-                let array = ValueExpr::Identifier(annot.clone(), id.into());
-                Expression::index(array, index, annot.deref())
-            }
             Token::Identifier(id) => {
                 let Some(symbol) = self.symbols.find(id) else {
                     Error::syntatic("symbol not found in scope", ts.position)?
@@ -350,6 +330,21 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn check_field(field: &str, sym: &Symbol, pos: Position) -> Result<(usize, TypeAnnot)> {
+        let SymbolKind::Type(fields) = &sym.kind else {
+            Error::syntatic("type is not a struct", pos)?
+        };
+        let Some(field) = fields.iter().find(|x| x.name.eq(field)) else {
+            Error::syntatic("field not found in struct", pos)?
+        };
+        let offset = fields
+            .iter()
+            .take_while(|x| !x.name.eq(&field.name))
+            .fold(0, |acc, curr| acc + curr.type_size());
+
+        Ok((offset, field.get_annot()))
+    }
+
     fn parse_expr(&self, ts: &mut TokenStream, min_prec: u8) -> Result<Expression> {
         let mut lhs = match ts.peek_unaop() {
             Some(op) => {
@@ -363,31 +358,62 @@ impl<'a> Parser<'a> {
             None => self.parse_atom(ts)?,
         };
 
-        if let Some(Token::As) = ts.peek() {
-            self.next_or_err(ts)?;
-            let target = self.parse_annot(ts)?;
-            Parser::check_cast(&lhs, &target, ts.position)?;
-
-            lhs = Expression::cast(lhs, target);
-        }
-
         loop {
-            let Some(op) = ts.peek_binop() else {
+            if let Some(op) = ts.peek_binop() {
+                let prec = op.precedence();
+                if prec < min_prec {
+                    break;
+                }
+                let min_prec = if op.is_assign() { prec } else { prec + 1 };
+
+                ts.next(); // consume operator
+
+                let rhs = self.parse_expr(ts, min_prec)?;
+                let result = Parser::check_binexpr(op, &lhs, &rhs, ts.position)?;
+
+                lhs = Expression::bin_op(op, lhs, rhs, result);
+            } else if let Some(Token::Dot) = ts.peek() {
+                ts.next(); // consume dot
+
+                let dot_pos = ts.position;
+                let Token::Identifier(field) = self.next_or_err(ts)? else {
+                    Error::syntatic("expected field identifier", dot_pos)?
+                };
+
+                if lhs.is_primitive() {
+                    Error::syntatic("cannot member access into primitive type", dot_pos)?
+                }
+                let Some(sym) = self.symbols.find(&lhs.type_name()) else {
+                    Error::syntatic("symbol not found in scope", dot_pos)?
+                };
+
+                let (offset, annot) = Parser::check_field(field, sym, dot_pos)?;
+                lhs = Expression::field(lhs, offset, annot);
+            } else if let Some(Token::OpenBracket) = ts.peek() {
+                ts.next(); // consume open bracket
+
+                let pos = ts.position;
+                let index = self.parse_expr(ts, 1)?;
+                if !index.get_annot().is_int() {
+                    Error::syntatic("array index should be int", ts.position)?
+                }
+                let Token::CloseBracket = self.next_or_err(ts)? else {
+                    Error::syntatic("expected close bracket", ts.position)?
+                };
+                let annot = lhs.get_annot();
+                if !annot.is_ptr() {
+                    Error::syntatic("indexing can only be applied to arrays and pointers", pos)?
+                }
+                lhs = Expression::index(lhs, index, annot.deref());
+            } else if let Some(Token::As) = ts.peek() {
+                self.next_or_err(ts)?;
+                let target = self.parse_annot(ts)?;
+                Parser::check_cast(&lhs, &target, ts.position)?;
+
+                lhs = Expression::cast(lhs, target);
+            } else {
                 break;
             };
-
-            let prec = op.precedence();
-            if prec < min_prec {
-                break;
-            }
-            let min_prec = if op.is_assign() { prec } else { prec + 1 };
-
-            ts.next(); // consume operator
-
-            let rhs = self.parse_expr(ts, min_prec)?;
-            let result = Parser::check_binexpr(op, &lhs, &rhs, ts.position)?;
-
-            lhs = Expression::bin_op(op, lhs, rhs, result);
         }
 
         Ok(lhs)
@@ -445,13 +471,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_annot(&self, ts: &mut TokenStream) -> Result<TypeAnnot> {
-        let mut ty = match self.next_or_err(ts)? {
-            Token::Int => TypeAnnot::INT,
-            Token::Real => TypeAnnot::REAL,
-            Token::Char => TypeAnnot::CHAR,
-            Token::Byte => TypeAnnot::BYTE,
-            Token::Bool => TypeAnnot::BOOL,
-            Token::Void => TypeAnnot::VOID,
+        let base = match self.next_or_err(ts)? {
+            Token::Int => Type::Primitive(Primitive::Int),
+            Token::Real => Type::Primitive(Primitive::Real),
+            Token::Char => Type::Primitive(Primitive::Char),
+            Token::Byte => Type::Primitive(Primitive::Byte),
+            Token::Bool => Type::Primitive(Primitive::Bool),
+            Token::Void => Type::Primitive(Primitive::Void),
             Token::Identifier(name) => {
                 let Some(symbol) = self.symbols.find(name) else {
                     Error::syntatic("symbol not defined", ts.position)?
@@ -459,11 +485,11 @@ impl<'a> Parser<'a> {
                 let SymbolKind::Type(..) = symbol.kind else {
                     Error::syntatic("expected type", ts.position)?
                 };
-                symbol.annot.clone()
+                Type::new_custom(name.to_string(), symbol.annot.type_size())
             }
             _ => Error::syntatic("expected type annotation", ts.position)?,
         };
-        match ts.peek() {
+        let annot = match ts.peek() {
             Some(Token::OpenBracket) => {
                 self.next_or_err(ts)?; // discard open bracket
                 let ValueExpr::Int(size) = self.parse_value(ts)? else {
@@ -472,21 +498,20 @@ impl<'a> Parser<'a> {
                 let Token::CloseBracket = self.next_or_err(ts)? else {
                     Error::syntatic("expected close bracket", ts.position)?
                 };
-                ty.indir = 1;
-                ty.array = size as u32;
+                TypeAnnot::new_array(base, size as u32)
             }
             Some(Token::Mul) => {
                 self.next_or_err(ts)?; // discard asterisk
-                let mut indirection = 1;
+                let mut indir = 1;
                 while let Some(Token::Mul) = ts.peek() {
                     self.next_or_err(ts)?; // discard asterisk
-                    indirection += 1;
+                    indir += 1;
                 }
-                ty.indir = indirection;
+                TypeAnnot::new_ptr(base, indir)
             }
-            _ => {}
-        }
-        Ok(ty)
+            _ => TypeAnnot::new_value(base),
+        };
+        Ok(annot)
     }
 
     fn consume_var(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
@@ -735,9 +760,9 @@ impl<'a> Parser<'a> {
         let fields = self.parse_args(ts, false)?;
         self.consume_semi(ts)?;
 
-        let size = fields.iter().fold(0, |acc, f| acc + f.size());
+        let size = fields.iter().fold(0, |acc, f| acc + f.type_size());
 
-        let annot = TypeAnnot::new(name.to_owned(), size);
+        let annot = TypeAnnot::new_value(Type::new_custom(name.to_owned(), size));
         self.symbols.set(name, Symbol::new_type(pos, fields, annot));
 
         Ok(())
