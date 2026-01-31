@@ -34,6 +34,7 @@ pub enum IrExprOpe {
     Field {
         value: usize,
         offset: usize,
+        is_ref: bool,
     },
 }
 
@@ -142,6 +143,7 @@ fn parse_expr(expr: &ast::Expression, exprs: &mut Vec<IrExpr>, max: usize, assig
             let ope = IrExprOpe::Field {
                 value: max + 1,
                 offset: field.offset(),
+                is_ref: field.is_ref(),
             };
             IrExpr::new(id, field.get_annot(), ope, assign)
         }

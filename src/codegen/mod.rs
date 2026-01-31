@@ -690,9 +690,21 @@ fn compile_alloc(c: &mut CodeGen, args: Vec<(Operand, &TypeAnnot)>, annot: &Type
     Operand::Mem(Mem::offset(Reg::Rbp, base_offset, annot.mem_size()))
 }
 
-fn compile_field(c: &mut CodeGen, value: Operand, offset: usize, annot: &TypeAnnot) -> Operand {
-    let reg = move_operand_to_reg(c, annot, value).expect_reg();
-    Operand::Mem(Mem::offset(reg, offset as isize, annot.mem_size()))
+fn compile_field(
+    c: &mut CodeGen,
+    value: Operand,
+    offset: usize,
+    is_ref: bool,
+    annot: &TypeAnnot,
+) -> Operand {
+    let base = if is_ref {
+        move_operand_to_reg(c, annot, value).expect_reg()
+    } else {
+        let reg = c.regs.take_any(MemSize::QWord);
+        asm::code!(c.code, Lea, reg, value);
+        reg
+    };
+    Operand::Mem(Mem::offset(base, offset as isize, annot.mem_size()))
 }
 
 fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
@@ -724,7 +736,11 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
                 let args = args.iter().map(|(id, annot)| (mems[*id], annot)).collect();
                 compile_alloc(c, args, &curr.annot)
             }
-            Field { value, offset } => compile_field(c, mems[value], offset, &curr.annot),
+            Field {
+                value,
+                offset,
+                is_ref,
+            } => compile_field(c, mems[value], offset, is_ref, &curr.annot),
         };
         match expr_ir.next() {
             Some(next) => {

@@ -330,13 +330,25 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn check_field(field: &str, sym: &Symbol, pos: Position) -> Result<(usize, TypeAnnot)> {
+    fn check_field(
+        field: &str,
+        sym: &Symbol,
+        lhs: &TypeAnnot,
+        pos: Position,
+    ) -> Result<(usize, TypeAnnot)> {
+        if lhs.is_primitive() {
+            Error::syntatic("cannot member access into primitive type", pos)?
+        }
         let SymbolKind::Type(fields) = &sym.kind else {
             Error::syntatic("type is not a struct", pos)?
         };
         let Some(field) = fields.iter().find(|x| x.name.eq(field)) else {
-            Error::syntatic("field not found in struct", pos)?
+            let message = format!("field `{field}` not found in struct `{}`", lhs.type_name());
+            Error::syntatic(&message, pos)?
         };
+        if lhs.meta.indirection() > 1 {
+            Error::syntatic("cannnot member access into pointer-to-pointer", pos)?
+        }
         let offset = fields
             .iter()
             .take_while(|x| !x.name.eq(&field.name))
@@ -380,15 +392,13 @@ impl<'a> Parser<'a> {
                     Error::syntatic("expected field identifier", dot_pos)?
                 };
 
-                if lhs.is_primitive() {
-                    Error::syntatic("cannot member access into primitive type", dot_pos)?
-                }
-                let Some(sym) = self.symbols.find(&lhs.type_name()) else {
+                let lhs_annot = lhs.get_annot();
+                let Some(sym) = self.symbols.find(&lhs_annot.type_name()) else {
                     Error::syntatic("symbol not found in scope", dot_pos)?
                 };
 
-                let (offset, annot) = Parser::check_field(field, sym, dot_pos)?;
-                lhs = Expression::field(lhs, offset, annot);
+                let (offset, annot) = Parser::check_field(field, sym, &lhs_annot, dot_pos)?;
+                lhs = Expression::field(lhs, offset, annot, lhs_annot.is_ref());
             } else if let Some(Token::OpenBracket) = ts.peek() {
                 ts.next(); // consume open bracket
 

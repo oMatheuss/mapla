@@ -230,6 +230,7 @@ pub struct FieldAccess {
     value: Box<Expression>,
     offset: usize,
     annot: TypeAnnot,
+    is_ref: bool,
 }
 
 impl FieldAccess {
@@ -241,6 +242,11 @@ impl FieldAccess {
     #[inline]
     pub fn offset(&self) -> usize {
         self.offset
+    }
+
+    #[inline]
+    pub fn is_ref(&self) -> bool {
+        self.is_ref
     }
 }
 
@@ -385,11 +391,12 @@ impl Expression {
     }
 
     #[inline]
-    pub fn field(expr: Expression, offset: usize, annot: TypeAnnot) -> Self {
+    pub fn field(expr: Expression, offset: usize, annot: TypeAnnot, is_ref: bool) -> Self {
         Self::Field(FieldAccess {
             value: Box::new(expr),
             offset,
             annot,
+            is_ref,
         })
     }
 
