@@ -694,16 +694,15 @@ fn compile_field(c: &mut CodeGen, value: Operand, offset: usize, annot: &TypeAnn
 }
 
 fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
-    let mut flat_expr = crate::ir::IrExpr::from_expr(expr).into_iter().peekable();
-    let mut mems = vec![Operand::Imm(Imm::Byte(0)); flat_expr.len()];
-    let mut last = 0;
+    let mut expr_ir = crate::ir::IrExpr::from_expr(expr).into_iter();
+    let mut mems = vec![Operand::Imm(Imm::Byte(0)); expr_ir.len()];
+    let mut curr = expr_ir.next().unwrap();
 
     use crate::ir::IrExprOpe::*;
-    while let Some(ir) = flat_expr.next() {
-        last = ir.id;
-        mems[ir.id] = match ir.ope.clone() {
+    loop {
+        mems[curr.id] = match curr.ope {
             Value { value } => compile_value(c, &value),
-            UnaOp { operator, operand } => compile_unaop(c, operator, mems[operand], &ir.annot),
+            UnaOp { operator, operand } => compile_unaop(c, operator, mems[operand], &curr.annot),
             BinOp {
                 operator,
                 lhs,
@@ -713,27 +712,32 @@ fn compile_expr(c: &mut CodeGen, expr: &Expression) -> Operand {
             Func { name, args } => {
                 let args = args.iter().map(|(id, annot)| (mems[*id], annot)).collect();
                 match c.target {
-                    CompilerTarget::Linux => linux::compile_call(c, &name, args, &ir.annot),
-                    CompilerTarget::Windows => windows::compile_call(c, &name, args, &ir.annot),
+                    CompilerTarget::Linux => linux::compile_call(c, &name, args, &curr.annot),
+                    CompilerTarget::Windows => windows::compile_call(c, &name, args, &curr.annot),
                 }
             }
-            Index { array, index } => compile_index(c, mems[array], mems[index], &ir.annot),
-            Cast { value, cast_from } => compile_cast(c, mems[value], &cast_from, &ir.annot),
+            Index { array, index } => compile_index(c, mems[array], mems[index], &curr.annot),
+            Cast { value, cast_from } => compile_cast(c, mems[value], &cast_from, &curr.annot),
             Alloc { args } => {
                 let args = args.iter().map(|(id, annot)| (mems[*id], annot)).collect();
-                compile_alloc(c, args, &ir.annot)
+                compile_alloc(c, args, &curr.annot)
             }
-            Field { value, offset } => compile_field(c, mems[value], offset, &ir.annot),
+            Field { value, offset } => compile_field(c, mems[value], offset, &curr.annot),
         };
-
-        if !ir.assign && flat_expr.peek().is_some() {
-            // TODO: register management is a mess, so we always move to stack
-            mems[ir.id] = move_operand_to_mem(c, mems[ir.id]);
-        }
+        match expr_ir.next() {
+            Some(next) => {
+                if !curr.assign {
+                    // TODO: register management is a mess, so we always move to stack
+                    mems[curr.id] = move_operand_to_mem(c, mems[curr.id]);
+                }
+                curr = next;
+            }
+            None => break,
+        };
     }
 
     c.scope.reset_temps();
-    return mems[last];
+    return mems[curr.id];
 }
 
 fn compile_node(c: &mut CodeGen, node: &AstNode) {
