@@ -322,7 +322,7 @@ impl<'a> Parser<'a> {
 
         if annot.is_number() && target.is_number() {
             Ok(())
-        } else if annot.is_void_ptr() && target.is_ptr() {
+        } else if annot.is_void_ptr() && target.is_ptr() || annot.is_ptr() && target.is_void_ptr() {
             Ok(())
         } else {
             let msg = format!("cannot cast from {annot} to {target}");

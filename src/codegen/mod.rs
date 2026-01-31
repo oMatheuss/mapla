@@ -668,7 +668,9 @@ fn compile_cast(
             }
             Operand::Xmm(..) => unimplemented!(),
         }
-    } else if cast_from.is_void_ptr() && cast_to.is_ptr() {
+    } else if cast_from.is_void_ptr() || cast_to.is_void_ptr() {
+        // assuming the size is correct, anything can be a pointer
+        assert!(operand.mem_size() == MemSize::QWord);
         operand
     } else {
         todo!("conversion between {cast_from} to {cast_to} not implemented yet");
