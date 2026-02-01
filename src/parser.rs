@@ -747,7 +747,7 @@ impl<'a> Parser<'a> {
         AstRoot::ExternFunc(name.into(), args, annot).ok()
     }
 
-    fn consume_use(&mut self, ts: &mut TokenStream) -> Result<Vec<AstRoot>> {
+    fn consume_import(&mut self, ts: &mut TokenStream) -> Result<Vec<AstRoot>> {
         ts.next(); // discard use token
         let Token::StrLiteral(path) = self.next_or_err(ts)? else {
             Error::syntatic("expected identifier", ts.position)?
@@ -833,8 +833,8 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            if let Token::Use = token {
-                let mut other = self.consume_use(ts)?;
+            if let Token::Import = token {
+                let mut other = self.consume_import(ts)?;
                 nodes.append(&mut other);
                 continue;
             }
