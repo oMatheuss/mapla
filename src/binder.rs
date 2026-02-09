@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{Ast, AstNode, AstRoot, Expression, ValueExpr};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
 use crate::symbols::{FuncDef, GlobalVar, SymbolTable, TypeDef};
@@ -79,7 +79,7 @@ impl Binder {
         for root in ast.nodes {
             match root {
                 AstRoot::Func(typ, id, args, ast_nodes) => {
-                    let body = FuncBinder::new(self).bind_func(&args, ast_nodes);
+                    let body = FuncBinder::new(self).bind_func(&args, ast_nodes)?;
                     self.functions.push(IrFunc {
                         name: id.name,
                         namespace: ast.namespace.clone(),
@@ -187,13 +187,13 @@ impl<'a> FuncBinder<'a> {
         self.labels
     }
 
-    fn bind_value(&mut self, value: ValueExpr) -> IrArg {
-        match value {
+    fn bind_value(&mut self, value: ValueExpr) -> Result<IrArg> {
+        let value = match value {
             ValueExpr::Id(name) => match self.scope.get(&name) {
                 Some(var) => var,
                 None => match self.binder.globals.get_var(&name, "global").cloned() {
                     Some(sym) => IrArg::Global { name, typ: sym.typ },
-                    None => todo!("Symbol not found on scope"),
+                    None => Error::syntatic("symbol not found in scope", Position::default())?,
                 },
             },
             ValueExpr::String(s) => {
@@ -205,36 +205,36 @@ impl<'a> FuncBinder<'a> {
             ValueExpr::Int(i) => IrLiteral::Int(i).into(),
             ValueExpr::Float(f) => IrLiteral::Float(f).into(),
             ValueExpr::Bool(b) => IrLiteral::Bool(b).into(),
-        }
+        };
+        Ok(value)
     }
 
-    fn bind_expr(&mut self, expr: Expression) -> Type {
+    fn bind_expr(&mut self, expr: Expression) -> Result<Type> {
         match expr {
             Expression::Value { value } => {
-                let value = self.bind_value(value);
+                let value = self.bind_value(value)?;
                 let res = value.get_type();
                 self.nodes.push(IrNode::Load { value });
-                res
+                Ok(res)
             }
             Expression::UnaOp { operator, operand } => {
-                let operand = self.bind_expr(*operand);
-                let typ = TypeCheck::check_unaexpr(operator, operand, Position::default()).unwrap();
+                let operand = self.bind_expr(*operand)?;
+                let typ = TypeCheck::check_unaexpr(operator, operand, Position::default())?;
                 let res = typ.clone();
                 self.nodes.push(IrNode::UnaOp { ope: operator, typ });
-                res
+                Ok(res)
             }
             Expression::BinOp { operator, lhs, rhs } => {
-                let rhs = self.bind_expr(*rhs);
+                let rhs = self.bind_expr(*rhs)?;
                 let ope_type = rhs.clone();
-                let lhs = self.bind_expr(*lhs);
-                let typ =
-                    TypeCheck::check_binexpr(operator, lhs, rhs, Position::default()).unwrap();
+                let lhs = self.bind_expr(*lhs)?;
+                let typ = TypeCheck::check_binexpr(operator, lhs, rhs, Position::default())?;
                 let res = typ.clone();
                 self.nodes.push(IrNode::BinOp {
                     ope: operator,
                     typ: ope_type,
                 });
-                res
+                Ok(res)
             }
             Expression::Call { name, args } => {
                 let func = self
@@ -244,34 +244,34 @@ impl<'a> FuncBinder<'a> {
                     .cloned()
                     .unwrap();
                 for arg in args {
-                    self.bind_expr(arg);
+                    self.bind_expr(arg)?;
                 }
                 let args = func.args;
                 let ret = func.ret.clone();
                 self.nodes.push(IrNode::Call { name, args, ret });
-                func.ret
+                Ok(func.ret)
             }
             Expression::Index { array, index } => {
-                let array = self.bind_expr(*array);
-                let index = self.bind_expr(*index);
-                let typ = TypeCheck::check_index(array, index, Position::default()).unwrap();
+                let array = self.bind_expr(*array)?;
+                let index = self.bind_expr(*index)?;
+                let typ = TypeCheck::check_index(array, index, Position::default())?;
                 self.nodes.push(IrNode::Index { typ: typ.clone() });
-                typ
+                Ok(typ)
             }
             Expression::Cast { value, as_type } => {
-                let from = self.bind_expr(*value);
+                let from = self.bind_expr(*value)?;
                 let to = as_type.clone();
-                TypeCheck::check_cast(&from, &to, Position::default()).unwrap();
+                TypeCheck::check_cast(&from, &to, Position::default())?;
                 self.nodes.push(IrNode::Cast { from, to });
-                as_type
+                Ok(as_type)
             }
         }
     }
 
-    fn bind_node(&mut self, node: AstNode) {
+    fn bind_node(&mut self, node: AstNode) -> Result<()> {
         match node {
             AstNode::TypedVar(typ, name, Some(expr)) => {
-                self.bind_expr(expr);
+                self.bind_expr(expr)?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
             }
@@ -280,7 +280,7 @@ impl<'a> FuncBinder<'a> {
                 self.nodes.push(IrNode::Alloc { index, typ });
             }
             AstNode::Var(name, expr) => {
-                let typ = self.bind_expr(expr);
+                let typ = self.bind_expr(expr)?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
             }
@@ -288,10 +288,10 @@ impl<'a> FuncBinder<'a> {
             AstNode::If(expr, nodes) => {
                 self.scope.enter();
                 let label = self.new_label();
-                self.bind_expr(expr);
+                self.bind_expr(expr)?;
                 self.nodes.push(IrNode::JmpFalse { label });
                 for node in nodes {
-                    self.bind_node(node);
+                    self.bind_node(node)?;
                 }
                 self.nodes.push(IrNode::Label { label });
                 self.scope.exit();
@@ -301,10 +301,10 @@ impl<'a> FuncBinder<'a> {
                 let start = self.new_label();
                 let end = self.new_label();
                 self.nodes.push(IrNode::Label { label: start });
-                self.bind_expr(expr);
+                self.bind_expr(expr)?;
                 self.nodes.push(IrNode::JmpFalse { label: end });
                 for node in nodes {
-                    self.bind_node(node);
+                    self.bind_node(node)?;
                 }
                 self.nodes.push(IrNode::Jmp { label: start });
                 self.nodes.push(IrNode::Label { label: end });
@@ -316,7 +316,7 @@ impl<'a> FuncBinder<'a> {
                 let end = self.new_label();
                 let typ = Type::Int;
                 let expr_start = match expr_start {
-                    Some(expr_start) => self.bind_value(expr_start),
+                    Some(expr_start) => self.bind_value(expr_start)?,
                     None => IrLiteral::Int(0).into(),
                 };
                 self.nodes.push(IrNode::Load { value: expr_start });
@@ -324,14 +324,14 @@ impl<'a> FuncBinder<'a> {
                 let counter = IrArg::var(index, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
                 self.nodes.push(IrNode::Label { label: start });
-                let expr_end = self.bind_value(expr_end);
+                let expr_end = self.bind_value(expr_end)?;
                 self.nodes.push(IrNode::Load {
                     value: counter.clone(),
                 });
                 self.nodes.push(IrNode::Load { value: expr_end });
                 self.nodes.push(IrNode::JmpEq { label: end });
                 for node in nodes {
-                    self.bind_node(node);
+                    self.bind_node(node)?;
                 }
                 self.nodes.push(IrNode::Load { value: counter });
                 self.nodes.push(IrNode::Inc);
@@ -340,24 +340,25 @@ impl<'a> FuncBinder<'a> {
                 self.scope.exit();
             }
             AstNode::Expr(expr) => {
-                self.bind_expr(expr);
+                self.bind_expr(expr)?;
                 self.nodes.push(IrNode::Pop);
             }
             AstNode::Ret(expr) => {
-                let typ = self.bind_expr(expr);
+                let typ = self.bind_expr(expr)?;
                 self.nodes.push(IrNode::Return { typ });
             }
         };
+        Ok(())
     }
 
-    fn bind_func(mut self, args: &Vec<Argument>, nodes: Vec<AstNode>) -> Vec<IrNode> {
+    fn bind_func(mut self, args: &Vec<Argument>, nodes: Vec<AstNode>) -> Result<Vec<IrNode>> {
         self.scope.enter();
         for Argument { name, arg_type } in args.iter() {
             self.scope.set(name.clone(), arg_type.clone());
         }
         for node in nodes {
-            self.bind_node(node);
+            self.bind_node(node)?;
         }
-        self.nodes
+        Ok(self.nodes)
     }
 }
