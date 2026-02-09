@@ -1,249 +1,176 @@
-#![allow(dead_code)]
+use crate::ast::{BinOpe, UnaOpe};
+use crate::error::{Error, Result};
+use crate::position::Position;
 
-use std::borrow::Cow;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Primitive {
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum Type {
     Int,
     Real,
     Byte,
     Char,
     Bool,
     Void,
-}
-
-impl std::fmt::Display for Primitive {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Primitive::Int => write!(f, "int"),
-            Primitive::Real => write!(f, "real"),
-            Primitive::Byte => write!(f, "byte"),
-            Primitive::Char => write!(f, "char"),
-            Primitive::Bool => write!(f, "bool"),
-            Primitive::Void => write!(f, "void"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Type {
-    Primitive(Primitive),
-    Custom {
-        name: Cow<'static, str>,
-        size: usize,
-    },
+    Pointer(Box<Type>),
+    Array(Box<Type>, u32),
+    Custom(String),
 }
 
 impl Type {
-    pub fn new_custom(name: impl Into<std::borrow::Cow<'static, str>>, size: usize) -> Self {
-        Self::Custom {
-            name: name.into(),
-            size,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum TypeMeta {
-    Value,
-    Array(u32),
-    Pointer(u8),
-}
-
-impl TypeMeta {
-    pub fn is_value(&self) -> bool {
-        matches!(self, TypeMeta::Value)
-    }
-
-    pub fn is_ptr(&self) -> bool {
-        matches!(self, TypeMeta::Array(..) | TypeMeta::Pointer(..))
-    }
-
-    pub fn is_array(&self) -> bool {
-        matches!(self, TypeMeta::Array(..))
-    }
-
-    pub fn indirection(&self) -> u8 {
-        match self {
-            TypeMeta::Value => 0,
-            TypeMeta::Array(_) => 1,
-            TypeMeta::Pointer(p) => *p,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TypeAnnot {
-    pub base: Type,
-    pub meta: TypeMeta,
-}
-
-impl PartialEq for TypeAnnot {
-    fn eq(&self, other: &Self) -> bool {
-        self.base == other.base && self.meta.indirection() == other.meta.indirection()
-        // && self.array == other.array
-    }
-}
-
-impl std::fmt::Display for TypeAnnot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match &self.base {
-            Type::Primitive(p) => &p.to_string(),
-            Type::Custom { name, .. } => name.as_ref(),
-        };
-        let indir = self.meta.indirection() as usize;
-        write!(f, "{}{e:*>w$}", name, e = "", w = indir)
-    }
-}
-
-impl TypeAnnot {
-    pub const INT: Self = TypeAnnot::new_const(Primitive::Int);
-    pub const REAL: Self = TypeAnnot::new_const(Primitive::Real);
-    pub const BYTE: Self = TypeAnnot::new_const(Primitive::Byte);
-    pub const CHAR: Self = TypeAnnot::new_const(Primitive::Char);
-    pub const BOOL: Self = TypeAnnot::new_const(Primitive::Bool);
-    pub const VOID: Self = TypeAnnot::new_const(Primitive::Void);
-
-    const fn new_const(base: Primitive) -> Self {
-        TypeAnnot {
-            base: Type::Primitive(base),
-            meta: TypeMeta::Value,
-        }
-    }
-
-    pub const fn new_value(base: Type) -> Self {
-        TypeAnnot {
-            base,
-            meta: TypeMeta::Value,
-        }
-    }
-
-    pub const fn new_array(base: Type, size: u32) -> Self {
-        TypeAnnot {
-            base,
-            meta: TypeMeta::Array(size),
-        }
-    }
-
-    pub const fn new_ptr(base: Type, indir: u8) -> Self {
-        TypeAnnot {
-            base,
-            meta: TypeMeta::Pointer(indir),
-        }
-    }
-
-    pub const fn new_string(size: u32) -> Self {
-        TypeAnnot {
-            base: Type::Primitive(Primitive::Char),
-            meta: TypeMeta::Array(size),
-        }
-    }
-
-    pub fn is_bool(&self) -> bool {
-        *self == TypeAnnot::BOOL
-    }
-
-    pub fn is_byte(&self) -> bool {
-        *self == TypeAnnot::BYTE
-    }
-
-    pub fn is_number(&self) -> bool {
-        *self == TypeAnnot::INT || *self == TypeAnnot::REAL
-    }
-
-    pub fn is_int(&self) -> bool {
-        *self == TypeAnnot::INT
-    }
-
-    pub fn is_float(&self) -> bool {
-        *self == TypeAnnot::REAL
-    }
-
-    pub fn is_void(&self) -> bool {
-        *self == TypeAnnot::VOID
+    pub fn ptr_to(typ: Self) -> Self {
+        Self::Pointer(Box::new(typ))
     }
 
     pub fn is_void_ptr(&self) -> bool {
-        matches!(self.base, Type::Primitive(Primitive::Void)) && self.is_ref()
-    }
-
-    pub fn is_byte_ptr(&self) -> bool {
-        matches!(self.base, Type::Primitive(Primitive::Byte)) && self.is_ref()
+        let Type::Pointer(ty) = self else {
+            return false;
+        };
+        matches!(**ty, Type::Void)
     }
 
     pub fn is_ptr(&self) -> bool {
-        self.meta.is_ptr()
-    }
-
-    pub fn is_ref(&self) -> bool {
-        self.meta.indirection() == 1
+        matches!(self, Type::Pointer(..) | Type::Array(..))
     }
 
     pub fn is_array(&self) -> bool {
-        self.meta.is_array()
+        matches!(self, Type::Array(..))
     }
 
-    pub fn is_max_indirection(&self) -> bool {
-        self.meta.indirection() == u8::MAX
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::Real)
     }
 
-    pub fn deref(self) -> Self {
-        match self.meta {
-            TypeMeta::Value => self,
-            TypeMeta::Array(..) => Self::new_value(self.base),
-            TypeMeta::Pointer(i) if i > 1 => Self::new_ptr(self.base, i - 1),
-            TypeMeta::Pointer(..) => Self::new_value(self.base),
-        }
+    pub fn is_int(&self) -> bool {
+        matches!(self, Type::Int)
     }
 
-    pub fn create_ref(self) -> Self {
-        match self.meta {
-            TypeMeta::Value => Self::new_ptr(self.base, 1),
-            TypeMeta::Array(..) => Self::new_ptr(self.base, 2),
-            TypeMeta::Pointer(i) => Self::new_ptr(self.base, i + 1),
+    pub fn is_number(&self) -> bool {
+        matches!(self, Type::Int | Type::Real)
+    }
+
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Type::Bool)
+    }
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int => write!(f, "int"),
+            Self::Real => write!(f, "real"),
+            Self::Byte => write!(f, "byte"),
+            Self::Char => write!(f, "char"),
+            Self::Bool => write!(f, "bool"),
+            Self::Void => write!(f, "void"),
+            Self::Pointer(inner) => write!(f, "{inner}*"),
+            Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
+            Self::Custom(name) => write!(f, "{name}"),
         }
     }
 }
 
-pub trait Annotated {
-    fn get_annot(&self) -> TypeAnnot;
+#[derive(Debug, Clone)]
+pub struct Argument {
+    pub name: String,
+    pub arg_type: Type,
+}
 
-    fn type_name(&self) -> String {
-        match &self.get_annot().base {
-            Type::Primitive(p) => p.to_string(),
-            Type::Custom { name, .. } => name.to_string(),
+impl std::fmt::Display for Argument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name, arg_type } = self;
+        write!(f, "{name}: {arg_type}")
+    }
+}
+
+pub struct TypeCheck;
+
+impl TypeCheck {
+    pub fn check_binexpr(op: BinOpe, lhs: Type, rhs: Type, pos: Position) -> Result<Type> {
+        match op {
+            BinOpe::Equal | BinOpe::NotEqual if lhs == rhs => Ok(Type::Bool),
+
+            BinOpe::Greater | BinOpe::GreaterEqual | BinOpe::Less | BinOpe::LessEqual
+                if lhs == rhs && lhs.is_number() =>
+            {
+                Ok(Type::Bool)
+            }
+
+            BinOpe::And | BinOpe::Or if lhs == rhs && lhs.is_bool() => Ok(Type::Bool),
+
+            BinOpe::Assign if lhs == rhs => Ok(lhs),
+            BinOpe::Assign if lhs.is_ptr() && rhs.is_void_ptr() => Ok(lhs),
+
+            BinOpe::Add
+            | BinOpe::Sub
+            | BinOpe::Mul
+            | BinOpe::Div
+            | BinOpe::AddAssign
+            | BinOpe::SubAssign
+            | BinOpe::MulAssign
+            | BinOpe::DivAssign
+                if lhs == rhs && lhs.is_number() =>
+            {
+                Ok(lhs)
+            }
+
+            BinOpe::Mod
+            | BinOpe::Shr
+            | BinOpe::Shl
+            | BinOpe::BitwiseAnd
+            | BinOpe::BitwiseOr
+            | BinOpe::BitwiseXor
+                if lhs == rhs && lhs.is_int() =>
+            {
+                Ok(lhs)
+            }
+
+            _ => Error::syntatic("invalid operation between types", pos),
         }
     }
 
-    fn is_primitive(&self) -> bool {
-        matches!(&self.get_annot().base, Type::Primitive(..))
+    pub fn check_unaexpr(op: UnaOpe, ope: Type, pos: Position) -> Result<Type> {
+        match op {
+            UnaOpe::AddressOf => Ok(Type::ptr_to(ope)),
+
+            UnaOpe::Minus if ope.is_number() => Ok(ope),
+            UnaOpe::Minus => Error::syntatic("cannot apply unary minus here", pos),
+
+            UnaOpe::Dereference => match ope {
+                Type::Int => Ok(Type::Void),
+                Type::Pointer(inner) => Ok(*inner),
+                _ => Error::syntatic("can only dereference addresses", pos),
+            },
+
+            UnaOpe::Not if ope.is_bool() => Ok(ope),
+            UnaOpe::Not => Error::syntatic("cannot apply unary not here", pos),
+
+            UnaOpe::BitwiseNot if ope.is_int() => Ok(ope),
+            UnaOpe::BitwiseNot => Error::syntatic("cannot apply bitwise not here", pos),
+        }
     }
 
-    fn type_size(&self) -> usize {
-        let annot = self.get_annot();
+    pub fn check_cast(from: &Type, to: &Type, pos: Position) -> Result<()> {
+        if from.is_number() && to.is_number() {
+            Ok(())
+        } else if from.is_void_ptr() && to.is_ptr() {
+            Ok(())
+        } else {
+            let msg = format!("cannot cast from {from} to {to}");
+            Error::syntatic(msg, pos)
+        }
+    }
 
-        let size = match &annot.base {
-            Type::Primitive(p) => match p {
-                Primitive::Int => 4,
-                Primitive::Real => 4,
-                Primitive::Byte => 1,
-                Primitive::Char => 1,
-                Primitive::Bool => 1,
-                Primitive::Void => 0,
-            },
-            Type::Custom { name: _, size } => *size,
+    pub fn check_index(array: Type, index: Type, pos: Position) -> Result<Type> {
+        let result = match array {
+            Type::Int => Type::Void,
+            Type::Pointer(inner) => *inner,
+            Type::Array(inner, _) => *inner,
+            _ => return Error::syntatic(format!("cannot index into {array}"), pos),
         };
 
-        match annot.meta {
-            TypeMeta::Value => size,
-            TypeMeta::Array(array_size) => size * array_size as usize,
-            TypeMeta::Pointer(_) => 8,
-        }
-    }
-}
+        if !index.is_int() {
+            return Error::syntatic("can only index array using int", pos);
+        };
 
-impl Annotated for TypeAnnot {
-    fn get_annot(&self) -> TypeAnnot {
-        self.clone()
+        Ok(result)
     }
 }

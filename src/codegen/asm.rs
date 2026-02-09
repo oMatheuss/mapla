@@ -447,6 +447,20 @@ pub trait MemSized {
     fn mem_size(&self) -> MemSize;
 }
 
+impl TryFrom<usize> for MemSize {
+    type Error = usize;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Byte),
+            2 => Ok(Self::DWord),
+            4 => Ok(Self::DWord),
+            8 => Ok(Self::QWord),
+            _ => Err(value),
+        }
+    }
+}
+
 impl Display for MemSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -712,19 +726,15 @@ thread_local! {
 }
 
 impl Lbl {
-    pub fn new() -> Self {
-        LABELS.with_borrow_mut(|labels| {
-            let id = labels.len();
-            labels.push(format!("L.str.{id}"));
-            Self(id)
-        })
-    }
-
     pub fn from_label(label: &str) -> Self {
         LABELS.with_borrow_mut(|labels| {
-            let id = labels.len();
-            labels.push(String::from(label));
-            Self(id)
+            if let Some((id, _)) = labels.iter().enumerate().find(|(_, l)| *l == label) {
+                Self(id)
+            } else {
+                let id = labels.len();
+                labels.push(String::from(label));
+                Self(id)
+            }
         })
     }
 }
@@ -747,6 +757,12 @@ pub enum Operand {
     Mem(Mem),
     Imm(Imm),
     Xmm(Xmm),
+}
+
+impl Default for Operand {
+    fn default() -> Self {
+        Self::Imm(Imm::TRUE)
+    }
 }
 
 impl Display for Operand {

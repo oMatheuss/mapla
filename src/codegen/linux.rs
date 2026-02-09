@@ -1,7 +1,7 @@
 use crate::codegen::asm;
 use crate::codegen::asm::{Imm, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use crate::codegen::regs::OperandManager;
-use crate::types::{Type, TypeAnnot};
+use crate::types::{Argument, Type};
 
 use super::CodeGen;
 
@@ -36,23 +36,21 @@ fn cdecl_f(arg_num: usize, mem_size: MemSize) -> Option<Xmm> {
 pub fn compile_call(
     c: &mut CodeGen,
     name: &str,
-    args: Vec<(Operand, &TypeAnnot)>,
-    annot: &TypeAnnot,
+    args: Vec<(Operand, Type)>,
+    typ: &Type,
 ) -> Operand {
     let ptr_size = MemSize::QWord as isize;
     let mut stack_offset = 0.max(args.len() as isize - 6) * ptr_size;
 
     c.scope.new_call(stack_offset as usize);
 
-    if let Type::Custom { name: _, size } = annot.base
-        && size > ptr_size as usize
-    {
+    if let Type::Custom(..) = typ {
         todo!("implement return value greater than 8 bytes");
     }
 
-    for (arg_num, (arg, annot)) in args.iter().enumerate().rev() {
-        let mem_size = annot.mem_size();
-        let is_float = annot.is_float();
+    for (arg_num, (arg, typ)) in args.iter().enumerate().rev() {
+        let mem_size = arg.mem_size();
+        let is_float = matches!(typ, Type::Real);
 
         if let Some(reg) = cdecl(arg_num, mem_size) {
             assert!(c.regs.take(reg), "arg register should be free");
@@ -110,39 +108,39 @@ pub fn compile_call(
         }
     }
 
-    if annot.is_float() {
-        let xmm = Xmm::xmm0(annot.mem_size());
-        assert!(
-            c.xmms.take(xmm),
-            "return register (xmm) should be available"
-        );
-        Operand::Xmm(xmm)
-    } else if !annot.is_void() {
-        let reg = Reg::acc(annot.mem_size());
-        assert!(c.regs.take(reg), "return register should be available");
-        Operand::Reg(reg)
-    } else {
-        Operand::Imm(Imm::Dword(0))
+    let mem_size = c.type_size(typ).try_into().unwrap();
+
+    match typ {
+        Type::Void => Operand::Imm(Imm::Dword(0)),
+        Type::Real => {
+            let xmm = Xmm::xmm0(mem_size);
+            assert!(c.xmms.take(xmm), "return register should be available");
+            Operand::Xmm(xmm)
+        }
+        Type::Custom(..) => todo!(),
+        _ => {
+            let reg = Reg::acc(mem_size);
+            assert!(c.regs.take(reg), "return register should be available");
+            Operand::Reg(reg)
+        }
     }
 }
 
-pub fn compile_args(c: &mut CodeGen, args: &[crate::ast::Argument], fn_annot: &TypeAnnot) {
+pub fn compile_args(c: &mut CodeGen, args: &[Argument], fn_type: &Type) {
     let mut mem_offset = 16; // rip + rbp
-    if let Type::Custom { name: _, size } = fn_annot.base
-        && size > 8
-    {
+    if c.type_size(fn_type) > 8 {
         todo!("implement return value greater than 8 bytes");
     }
     for (arg_num, arg) in args.iter().enumerate() {
-        let crate::ast::Argument { name, annot } = arg;
-        let mem_size = annot.mem_size();
+        let size = c.type_size(&arg.arg_type);
+        let mem_size = size.try_into().unwrap();
         if let Some(reg) = cdecl(arg_num, mem_size) {
-            let addr = c.scope.new_local(name, mem_size);
-            asm::code!(c.code, Mov, addr, reg);
+            let mem = c.scope.set_sized_var(arg_num, size, mem_size);
+            asm::code!(c.code, Mov, mem, reg);
         } else {
-            let addr = Mem::offset(Reg::Rbp, mem_offset, mem_size);
+            let mem = Mem::offset(Reg::Rbp, mem_offset, mem_size);
             mem_offset += MemSize::QWord as isize;
-            c.scope.set(name, addr);
+            c.scope.set_fixed_var(arg_num, mem);
         }
     }
 }

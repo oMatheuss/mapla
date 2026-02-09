@@ -1,9 +1,10 @@
-use error::Result;
-use parser::Parser;
-use source::SourceManager;
+use crate::{
+    binder::Binder, codegen::CodeGen, error::Result, parser::Parser, source::SourceManager,
+};
 
 mod args;
 mod ast;
+mod binder;
 mod codegen;
 mod error;
 mod ir;
@@ -11,6 +12,7 @@ mod lexer;
 mod parser;
 mod position;
 mod source;
+mod symbols;
 mod target;
 mod token;
 mod types;
@@ -19,12 +21,24 @@ mod utils;
 fn run() -> Result<()> {
     let args = args::parse_args()?;
 
-    let sm = SourceManager::new(&args.input, args.dir.clone());
-    let ast = Parser::new(sm).parse()?;
+    let sources = SourceManager::new(&args.input, &args.dir);
+    let main = sources.main()?;
+    let main = Parser::parse(main)?;
+    let mut binder = Binder::new();
 
-    let assembly = codegen::compile(args.target, ast);
+    binder.bind_globals(&main)?;
+    binder.bind_ast(main)?;
 
-    std::fs::write(args.output_path(), assembly)?;
+    let mut codegen = CodeGen::new(args.target, binder.globals);
+    codegen.gen_intro();
+
+    for func in binder.functions {
+        codegen.gen_func(func);
+    }
+
+    codegen.gen_data(binder.data);
+
+    std::fs::write(args.output_path(), codegen.to_string())?;
 
     Ok(())
 }
