@@ -123,7 +123,7 @@ impl TypeCheck {
                 Ok(lhs)
             }
 
-            _ => Error::syntatic("invalid operation between types", pos),
+            _ => Error::type_err("invalid operation between types", pos),
         }
     }
 
@@ -132,19 +132,19 @@ impl TypeCheck {
             UnaOpe::AddressOf => Ok(Type::ptr_to(ope)),
 
             UnaOpe::Minus if ope.is_number() => Ok(ope),
-            UnaOpe::Minus => Error::syntatic("cannot apply unary minus here", pos),
+            UnaOpe::Minus => Error::type_err("cannot apply unary minus here", pos),
 
             UnaOpe::Dereference => match ope {
                 Type::Int => Ok(Type::Void),
                 Type::Pointer(inner) => Ok(*inner),
-                _ => Error::syntatic("can only dereference addresses", pos),
+                _ => Error::type_err("can only dereference addresses", pos),
             },
 
             UnaOpe::Not if ope.is_bool() => Ok(ope),
-            UnaOpe::Not => Error::syntatic("cannot apply unary not here", pos),
+            UnaOpe::Not => Error::type_err("cannot apply unary not here", pos),
 
             UnaOpe::BitwiseNot if ope.is_int() => Ok(ope),
-            UnaOpe::BitwiseNot => Error::syntatic("cannot apply bitwise not here", pos),
+            UnaOpe::BitwiseNot => Error::type_err("cannot apply bitwise not here", pos),
         }
     }
 
@@ -155,7 +155,7 @@ impl TypeCheck {
             Ok(())
         } else {
             let msg = format!("cannot cast from {from} to {to}");
-            Error::syntatic(msg, pos)
+            Error::type_err(msg, pos)
         }
     }
 
@@ -164,11 +164,11 @@ impl TypeCheck {
             Type::Int => Type::Void,
             Type::Pointer(inner) => *inner,
             Type::Array(inner, _) => *inner,
-            _ => return Error::syntatic(format!("cannot index into {array}"), pos),
+            _ => return Error::type_err(format!("cannot index into {array}"), pos),
         };
 
         if !index.is_int() {
-            return Error::syntatic("can only index array using int", pos);
+            return Error::type_err("can only index array using int", pos);
         };
 
         Ok(result)

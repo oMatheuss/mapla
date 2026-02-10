@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::ast::{Ast, AstNode, AstRoot, Expression, Identifier, ValueExpr};
+use crate::ast::{Ast, AstNode, AstRoot, Expression, Identifier, Literal};
 use crate::error::{Error, PositionResult, Result};
 use crate::source::Source;
 use crate::token::{Token, TokenStream};
@@ -26,7 +26,7 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_str(&self, ts: &TokenStream, s: &str) -> Result<ValueExpr> {
+    fn parse_str(&self, ts: &TokenStream, s: &str) -> Result<Literal> {
         let mut chs = s.bytes().peekable();
         let mut acc = Vec::with_capacity(s.len());
 
@@ -34,7 +34,7 @@ impl Parser {
             let Some(curr) = chs.next() else {
                 acc.push(b'\0');
                 let escaped = String::from_utf8(acc).with_position(ts.pos())?;
-                break Ok(ValueExpr::String(escaped));
+                break Ok(Literal::String(escaped));
             };
 
             let b = match curr {
@@ -54,19 +54,18 @@ impl Parser {
         }
     }
 
-    fn parse_value(&self, ts: &mut TokenStream) -> Result<ValueExpr> {
+    fn parse_value(&self, ts: &mut TokenStream) -> Result<Literal> {
         let expr = match self.next_or_err(ts)? {
-            Token::Identifier(id) => ValueExpr::Id(id.into()),
             Token::StrLiteral(string) => self.parse_str(ts, string)?,
-            Token::IntLiteral(int) => ValueExpr::Int(int as i32),
-            Token::FloatLiteral(float) => ValueExpr::Float(float),
+            Token::IntLiteral(int) => Literal::Int(int as i32),
+            Token::FloatLiteral(float) => Literal::Float(float),
             Token::Sub => match self.next_or_err(ts)? {
-                Token::IntLiteral(int) => ValueExpr::Int(-(int as i32)),
-                Token::FloatLiteral(float) => ValueExpr::Float(-float),
+                Token::IntLiteral(int) => Literal::Int(-(int as i32)),
+                Token::FloatLiteral(float) => Literal::Float(-float),
                 _ => Error::syntatic("unexpected token", ts.pos())?,
             },
-            Token::True => ValueExpr::Bool(true),
-            Token::False => ValueExpr::Bool(false),
+            Token::True => Literal::Bool(true),
+            Token::False => Literal::Bool(false),
             _ => Error::syntatic("unexpected token", ts.pos())?,
         };
 
@@ -75,18 +74,14 @@ impl Parser {
 
     fn parse_atom(&self, ts: &mut TokenStream) -> Result<Expression> {
         let expr = match self.next_or_err(ts)? {
-            Token::StrLiteral(string) => Expression::Value {
+            Token::StrLiteral(string) => Expression::Literal {
                 value: self.parse_str(ts, string)?,
             },
             Token::IntLiteral(int) => Expression::int(int as i32),
             Token::FloatLiteral(float) => Expression::float(float),
             Token::True => Expression::TRUE,
             Token::False => Expression::FALSE,
-            Token::Identifier(id) if matches!(ts.peek(), Some(Token::OpenParen)) => {
-                let args = self.parse_callargs(ts)?;
-                Expression::call(id.into(), args)
-            }
-            Token::Identifier(id) => Expression::id(id),
+            Token::Identifier(name) => Expression::id(name, ts.pos()),
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(ts, 1)?;
                 let Token::CloseParen = self.next_or_err(ts)? else {
@@ -123,6 +118,9 @@ impl Parser {
 
                 let rhs = self.parse_expr(ts, min_prec)?;
                 lhs = Expression::bin_op(op, lhs, rhs);
+            } else if let Some(Token::OpenParen) = ts.peek() {
+                let args = self.parse_callargs(ts)?;
+                lhs = Expression::call(lhs, args);
             } else if let Some(Token::Dot) = ts.peek() {
                 todo!();
             } else if let Some(Token::OpenBracket) = ts.peek() {
@@ -166,7 +164,7 @@ impl Parser {
         let Token::To = self.next_or_err(ts)? else {
             Error::syntatic("expected token `to`", ts.pos())?
         };
-        let limit = self.parse_value(ts)?;
+        let limit = self.parse_expr(ts, 1)?;
         let Token::Do = self.next_or_err(ts)? else {
             Error::syntatic("expected token `do`", ts.pos())?
         };
@@ -208,7 +206,7 @@ impl Parser {
         let ty = match ts.peek() {
             Some(Token::OpenBracket) => {
                 self.next_or_err(ts)?; // discard open bracket
-                let ValueExpr::Int(size) = self.parse_value(ts)? else {
+                let Literal::Int(size) = self.parse_value(ts)? else {
                     Error::syntatic("expected integer literal", ts.pos())?
                 };
                 let Token::CloseBracket = self.next_or_err(ts)? else {

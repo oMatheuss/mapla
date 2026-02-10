@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Ast, AstNode, AstRoot, Expression, ValueExpr};
+use crate::ast::{Ast, AstNode, AstRoot, Expression, Identifier, Literal};
 use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
@@ -36,12 +36,11 @@ impl Binder {
                     if let Some(value) = value {
                         let name = id.name.clone();
                         match value {
-                            ValueExpr::Id(_) => todo!(),
-                            ValueExpr::String(s) => self.data.insert(name, s.clone().into_bytes()),
-                            ValueExpr::Byte(b) => self.data.insert(name, [*b as u8].to_vec()),
-                            ValueExpr::Int(i) => self.data.insert(name, i.to_le_bytes().to_vec()),
-                            ValueExpr::Float(f) => self.data.insert(name, f.to_le_bytes().to_vec()),
-                            ValueExpr::Bool(b) => self.data.insert(name, [*b as u8].to_vec()),
+                            Literal::String(s) => self.data.insert(name, s.clone().into_bytes()),
+                            Literal::Byte(b) => self.data.insert(name, [*b as u8].to_vec()),
+                            Literal::Int(i) => self.data.insert(name, i.to_le_bytes().to_vec()),
+                            Literal::Float(f) => self.data.insert(name, f.to_le_bytes().to_vec()),
+                            Literal::Bool(b) => self.data.insert(name, [*b as u8].to_vec()),
                         };
                     }
                 }
@@ -187,31 +186,39 @@ impl<'a> FuncBinder<'a> {
         self.labels
     }
 
-    fn bind_value(&mut self, value: ValueExpr) -> Result<IrArg> {
+    fn bind_value(&mut self, value: Literal) -> Result<IrArg> {
         let value = match value {
-            ValueExpr::Id(name) => match self.scope.get(&name) {
-                Some(var) => var,
-                None => match self.binder.globals.get_var(&name, "global").cloned() {
-                    Some(sym) => IrArg::Global { name, typ: sym.typ },
-                    None => Error::syntatic("symbol not found in scope", Position::default())?,
-                },
-            },
-            ValueExpr::String(s) => {
+            Literal::String(s) => {
                 let label = format!("L.str.{}", self.binder.data.len());
                 self.binder.data.insert(label.clone(), s.into_bytes());
                 IrLiteral::String { label }.into()
             }
-            ValueExpr::Byte(b) => IrLiteral::Byte(b).into(),
-            ValueExpr::Int(i) => IrLiteral::Int(i).into(),
-            ValueExpr::Float(f) => IrLiteral::Float(f).into(),
-            ValueExpr::Bool(b) => IrLiteral::Bool(b).into(),
+            Literal::Byte(b) => IrLiteral::Byte(b).into(),
+            Literal::Int(i) => IrLiteral::Int(i).into(),
+            Literal::Float(f) => IrLiteral::Float(f).into(),
+            Literal::Bool(b) => IrLiteral::Bool(b).into(),
         };
         Ok(value)
     }
 
     fn bind_expr(&mut self, expr: Expression) -> Result<Type> {
         match expr {
-            Expression::Value { value } => {
+            Expression::Identifier { id } => {
+                let value = match self.scope.get(&id.name) {
+                    Some(var) => var,
+                    None => match self.binder.globals.get_var(&id.name, "global").cloned() {
+                        Some(sym) => IrArg::Global {
+                            name: id.name,
+                            typ: sym.typ,
+                        },
+                        None => Error::syntatic("symbol not found in scope", id.position)?,
+                    },
+                };
+                let res = value.get_type();
+                self.nodes.push(IrNode::Load { value });
+                Ok(res)
+            }
+            Expression::Literal { value } => {
                 let value = self.bind_value(value)?;
                 let res = value.get_type();
                 self.nodes.push(IrNode::Load { value });
@@ -236,20 +243,22 @@ impl<'a> FuncBinder<'a> {
                 });
                 Ok(res)
             }
-            Expression::Call { name, args } => {
-                let func = self
-                    .binder
-                    .globals
-                    .get_func(&name, "global")
-                    .cloned()
-                    .unwrap();
+            Expression::Call { func, args } => {
+                let Expression::Identifier { id } = *func else {
+                    Error::syntatic("expected function identifier", Position::default())?
+                };
+                let Identifier { name, .. } = id;
                 for arg in args {
                     self.bind_expr(arg)?;
                 }
-                let args = func.args;
-                let ret = func.ret.clone();
-                self.nodes.push(IrNode::Call { name, args, ret });
-                Ok(func.ret)
+                if let Some(func) = self.binder.globals.get_func(&name, "global") {
+                    let args = func.args.clone();
+                    let ret = func.ret.clone();
+                    self.nodes.push(IrNode::Call { name, args, ret });
+                    Ok(func.ret.clone())
+                } else {
+                    Error::syntatic("symbol not found in scope", id.position)?
+                }
             }
             Expression::Index { array, index } => {
                 let array = self.bind_expr(*array)?;
@@ -324,11 +333,13 @@ impl<'a> FuncBinder<'a> {
                 let counter = IrArg::var(index, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
                 self.nodes.push(IrNode::Label { label: start });
-                let expr_end = self.bind_value(expr_end)?;
+                let expr_end = self.bind_expr(expr_end)?;
+                if !expr_end.is_int() {
+                    Error::type_err("expected int expression", Position::default())?;
+                }
                 self.nodes.push(IrNode::Load {
                     value: counter.clone(),
                 });
-                self.nodes.push(IrNode::Load { value: expr_end });
                 self.nodes.push(IrNode::JmpEq { label: end });
                 for node in nodes {
                     self.bind_node(node)?;

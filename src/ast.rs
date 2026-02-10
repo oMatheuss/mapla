@@ -23,8 +23,7 @@ impl Ast {
 }
 
 #[derive(Debug, Clone)]
-pub enum ValueExpr {
-    Id(String),
+pub enum Literal {
     String(String),
     Byte(u8),
     Int(i32),
@@ -34,8 +33,11 @@ pub enum ValueExpr {
 
 #[derive(Debug)]
 pub enum Expression {
-    Value {
-        value: ValueExpr,
+    Identifier {
+        id: Identifier,
+    },
+    Literal {
+        value: Literal,
     },
     UnaOp {
         operator: UnaOpe,
@@ -47,7 +49,7 @@ pub enum Expression {
         rhs: Box<Expression>,
     },
     Call {
-        name: String,
+        func: Box<Expression>,
         args: Vec<Expression>,
     },
     Index {
@@ -61,31 +63,31 @@ pub enum Expression {
 }
 
 impl Expression {
-    pub const TRUE: Self = Self::Value {
-        value: ValueExpr::Bool(true),
+    pub const TRUE: Self = Self::Literal {
+        value: Literal::Bool(true),
     };
-    pub const FALSE: Self = Self::Value {
-        value: ValueExpr::Bool(false),
+    pub const FALSE: Self = Self::Literal {
+        value: Literal::Bool(false),
     };
 
     #[inline]
-    pub fn id(id: &str) -> Self {
-        Self::Value {
-            value: ValueExpr::Id(id.into()),
+    pub fn id(name: &str, pos: Position) -> Self {
+        Self::Identifier {
+            id: Identifier::new(name, pos),
         }
     }
 
     #[inline]
     pub fn float(f: f32) -> Self {
-        Self::Value {
-            value: ValueExpr::Float(f),
+        Self::Literal {
+            value: Literal::Float(f),
         }
     }
 
     #[inline]
     pub fn int(i: i32) -> Self {
-        Self::Value {
-            value: ValueExpr::Int(i),
+        Self::Literal {
+            value: Literal::Int(i),
         }
     }
 
@@ -107,8 +109,11 @@ impl Expression {
     }
 
     #[inline]
-    pub fn call(name: String, args: Vec<Expression>) -> Self {
-        Self::Call { name, args }
+    pub fn call(func: Expression, args: Vec<Expression>) -> Self {
+        Self::Call {
+            func: Box::new(func),
+            args,
+        }
     }
 
     #[inline]
@@ -145,7 +150,7 @@ impl Identifier {
 
 #[derive(Debug)]
 pub enum AstRoot {
-    Global(Type, Identifier, Option<ValueExpr>),
+    Global(Type, Identifier, Option<Literal>),
     Struct(Identifier, Vec<Argument>),
     Func(Type, Identifier, Vec<Argument>, Vec<AstNode>),
     ExternFunc(Type, Identifier, Vec<Argument>),
@@ -163,7 +168,7 @@ pub enum AstNode {
     Var(String, Expression),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),
-    For(String, Option<ValueExpr>, ValueExpr, Vec<AstNode>),
+    For(String, Option<Literal>, Expression, Vec<AstNode>),
     Expr(Expression),
     Ret(Expression),
 }

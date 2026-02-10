@@ -813,8 +813,8 @@ impl CodeGen {
             IrNode::Label { label } => asm::code!(self.code, ".L{label}:"),
             IrNode::Jmp { label } => asm::code!(self.code, Jmp, format!(".L{label}")),
             IrNode::JmpEq { label } => {
-                let rhs = self.scope.pop().unwrap();
                 let lhs = self.scope.pop().unwrap();
+                let rhs = self.scope.pop().unwrap();
                 let lhs = self.move_operand_to_reg(&Type::Int, lhs);
                 asm::code!(self.code, Cmp, lhs, rhs);
                 asm::code!(self.code, Je, format!(".L{label}"));
