@@ -753,6 +753,7 @@ impl Display for Lbl {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Operand {
+    Lbl(Lbl),
     Reg(Reg),
     Mem(Mem),
     Imm(Imm),
@@ -768,6 +769,7 @@ impl Default for Operand {
 impl Display for Operand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Lbl(lbl) => lbl.fmt(f),
             Self::Reg(reg) => reg.fmt(f),
             Self::Mem(mem) => mem.fmt(f),
             Self::Imm(imm) => imm.fmt(f),
@@ -840,6 +842,7 @@ impl Operand {
 impl MemSized for Operand {
     fn mem_size(&self) -> MemSize {
         match self {
+            Operand::Lbl(lbl) => lbl.mem_size(),
             Operand::Reg(reg) => reg.mem_size(),
             Operand::Mem(mem) => mem.mem_size(),
             Operand::Imm(imm) => imm.mem_size(),

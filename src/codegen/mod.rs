@@ -121,23 +121,12 @@ impl CodeGen {
         }
     }
 
-    pub(self) fn clear_all_regs(&mut self) {
-        let mut vec = Vec::new();
-        while let Some(val) = self.scope.pop() {
-            let mem = self.move_operand_to_mem(val);
-            vec.push(mem);
-        }
-        while let Some(val) = vec.pop() {
-            self.scope.push(val);
-        }
-    }
-
     pub(self) fn type_size(&self, typ: &Type) -> usize {
         match typ {
             Type::Void => 0,
             Type::Byte | Type::Char | Type::Bool => 1,
             Type::Int | Type::Real => 4,
-            Type::Pointer(_) | Type::Array(_, _) => 8,
+            Type::Func(..) | Type::Pointer(..) | Type::Array(..) => 8,
             Type::Custom(name) => self
                 .symbols
                 .get_type(name, "global")
@@ -244,6 +233,12 @@ impl CodeGen {
                             Operand::Imm(imm) => {
                                 asm::code!(self.code, Mov, local, imm);
                             }
+                            Operand::Lbl(lbl) => {
+                                let reg = self.regs.take_any(lbl.mem_size());
+                                asm::code!(self.code, Lea, reg, Mem::lbl(lbl, lbl.mem_size()));
+                                asm::code!(self.code, Mov, local, reg);
+                                self.regs.push(reg);
+                            }
                         }
                     }
                     _ => {
@@ -276,7 +271,9 @@ impl CodeGen {
                                 self.regs.push(aux);
                                 self.regs.try_push(ret.into());
                             }
-                            Operand::Xmm(..) | Operand::Imm(..) => unimplemented!(),
+                            Operand::Xmm(..) | Operand::Imm(..) | Operand::Lbl(..) => {
+                                unimplemented!()
+                            }
                         };
                     }
                 }
@@ -320,7 +317,11 @@ impl CodeGen {
                     IrLiteral::Float(f) => self.scope.push(Operand::Imm(Imm::from_f32(f))),
                     IrLiteral::Bool(b) => self.scope.push(Operand::Imm(Imm::Byte(b as u8))),
                 },
-                IrArg::Global { name, typ } => {
+                IrArg::Global { ns: _, name, typ } if typ.is_func() => {
+                    let lbl = Lbl::from_label(&name);
+                    self.scope.push(Operand::Lbl(lbl));
+                }
+                IrArg::Global { ns: _, name, typ } => {
                     let lbl = Lbl::from_label(&name);
                     let mem_size = self.type_size(&typ).try_into().unwrap();
                     self.scope.push(Operand::Mem(Mem::lbl(lbl, mem_size)));
@@ -392,6 +393,7 @@ impl CodeGen {
                                     asm::code!(self.code, Xor, tmp, Imm::Dword(MINUS_BIT));
                                     tmp
                                 }
+                                _ => panic!("operator minus could not be applied"),
                             }
                         }
                     }
@@ -408,7 +410,7 @@ impl CodeGen {
                             asm::code!(self.code, And, tmp, Imm::Byte(0x01));
                             tmp
                         }
-                        Operand::Xmm(..) => unimplemented!(),
+                        Operand::Xmm(..) | Operand::Lbl(..) => unimplemented!(),
                     },
                     UnaOpe::BitwiseNot => match value {
                         Operand::Reg(..) | Operand::Mem(..) => {
@@ -427,6 +429,7 @@ impl CodeGen {
                             asm::code!(self.code, Not, tmp);
                             tmp
                         }
+                        Operand::Lbl(..) => unimplemented!(),
                     },
                 };
                 self.scope.push(value);
@@ -722,8 +725,13 @@ impl CodeGen {
                 self.scope.push(lhs);
                 self.regs.try_push(rhs);
             }
-            IrNode::Call { name, args, ret } => {
-                self.clear_all_regs();
+            IrNode::Arg => {
+                let arg = self.scope.pop().unwrap();
+                let arg = self.move_operand_to_mem(arg);
+                self.scope.push(arg);
+            }
+            IrNode::Call { args, ret } => {
+                let func = self.scope.pop().unwrap();
                 let mut values = Vec::new();
                 for arg in args.into_iter().rev() {
                     let value = self.scope.pop().unwrap();
@@ -731,8 +739,8 @@ impl CodeGen {
                 }
                 values.reverse();
                 let ret = match self.target {
-                    CompilerTarget::Linux => linux::compile_call(self, &name, values, &ret),
-                    CompilerTarget::Windows => windows::compile_call(self, &name, values, &ret),
+                    CompilerTarget::Linux => linux::compile_call(self, func, values, &ret),
+                    CompilerTarget::Windows => windows::compile_call(self, func, values, &ret),
                 };
                 self.scope.push(ret);
             }
@@ -782,6 +790,7 @@ impl CodeGen {
                             asm::code!(self.code, Cvtss2si, reg, tmp);
                             self.scope.push(reg.into());
                         }
+                        Operand::Lbl(..) => unimplemented!(),
                     }
                 } else if from.is_int() && to.is_float() {
                     let xmm = self.xmms.take_any(value.mem_size());
@@ -796,7 +805,19 @@ impl CodeGen {
                             asm::code!(self.code, Mov, tmp, imm);
                             asm::code!(self.code, Cvtsi2ss, xmm, tmp);
                         }
-                        Operand::Xmm(..) => unimplemented!(),
+                        Operand::Xmm(..) | Operand::Lbl(..) => unimplemented!(),
+                    }
+                } else if from.is_func() && to.is_void_ptr() {
+                    match value {
+                        Operand::Lbl(lbl) => {
+                            let reg = self.regs.take_any(lbl.mem_size());
+                            asm::code!(self.code, Lea, reg, Mem::lbl(lbl, lbl.mem_size()));
+                            self.scope.push(reg.into());
+                        }
+                        Operand::Reg(..) | Operand::Mem(..) | Operand::Xmm(..) => {
+                            self.scope.push(value)
+                        }
+                        Operand::Imm(..) => unimplemented!(),
                     }
                 } else if from.is_void_ptr() || to.is_void_ptr() {
                     // assuming the size is correct, anything can be a pointer
@@ -859,6 +880,7 @@ impl CodeGen {
                                 asm::code!(self.code, Mov, tmp, imm);
                                 asm::code!(self.code, Movss, xmm0, tmp);
                             }
+                            Operand::Lbl(..) => unimplemented!(),
                         }
                     } else {
                         self.xmms.push(xmm0);
@@ -880,6 +902,9 @@ impl CodeGen {
                                 let tmp = self.scope.new_sized_temp(size, xmm.mem_size());
                                 asm::code!(self.code, Movss, tmp, xmm);
                                 asm::code!(self.code, Mov, acc, tmp);
+                            }
+                            Operand::Lbl(lbl) => {
+                                asm::code!(self.code, Lea, acc, Mem::lbl(lbl, lbl.mem_size()));
                             }
                         }
                     } else {

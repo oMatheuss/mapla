@@ -10,6 +10,7 @@ pub enum Type {
     Char,
     Bool,
     Void,
+    Func(Vec<Argument>, Box<Type>),
     Pointer(Box<Type>),
     Array(Box<Type>, u32),
     Custom(String),
@@ -50,6 +51,19 @@ impl Type {
     pub fn is_bool(&self) -> bool {
         matches!(self, Type::Bool)
     }
+
+    pub fn is_func(&self) -> bool {
+        matches!(self, Type::Func(..))
+    }
+
+    pub fn is_compatible(&self, other: &Self) -> bool {
+        match (self, other) {
+            (_, _) if self == other => true,
+            (Self::Array(first, ..), Self::Pointer(second)) if *first == *second => true,
+            (Self::Func(..), second) if second.is_void_ptr() => true,
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -61,6 +75,7 @@ impl std::fmt::Display for Type {
             Self::Char => write!(f, "char"),
             Self::Bool => write!(f, "bool"),
             Self::Void => write!(f, "void"),
+            Self::Func(args, ret) => write!(f, "func({args:?}): {ret}"),
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
             Self::Custom(name) => write!(f, "{name}"),
@@ -68,7 +83,7 @@ impl std::fmt::Display for Type {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Argument {
     pub name: String,
     pub arg_type: Type,
@@ -149,14 +164,16 @@ impl TypeCheck {
     }
 
     pub fn check_cast(from: &Type, to: &Type, pos: Position) -> Result<()> {
-        if from.is_number() && to.is_number() {
-            Ok(())
-        } else if from.is_void_ptr() && to.is_ptr() {
-            Ok(())
-        } else {
+        let allowed = from.is_number() && to.is_number()
+            || from.is_void_ptr() && to.is_ptr()
+            || from.is_func() && to.is_void_ptr();
+
+        if !allowed {
             let msg = format!("cannot cast from {from} to {to}");
-            Error::type_err(msg, pos)
+            return Error::type_err(msg, pos);
         }
+
+        Ok(())
     }
 
     pub fn check_index(array: Type, index: Type, pos: Position) -> Result<Type> {
@@ -172,5 +189,21 @@ impl TypeCheck {
         };
 
         Ok(result)
+    }
+
+    pub fn check_callargs(func_args: &Vec<Argument>, args: &Vec<Type>) -> Result<()> {
+        let pos = Position::default();
+        if func_args.len() != args.len() {
+            return Error::type_err("wrong number of arguments provided to the function", pos);
+        }
+
+        for (func_arg, arg) in func_args.iter().zip(args) {
+            if !arg.is_compatible(&func_arg.arg_type) {
+                dbg!(func_arg, arg);
+                return Error::type_err("wrong type provided to the function", pos);
+            }
+        }
+
+        Ok(())
     }
 }

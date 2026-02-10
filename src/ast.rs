@@ -49,7 +49,7 @@ pub enum Expression {
         rhs: Box<Expression>,
     },
     Call {
-        func: Box<Expression>,
+        expr: Box<Expression>,
         args: Vec<Expression>,
     },
     Index {
@@ -111,7 +111,7 @@ impl Expression {
     #[inline]
     pub fn call(func: Expression, args: Vec<Expression>) -> Self {
         Self::Call {
-            func: Box::new(func),
+            expr: Box::new(func),
             args,
         }
     }

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::ast::{Ast, AstNode, AstRoot, Expression, Identifier, Literal};
 use crate::error::{Error, Result};
@@ -78,7 +79,8 @@ impl Binder {
         for root in ast.nodes {
             match root {
                 AstRoot::Func(typ, id, args, ast_nodes) => {
-                    let body = FuncBinder::new(self).bind_func(&args, ast_nodes)?;
+                    let body =
+                        FuncBinder::new(self, ast.namespace.clone()).bind_func(&args, ast_nodes)?;
                     self.functions.push(IrFunc {
                         name: id.name,
                         namespace: ast.namespace.clone(),
@@ -169,15 +171,17 @@ pub struct FuncBinder<'a> {
     nodes: Vec<IrNode>,
     scope: FuncScope,
     labels: usize,
+    namespace: Rc<String>,
 }
 
 impl<'a> FuncBinder<'a> {
-    fn new(binder: &'a mut Binder) -> Self {
+    fn new(binder: &'a mut Binder, namespace: Rc<String>) -> Self {
         Self {
             binder,
             nodes: Vec::new(),
             scope: FuncScope::new(),
             labels: 0,
+            namespace,
         }
     }
 
@@ -201,18 +205,24 @@ impl<'a> FuncBinder<'a> {
         Ok(value)
     }
 
+    fn bind_global(&mut self, id: Identifier, ns: Rc<String>) -> Result<IrArg> {
+        match self.binder.globals.get_any(&id.name, &ns) {
+            Some(typ) => Ok(IrArg::Global {
+                ns: self.namespace.clone(),
+                name: id.name,
+                typ,
+            }),
+            None => Error::syntatic("symbol not found in scope", id.position)?,
+        }
+    }
+
     fn bind_expr(&mut self, expr: Expression) -> Result<Type> {
         match expr {
             Expression::Identifier { id } => {
                 let value = match self.scope.get(&id.name) {
                     Some(var) => var,
-                    None => match self.binder.globals.get_var(&id.name, "global").cloned() {
-                        Some(sym) => IrArg::Global {
-                            name: id.name,
-                            typ: sym.typ,
-                        },
-                        None => Error::syntatic("symbol not found in scope", id.position)?,
-                    },
+                    // assume user is trying to access a variable in this namespace
+                    None => self.bind_global(id, self.namespace.clone())?,
                 };
                 let res = value.get_type();
                 self.nodes.push(IrNode::Load { value });
@@ -243,21 +253,26 @@ impl<'a> FuncBinder<'a> {
                 });
                 Ok(res)
             }
-            Expression::Call { func, args } => {
-                let Expression::Identifier { id } = *func else {
-                    Error::syntatic("expected function identifier", Position::default())?
-                };
-                let Identifier { name, .. } = id;
+            Expression::Call { expr, args } => {
+                let mut args_types = Vec::new();
                 for arg in args {
-                    self.bind_expr(arg)?;
+                    let arg_type = self.bind_expr(arg)?;
+                    self.nodes.push(IrNode::Arg);
+                    args_types.push(arg_type);
                 }
-                if let Some(func) = self.binder.globals.get_func(&name, "global") {
-                    let args = func.args.clone();
-                    let ret = func.ret.clone();
-                    self.nodes.push(IrNode::Call { name, args, ret });
-                    Ok(func.ret.clone())
-                } else {
-                    Error::syntatic("symbol not found in scope", id.position)?
+                match self.bind_expr(*expr)? {
+                    Type::Func(func_args, ret) => {
+                        TypeCheck::check_callargs(&func_args, &args_types)?;
+                        let args = func_args;
+                        let func_ret = *ret.clone();
+                        self.nodes.push(IrNode::Call { args, ret: *ret });
+                        Ok(func_ret)
+                    }
+                    Type::Custom(_) => todo!(),
+                    typ => {
+                        let msg = format!("symbol has type {typ} which is not a func or struct");
+                        Error::syntatic(msg, Position::default())?
+                    }
                 }
             }
             Expression::Index { array, index } => {

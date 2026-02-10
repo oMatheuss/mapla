@@ -22,7 +22,8 @@ pub enum IrNode {
     Pop,
     UnaOp { ope: UnaOpe, typ: Type },
     BinOp { ope: BinOpe, typ: Type },
-    Call { name: String, args: Vec<Argument>, ret: Type },
+    Arg,
+    Call { args: Vec<Argument>, ret: Type },
     Index { typ: Type },
     Cast { from: Type, to: Type },
     Inc,
@@ -43,10 +44,11 @@ pub enum IrLiteral {
 }
 
 #[derive(Debug, Clone)]
+#[rustfmt::skip]
 pub enum IrArg {
     Var { index: usize, typ: Type },
     Literal { value: IrLiteral },
-    Global { name: String, typ: Type },
+    Global { ns: Rc<String>, name: String, typ: Type },
 }
 
 impl IrArg {
@@ -64,7 +66,11 @@ impl IrArg {
                 IrLiteral::Float(_) => Type::Real,
                 IrLiteral::Bool(_) => Type::Bool,
             },
-            IrArg::Global { name: _, typ } => typ.clone(),
+            IrArg::Global {
+                ns: _,
+                name: _,
+                typ,
+            } => typ.clone(),
         }
     }
 }
@@ -94,7 +100,8 @@ impl Display for IrNode {
             IrNode::Pop => write!(f, "\tpop"),
             IrNode::UnaOp { ope, .. } => write!(f, "\tunaop\t{ope:?}"),
             IrNode::BinOp { ope, .. } => write!(f, "\tbinop\t{ope:?}"),
-            IrNode::Call { name, .. } => write!(f, "\tcall\t{name}"),
+            IrNode::Arg => write!(f, "\targ"),
+            IrNode::Call { .. } => write!(f, "\tcall"),
             IrNode::Index { .. } => write!(f, "\tindex"),
             IrNode::Cast { from, to } => write!(f, "\tcast\tfrom {from} to {to}"),
             IrNode::Inc => write!(f, "\tinc\t"),
@@ -112,7 +119,7 @@ impl Display for IrArg {
         match self {
             IrArg::Var { index, typ } => write!(f, "var {index}: {typ}"),
             IrArg::Literal { value } => write!(f, "literal {value}"),
-            IrArg::Global { name, typ } => write!(f, "global {name}: {typ}"),
+            IrArg::Global { ns, name, typ } => write!(f, "global {}@{name}: {typ}", *ns),
         }
     }
 }

@@ -108,6 +108,30 @@ impl SymbolTable {
         })
     }
 
+    pub fn get_any(&self, name: &str, ns: &str) -> Option<Type> {
+        let key = SymbolKey {
+            name: name.into(),
+            namespace: String::from(ns).into(),
+        };
+
+        match self.values.get(&key) {
+            Some(sym) => return Some(sym.typ.clone()),
+            None => {}
+        }
+
+        match self.types.get(&key) {
+            Some(..) => return Some(Type::Custom(key.name)),
+            None => {}
+        }
+
+        match self.functions.get(&key) {
+            Some(sym) => return Some(Type::Func(sym.args.clone(), Box::new(sym.ret.clone()))),
+            None => {}
+        }
+
+        None
+    }
+
     pub fn iter_extrns(&self) -> impl Iterator<Item = (&SymbolKey, &FuncDef)> {
         self.functions.iter().filter(|f| f.1.extrn)
     }

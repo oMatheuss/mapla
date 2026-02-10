@@ -42,7 +42,7 @@ fn release_call_regs(c: &mut CodeGen) {
 
 pub fn compile_call(
     c: &mut CodeGen,
-    name: &str,
+    name: Operand,
     args: Vec<(Operand, Type)>,
     typ: &Type,
 ) -> Operand {
@@ -79,12 +79,19 @@ pub fn compile_call(
                     asm::code!(c.code, Movss, xmm, arg);
                 }
                 Operand::Reg(reg) => asm::code!(c.code, Movd, xmm, reg),
+                Operand::Lbl(lbl) => {
+                    let reg = c.regs.take_any(lbl.mem_size());
+                    asm::code!(c.code, Lea, reg, lbl);
+                    asm::code!(c.code, Movq, xmm, reg);
+                    c.regs.push(reg);
+                }
             }
         } else if !is_float && let Some(reg) = call_regs(i, mem_size) {
             assert!(c.regs.take(reg), "arg register should be free");
             match arg {
                 Operand::Reg(arg) if reg == *arg => {}
                 Operand::Xmm(xmm) => asm::code!(c.code, Movd, reg, xmm),
+                Operand::Lbl(lbl) => asm::code!(c.code, Lea, reg, lbl),
                 _ => asm::code!(c.code, Mov, reg, arg),
             }
         } else {
@@ -96,6 +103,12 @@ pub fn compile_call(
                 Operand::Mem(..) => {
                     let reg = c.regs.take_any(mem_size);
                     asm::code!(c.code, Mov, reg, arg);
+                    asm::code!(c.code, Mov, mem, reg);
+                    c.regs.push(reg);
+                }
+                Operand::Lbl(..) => {
+                    let reg = c.regs.take_any(mem_size);
+                    asm::code!(c.code, Lea, reg, arg);
                     asm::code!(c.code, Mov, mem, reg);
                     c.regs.push(reg);
                 }
