@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Ast, AstNode, AstRoot, Expression, Identifier, Literal};
+use crate::ast::{Ast, AstArgument, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
 use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
@@ -23,6 +23,44 @@ impl Binder {
         }
     }
 
+    fn bind_type(&self, ast_type: &AstType, ns: &str) -> Result<Type> {
+        let typ = match ast_type {
+            AstType::Int => Type::Int,
+            AstType::Real => Type::Real,
+            AstType::Byte => Type::Byte,
+            AstType::Char => Type::Char,
+            AstType::Bool => Type::Bool,
+            AstType::Void => Type::Void,
+            AstType::Pointer(ast_type) => Type::Pointer(self.bind_type(ast_type, ns)?.into()),
+            AstType::Array(ast_type, size) => {
+                Type::Array(self.bind_type(ast_type, ns)?.into(), *size)
+            }
+            AstType::Named(items) => {
+                let mut items = items.clone();
+                let type_name = items.pop().unwrap();
+                let ns = items.pop().unwrap_or(ns.into());
+                let Some(typ) = self.globals.get_any(&type_name, &ns) else {
+                    let msg = format!("type declaration for '{type_name}' was not found");
+                    Error::type_err(msg, Position::default())?
+                };
+                typ
+            }
+        };
+        Ok(typ)
+    }
+
+    fn bind_args(&self, ast_args: Vec<AstArgument>, ns: &str) -> Result<Vec<Argument>> {
+        let mut args = Vec::new();
+        for ast_arg in ast_args.into_iter() {
+            let arg = Argument {
+                name: ast_arg.name,
+                arg_type: self.bind_type(&ast_arg.arg_type, ns)?,
+            };
+            args.push(arg);
+        }
+        Ok(args)
+    }
+
     pub fn bind_globals(&mut self, ast: &Ast) -> Result<()> {
         for node in ast.nodes.iter() {
             let ns = ast.namespace.clone();
@@ -30,7 +68,7 @@ impl Binder {
                 AstRoot::Global(var_type, id, value) => {
                     let symbol = GlobalVar {
                         pos: id.position.clone(),
-                        typ: var_type.clone(),
+                        typ: self.bind_type(var_type, &ns)?,
                     };
                     self.globals.set_var(&id.name, ns, symbol)?;
 
@@ -48,15 +86,15 @@ impl Binder {
                 AstRoot::Struct(id, args) => {
                     let symbol = TypeDef {
                         pos: id.position.clone(),
-                        fields: args.clone(),
+                        fields: self.bind_args(args.clone(), &ns)?,
                     };
                     self.globals.set_type(&id.name, ns, symbol)?;
                 }
                 AstRoot::Func(typ, id, args, ..) => {
                     let symbol = FuncDef {
                         pos: id.position.clone(),
-                        args: args.clone(),
-                        ret: typ.clone(),
+                        args: self.bind_args(args.clone(), &ns)?,
+                        ret: self.bind_type(typ, &ns)?,
                         extrn: false,
                     };
                     self.globals.set_func(&id.name, ns, symbol)?;
@@ -64,8 +102,8 @@ impl Binder {
                 AstRoot::ExternFunc(typ, id, args, ..) => {
                     let symbol = FuncDef {
                         pos: id.position.clone(),
-                        args: args.clone(),
-                        ret: typ.clone(),
+                        args: self.bind_args(args.clone(), &ns)?,
+                        ret: self.bind_type(typ, &ns)?,
                         extrn: true,
                     };
                     self.globals.set_func(&id.name, ns, symbol)?;
@@ -79,13 +117,14 @@ impl Binder {
         for root in ast.nodes {
             match root {
                 AstRoot::Func(typ, id, args, ast_nodes) => {
+                    let args = self.bind_args(args, &ast.namespace)?;
                     let body =
                         FuncBinder::new(self, ast.namespace.clone()).bind_func(&args, ast_nodes)?;
                     self.functions.push(IrFunc {
                         name: id.name,
                         namespace: ast.namespace.clone(),
                         args,
-                        typ,
+                        typ: self.bind_type(&typ, &ast.namespace)?,
                         body,
                     });
                 }
@@ -268,7 +307,13 @@ impl<'a> FuncBinder<'a> {
                         self.nodes.push(IrNode::Call { args, ret: *ret });
                         Ok(func_ret)
                     }
-                    Type::Custom(_) => todo!(),
+                    Type::Struct(fields) => {
+                        TypeCheck::check_callargs(&fields, &args_types)?;
+                        let typ = Type::Struct(fields.clone());
+                        let fields = fields.into_iter().map(|f| f.arg_type).collect();
+                        self.nodes.push(IrNode::Struct { fields });
+                        Ok(typ)
+                    }
                     typ => {
                         let msg = format!("symbol has type {typ} which is not a func or struct");
                         Error::syntatic(msg, Position::default())?
@@ -284,10 +329,48 @@ impl<'a> FuncBinder<'a> {
             }
             Expression::Cast { value, as_type } => {
                 let from = self.bind_expr(*value)?;
-                let to = as_type.clone();
+                let to = self.binder.bind_type(&as_type, &self.namespace)?;
+                let res = to.clone();
                 TypeCheck::check_cast(&from, &to, Position::default())?;
                 self.nodes.push(IrNode::Cast { from, to });
-                Ok(as_type)
+                Ok(res)
+            }
+            Expression::Field { expr, field } => {
+                let typ = self.bind_expr(*expr)?;
+                let (mut fields, by_ref) = if let Type::Pointer(inner) = &typ
+                    && let Type::Struct(ref fields) = **inner
+                {
+                    (fields.clone(), true)
+                } else if let Type::Struct(fields) = &typ {
+                    (fields.clone(), false)
+                } else {
+                    let msg = format!("cannot do a member access into the type {typ}");
+                    Error::syntatic(msg, Position::default())?
+                };
+                fields.reverse();
+                let mut offset = Vec::new();
+                let typ = loop {
+                    let Some(item) = fields.pop() else {
+                        let msg = format!("field {} does not exists in type {typ}", field.name);
+                        Error::syntatic(msg, Position::default())?
+                    };
+                    offset.push(item.arg_type.clone());
+                    if item.name == field.name {
+                        break item.arg_type;
+                    }
+                };
+                self.nodes.push(IrNode::Field { offset, by_ref });
+                Ok(typ)
+            }
+            Expression::Member { ns, member } => {
+                if let Some(typ) = self.binder.globals.get_any(&member.name, &ns.name) {
+                    let value = self.bind_global(member, ns.name.into())?;
+                    self.nodes.push(IrNode::Load { value });
+                    return Ok(typ);
+                } else {
+                    let msg = format!("member {} not found in namespace {}", member.name, ns.name);
+                    Error::syntatic(msg, Position::default())?
+                }
             }
         }
     }
@@ -296,10 +379,12 @@ impl<'a> FuncBinder<'a> {
         match node {
             AstNode::TypedVar(typ, name, Some(expr)) => {
                 self.bind_expr(expr)?;
+                let typ = self.binder.bind_type(&typ, &self.namespace)?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
             }
             AstNode::TypedVar(typ, name, None) => {
+                let typ = self.binder.bind_type(&typ, &self.namespace)?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Alloc { index, typ });
             }

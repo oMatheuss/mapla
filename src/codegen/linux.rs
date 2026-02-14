@@ -44,7 +44,7 @@ pub fn compile_call(
 
     c.scope.new_call(stack_offset as usize);
 
-    if let Type::Custom(..) = typ {
+    if let Type::Struct(..) = typ {
         todo!("implement return value greater than 8 bytes");
     }
 
@@ -130,7 +130,7 @@ pub fn compile_call(
             assert!(c.xmms.take(xmm), "return register should be available");
             Operand::Xmm(xmm)
         }
-        Type::Custom(..) => todo!(),
+        Type::Struct(..) => todo!(),
         _ => {
             let reg = Reg::acc(mem_size);
             assert!(c.regs.take(reg), "return register should be available");

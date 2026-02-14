@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
-use crate::ast::{Ast, AstNode, AstRoot, Expression, Identifier, Literal};
+use crate::ast::{Ast, AstArgument, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
 use crate::error::{Error, PositionResult, Result};
 use crate::source::Source;
 use crate::token::{Token, TokenStream};
-use crate::types::{Argument, Type};
 
 // At some point this was not opaque
 pub struct Parser;
@@ -81,6 +80,15 @@ impl Parser {
             Token::FloatLiteral(float) => Expression::float(float),
             Token::True => Expression::TRUE,
             Token::False => Expression::FALSE,
+            Token::Identifier(ns) if matches!(ts.peek(), Some(Token::DuoColon)) => {
+                ts.next(); // consume duo colon
+                let ns = Identifier::new(ns, ts.pos());
+                let Token::Identifier(member) = self.next_or_err(ts)? else {
+                    Error::syntatic("expected namespace member", ts.pos())?
+                };
+                let member = Identifier::new(member, ts.pos());
+                Expression::member(ns, member)
+            }
             Token::Identifier(name) => Expression::id(name, ts.pos()),
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(ts, 1)?;
@@ -96,14 +104,13 @@ impl Parser {
     }
 
     fn parse_expr(&self, ts: &mut TokenStream, min_prec: u8) -> Result<Expression> {
-        let mut lhs = match ts.peek_unaop() {
-            Some(op) => {
-                self.next_or_err(ts)?;
-                let prec = op.precedence();
-                let operand = self.parse_expr(ts, prec)?;
-                Expression::una_op(op, operand)
-            }
-            None => self.parse_atom(ts)?,
+        let mut lhs = if let Some(op) = ts.peek_unaop() {
+            self.next_or_err(ts)?;
+            let prec = op.precedence();
+            let operand = self.parse_expr(ts, prec)?;
+            Expression::una_op(op, operand)
+        } else {
+            self.parse_atom(ts)?
         };
 
         loop {
@@ -122,7 +129,11 @@ impl Parser {
                 let args = self.parse_callargs(ts)?;
                 lhs = Expression::call(lhs, args);
             } else if let Some(Token::Dot) = ts.peek() {
-                todo!();
+                ts.next(); // consume dot
+                let Token::Identifier(member) = self.next_or_err(ts)? else {
+                    Error::syntatic("expected member name after dot", ts.pos())?
+                };
+                lhs = Expression::field(lhs, member, ts.pos());
             } else if let Some(Token::OpenBracket) = ts.peek() {
                 ts.next(); // consume open bracket
                 let index = self.parse_expr(ts, 1)?;
@@ -192,15 +203,25 @@ impl Parser {
         AstNode::If(expr, inner).ok()
     }
 
-    fn parse_annot(&self, ts: &mut TokenStream) -> Result<Type> {
+    fn parse_annot(&self, ts: &mut TokenStream) -> Result<AstType> {
         let mut base = match self.next_or_err(ts)? {
-            Token::Int => Type::Int,
-            Token::Real => Type::Real,
-            Token::Char => Type::Char,
-            Token::Byte => Type::Byte,
-            Token::Bool => Type::Bool,
-            Token::Void => Type::Void,
-            Token::Identifier(name) => Type::Custom(name.into()),
+            Token::Int => AstType::Int,
+            Token::Real => AstType::Real,
+            Token::Char => AstType::Char,
+            Token::Byte => AstType::Byte,
+            Token::Bool => AstType::Bool,
+            Token::Void => AstType::Void,
+            Token::Identifier(name) => {
+                let mut segments = vec![name.into()];
+                while let Some(Token::DuoColon) = ts.peek() {
+                    ts.next();
+                    let Token::Identifier(segment) = self.next_or_err(ts)? else {
+                        Error::syntatic("expected identifier after `::`", ts.pos())?
+                    };
+                    segments.push(segment.into());
+                }
+                AstType::Named(segments)
+            }
             _ => Error::syntatic("expected type annotation", ts.pos())?,
         };
         let ty = match ts.peek() {
@@ -212,14 +233,14 @@ impl Parser {
                 let Token::CloseBracket = self.next_or_err(ts)? else {
                     Error::syntatic("expected close bracket", ts.pos())?
                 };
-                Type::Array(Box::new(base), size as u32)
+                AstType::Array(Box::new(base), size as u32)
             }
             Some(Token::Mul) => {
                 self.next_or_err(ts)?; // discard asterisk
-                base = Type::Pointer(Box::new(base));
+                base = AstType::Pointer(Box::new(base));
                 while let Some(Token::Mul) = ts.peek() {
                     self.next_or_err(ts)?; // discard asterisk
-                    base = Type::Pointer(Box::new(base));
+                    base = AstType::Pointer(Box::new(base));
                 }
                 base
             }
@@ -274,7 +295,7 @@ impl Parser {
         AstRoot::Global(typ, id, expr).ok()
     }
 
-    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<Vec<Argument>> {
+    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<Vec<AstArgument>> {
         let Token::OpenParen = self.next_or_err(ts)? else {
             Error::syntatic("expected open parenthesis `(`", ts.pos())?
         };
@@ -289,7 +310,7 @@ impl Parser {
                         Error::syntatic("expected token `:`", ts.pos())?
                     };
                     let arg_type = self.parse_annot(ts)?;
-                    args.push(Argument {
+                    args.push(AstArgument {
                         name: name.into(),
                         arg_type,
                     });
@@ -350,7 +371,7 @@ impl Parser {
                 };
                 ret_type
             }
-            Token::Do => Type::Void,
+            Token::Do => AstType::Void,
             _ => Error::syntatic("expected type annotation or `do`", ts.pos())?,
         };
         let inner = self.consume_inner(ts)?;
@@ -379,7 +400,7 @@ impl Parser {
             self.next_or_err(ts)?;
             self.parse_annot(ts)?
         } else {
-            Type::Void
+            AstType::Void
         };
         self.consume_semi(ts)?;
         AstRoot::ExternFunc(annot, id, args).ok()

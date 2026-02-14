@@ -26,6 +26,20 @@ fn run() -> Result<()> {
     let main = Parser::parse(main)?;
     let mut binder = Binder::new();
 
+    let mut files = main.imports.clone();
+    let mut codes = Vec::new();
+
+    while let Some(file) = files.pop() {
+        let code = sources.source(&file)?;
+        let code = Parser::parse(code)?;
+        binder.bind_globals(&code)?;
+        codes.push(code);
+    }
+
+    while let Some(code) = codes.pop() {
+        binder.bind_ast(code)?;
+    }
+
     binder.bind_globals(&main)?;
     binder.bind_ast(main)?;
 

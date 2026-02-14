@@ -59,6 +59,7 @@ pub enum Token<'a> {
     CloseBracket,
     Comma,
     Colon,
+    DuoColon,
     SemiColon,
     Amp,
     Til,

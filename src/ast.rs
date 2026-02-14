@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 use crate::error::Result;
 use crate::position::Position;
-use crate::types::{Argument, Type};
 
 #[derive(Debug, Default)]
 pub struct Ast {
@@ -20,6 +19,25 @@ impl Ast {
             ..Default::default()
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum AstType {
+    Int,
+    Real,
+    Byte,
+    Char,
+    Bool,
+    Void,
+    Pointer(Box<AstType>),
+    Array(Box<AstType>, u32),
+    Named(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstArgument {
+    pub name: String,
+    pub arg_type: AstType,
 }
 
 #[derive(Debug, Clone)]
@@ -58,7 +76,15 @@ pub enum Expression {
     },
     Cast {
         value: Box<Expression>,
-        as_type: Type,
+        as_type: AstType,
+    },
+    Field {
+        expr: Box<Expression>,
+        field: Identifier,
+    },
+    Member {
+        ns: Identifier,
+        member: Identifier,
     },
 }
 
@@ -125,11 +151,22 @@ impl Expression {
     }
 
     #[inline]
-    pub fn cast(expr: Expression, as_type: Type) -> Self {
+    pub fn cast(expr: Expression, as_type: AstType) -> Self {
         Self::Cast {
             value: Box::new(expr),
             as_type,
         }
+    }
+
+    pub fn field(expr: Expression, field: &str, pos: Position) -> Self {
+        Self::Field {
+            expr: expr.into(),
+            field: Identifier::new(field, pos),
+        }
+    }
+
+    pub fn member(ns: Identifier, member: Identifier) -> Self {
+        Self::Member { ns, member }
     }
 }
 
@@ -150,10 +187,10 @@ impl Identifier {
 
 #[derive(Debug)]
 pub enum AstRoot {
-    Global(Type, Identifier, Option<Literal>),
-    Struct(Identifier, Vec<Argument>),
-    Func(Type, Identifier, Vec<Argument>, Vec<AstNode>),
-    ExternFunc(Type, Identifier, Vec<Argument>),
+    Global(AstType, Identifier, Option<Literal>),
+    Struct(Identifier, Vec<AstArgument>),
+    Func(AstType, Identifier, Vec<AstArgument>, Vec<AstNode>),
+    ExternFunc(AstType, Identifier, Vec<AstArgument>),
 }
 
 impl AstRoot {
@@ -164,7 +201,7 @@ impl AstRoot {
 
 #[derive(Debug)]
 pub enum AstNode {
-    TypedVar(Type, String, Option<Expression>),
+    TypedVar(AstType, String, Option<Expression>),
     Var(String, Expression),
     If(Expression, Vec<AstNode>),
     While(Expression, Vec<AstNode>),

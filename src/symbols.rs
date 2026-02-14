@@ -120,7 +120,7 @@ impl SymbolTable {
         }
 
         match self.types.get(&key) {
-            Some(..) => return Some(Type::Custom(key.name)),
+            Some(sym) => return Some(Type::Struct(sym.fields.clone())),
             None => {}
         }
 

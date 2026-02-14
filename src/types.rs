@@ -13,7 +13,7 @@ pub enum Type {
     Func(Vec<Argument>, Box<Type>),
     Pointer(Box<Type>),
     Array(Box<Type>, u32),
-    Custom(String),
+    Struct(Vec<Argument>),
 }
 
 impl Type {
@@ -56,10 +56,15 @@ impl Type {
         matches!(self, Type::Func(..))
     }
 
+    pub fn is_struct(&self) -> bool {
+        matches!(self, Type::Struct(..))
+    }
+
     pub fn is_compatible(&self, other: &Self) -> bool {
         match (self, other) {
             (_, _) if self == other => true,
             (Self::Array(first, ..), Self::Pointer(second)) if *first == *second => true,
+            (Self::Pointer(..), second) if second.is_void_ptr() => true,
             (Self::Func(..), second) if second.is_void_ptr() => true,
             _ => false,
         }
@@ -78,7 +83,7 @@ impl std::fmt::Display for Type {
             Self::Func(args, ret) => write!(f, "func({args:?}): {ret}"),
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
-            Self::Custom(name) => write!(f, "{name}"),
+            Self::Struct(fields) => write!(f, "struct({fields:?})"),
         }
     }
 }
@@ -166,6 +171,7 @@ impl TypeCheck {
     pub fn check_cast(from: &Type, to: &Type, pos: Position) -> Result<()> {
         let allowed = from.is_number() && to.is_number()
             || from.is_void_ptr() && to.is_ptr()
+            || from.is_ptr() && to.is_void_ptr()
             || from.is_func() && to.is_void_ptr();
 
         if !allowed {
@@ -199,7 +205,6 @@ impl TypeCheck {
 
         for (func_arg, arg) in func_args.iter().zip(args) {
             if !arg.is_compatible(&func_arg.arg_type) {
-                dbg!(func_arg, arg);
                 return Error::type_err("wrong type provided to the function", pos);
             }
         }

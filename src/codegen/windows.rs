@@ -57,7 +57,6 @@ pub fn compile_call(
         let reg = call_regs(i, MemSize::QWord).unwrap();
         let mem = c.scope.new_sized_temp(c.type_size(typ), MemSize::QWord);
         asm::code!(c.code, Lea, reg, mem);
-        c.scope.push(mem);
         i += 1;
     }
 
@@ -178,7 +177,7 @@ pub fn compile_ret_struct(c: &mut CodeGen, ret: Operand, size: usize) {
     assert!(ret.is_mem());
     let dst = Reg::acc(MemSize::QWord);
     // assume the return address is the first variable in this stack frame
-    let mem = Mem::reg(Reg::Rbp, MemSize::QWord);
+    let mem = Mem::offset(Reg::Rbp, -8, MemSize::QWord);
     asm::code!(c.code, Mov, dst, mem);
     let src = Reg::src(MemSize::QWord);
     asm::code!(c.code, Lea, src, ret);

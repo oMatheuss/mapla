@@ -121,20 +121,24 @@ impl CodeGen {
         }
     }
 
+    pub(self) fn clear_all_regs(&mut self) {
+        let mut vec = Vec::new();
+        while let Some(val) = self.scope.pop() {
+            let mem = self.move_operand_to_mem(val);
+            vec.push(mem);
+        }
+        while let Some(val) = vec.pop() {
+            self.scope.push(val);
+        }
+    }
+
     pub(self) fn type_size(&self, typ: &Type) -> usize {
         match typ {
             Type::Void => 0,
             Type::Byte | Type::Char | Type::Bool => 1,
             Type::Int | Type::Real => 4,
             Type::Func(..) | Type::Pointer(..) | Type::Array(..) => 8,
-            Type::Custom(name) => self
-                .symbols
-                .get_type(name, "global")
-                .unwrap()
-                .fields
-                .iter()
-                .map(|f| self.type_size(&f.arg_type))
-                .sum(),
+            Type::Struct(fields) => fields.iter().map(|f| self.type_size(&f.arg_type)).sum(),
         }
     }
 
@@ -242,7 +246,8 @@ impl CodeGen {
                         }
                     }
                     _ => {
-                        let local = self.scope.set_sized_var(index, size, MemSize::QWord);
+                        let mem_size = size.try_into().unwrap_or(MemSize::QWord);
+                        let local = self.scope.set_sized_var(index, size, mem_size);
                         match val {
                             Operand::Reg(src) => {
                                 // assume src contains a pointer to the struct
@@ -321,6 +326,7 @@ impl CodeGen {
                     let lbl = Lbl::from_label(&name);
                     self.scope.push(Operand::Lbl(lbl));
                 }
+                IrArg::Global { ns: _, name, typ } if typ.is_struct() => {}
                 IrArg::Global { ns: _, name, typ } => {
                     let lbl = Lbl::from_label(&name);
                     let mem_size = self.type_size(&typ).try_into().unwrap();
@@ -731,6 +737,7 @@ impl CodeGen {
                 self.scope.push(arg);
             }
             IrNode::Call { args, ret } => {
+                self.clear_all_regs();
                 let func = self.scope.pop().unwrap();
                 let mut values = Vec::new();
                 for arg in args.into_iter().rev() {
@@ -826,6 +833,45 @@ impl CodeGen {
                 } else {
                     todo!("conversion between {from} to {to} not implemented yet");
                 }
+            }
+            IrNode::Field { mut offset, by_ref } => {
+                let item = self.scope.pop().unwrap();
+                let field_type = offset.pop().unwrap();
+                let type_size = self.type_size(&field_type);
+                let mem_size = type_size.try_into().unwrap_or(MemSize::QWord);
+                let offset: usize = offset.iter().map(|f| self.type_size(f)).sum();
+                let base = if by_ref {
+                    self.move_operand_to_reg(&field_type, item).expect_reg()
+                } else {
+                    let reg = self.regs.take_any(MemSize::QWord);
+                    asm::code!(self.code, Lea, reg, item);
+                    reg
+                };
+                let field_mem = Mem::offset(base, offset as isize, mem_size).into();
+                self.scope.push(field_mem);
+            }
+            IrNode::Struct { fields } => {
+                let type_size: usize = fields.iter().map(|f| self.type_size(&f)).sum();
+                let mut values = Vec::new();
+                for field_type in fields.into_iter().rev() {
+                    let value = self.scope.pop().unwrap();
+                    values.push((value, field_type));
+                }
+                let base_mem_size = type_size.try_into().unwrap_or(MemSize::QWord);
+                let base_reg = self.regs.take_any(MemSize::QWord);
+                let base_mem = self.scope.new_sized_temp(type_size, base_mem_size);
+                asm::code!(self.code, Lea, base_reg, base_mem);
+                let mut offset = 0;
+                for (operand, field_type) in values.into_iter().rev() {
+                    let operand_reg = self.move_operand_to_reg(&field_type, operand);
+                    let mem_size = self.type_size(&field_type).try_into().unwrap();
+                    let offset_mem = Mem::offset(base_reg, offset, mem_size);
+                    asm::code!(self.code, Mov, offset_mem, operand_reg);
+                    self.regs.try_push(operand_reg);
+                    offset += self.type_size(&field_type) as isize;
+                }
+                self.regs.push(base_reg);
+                self.scope.push(base_mem);
             }
             IrNode::Inc => {
                 let value = self.scope.pop().unwrap();

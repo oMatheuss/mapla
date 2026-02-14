@@ -210,6 +210,10 @@ impl<'a> Lexer<'a> {
             }
             ('/', _) => Token::Div,
             (',', _) => Token::Comma,
+            (':', Some(':')) => {
+                self.next();
+                Token::DuoColon
+            }
             (':', _) => Token::Colon,
             (';', _) => Token::SemiColon,
             ('.', _) => Token::Dot,
