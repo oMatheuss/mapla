@@ -1,22 +1,22 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::error::Result;
 use crate::lexer::Lexer;
 use crate::token::TokenStream;
 
 pub struct SourceManager<'a> {
-    main: &'a str,
-    dir: PathBuf,
+    main: &'a Path,
+    dir: &'a Path,
 }
 
 #[derive(Eq, Hash, PartialEq)]
 pub struct Source<'a> {
-    pub file: &'a str,
+    pub file: &'a Path,
     pub src: String,
 }
 
 impl<'a> SourceManager<'a> {
-    pub fn new(main: &'a str, dir: PathBuf) -> Self {
+    pub fn new(main: &'a Path, dir: &'a Path) -> Self {
         Self { main, dir }
     }
 
@@ -27,7 +27,7 @@ impl<'a> SourceManager<'a> {
         self.source(self.main)
     }
 
-    pub fn source<'b>(&self, file: &'b str) -> Result<Source<'b>> {
+    pub fn source<'b>(&self, file: &'b Path) -> Result<Source<'b>> {
         let path = self.dir.join(file);
         let src = std::fs::read_to_string(path)?;
 

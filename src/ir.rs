@@ -1,153 +1,141 @@
-use crate::ast;
-use crate::types::{Annotated, TypeAnnot};
+use std::fmt::Display;
+use std::rc::Rc;
+
+use crate::ast::{BinOpe, UnaOpe};
+use crate::types::{Argument, Type};
 
 #[derive(Debug, Clone)]
-pub enum IrExprOpe {
-    Value {
-        value: ast::ValueExpr,
-    },
-    UnaOp {
-        operator: ast::UnaryOperator,
-        operand: usize,
-    },
-    BinOp {
-        operator: ast::Operator,
-        lhs: usize,
-        rhs: usize,
-        annot: TypeAnnot,
-    },
-    Func {
-        name: ast::Identifier,
-        args: Vec<(usize, TypeAnnot)>,
-    },
-    Index {
-        array: usize,
-        index: usize,
-    },
-    Cast {
-        value: usize,
-        cast_from: TypeAnnot,
-    },
-    Alloc {
-        args: Vec<(usize, TypeAnnot)>,
-    },
-    Field {
-        value: usize,
-        offset: usize,
-        is_ref: bool,
-    },
+pub struct IrFunc {
+    pub name: String,
+    pub namespace: Rc<String>,
+    pub args: Vec<Argument>,
+    pub typ: Type,
+    pub body: Vec<IrNode>,
 }
 
 #[derive(Debug, Clone)]
-pub struct IrExpr {
-    pub id: usize,
-    pub annot: TypeAnnot,
-    pub ope: IrExprOpe,
-    pub assign: bool,
+#[rustfmt::skip]
+pub enum IrNode {
+    Store { index: usize, typ: Type },
+    Alloc { index: usize, typ: Type },
+    Load { value: IrArg },
+    Pop,
+    UnaOp { ope: UnaOpe, typ: Type },
+    BinOp { ope: BinOpe, typ: Type },
+    Arg,
+    Call { args: Vec<Argument>, ret: Type },
+    Index { typ: Type },
+    Cast { from: Type, to: Type },
+    Field { offset: Vec<Type>, by_ref: bool },
+    Struct { fields: Vec<Type> },
+    Inc,
+    Label { label: usize },
+    Jmp { label: usize },
+    JmpEq { label: usize },
+    JmpFalse { label: usize },
+    Return { typ: Type },
 }
 
-impl IrExpr {
-    fn new(id: usize, annot: TypeAnnot, ope: IrExprOpe, assign: bool) -> Self {
-        IrExpr {
-            id,
-            annot,
-            ope,
-            assign,
-        }
+#[derive(Debug, Clone)]
+pub enum IrLiteral {
+    String { label: String },
+    Byte(u8),
+    Int(i32),
+    Float(f32),
+    Bool(bool),
+}
+
+#[derive(Debug, Clone)]
+#[rustfmt::skip]
+pub enum IrArg {
+    Var { index: usize, typ: Type },
+    Literal { value: IrLiteral },
+    Global { ns: Rc<String>, name: String, typ: Type },
+}
+
+impl IrArg {
+    pub fn var(index: usize, typ: Type) -> Self {
+        Self::Var { index, typ }
     }
 
-    pub fn from_expr(expr: &ast::Expression) -> Vec<IrExpr> {
-        let mut ir_exprs = Vec::new();
-        parse_expr(expr, &mut ir_exprs, 0, false);
-        ir_exprs
+    pub fn get_type(&self) -> Type {
+        match self {
+            IrArg::Var { index: _, typ } => typ.clone(),
+            IrArg::Literal { value } => match value {
+                IrLiteral::String { .. } => Type::ptr_to(Type::Char),
+                IrLiteral::Byte(_) => Type::Byte,
+                IrLiteral::Int(_) => Type::Int,
+                IrLiteral::Float(_) => Type::Real,
+                IrLiteral::Bool(_) => Type::Bool,
+            },
+            IrArg::Global {
+                ns: _,
+                name: _,
+                typ,
+            } => typ.clone(),
+        }
     }
 }
 
-fn parse_expr(expr: &ast::Expression, exprs: &mut Vec<IrExpr>, max: usize, assign: bool) {
-    use ast::Expression::*;
+impl From<IrLiteral> for IrArg {
+    fn from(value: IrLiteral) -> Self {
+        Self::Literal { value }
+    }
+}
 
-    let id = max;
-    let expr = match expr {
-        Value(value) => {
-            let ope = IrExprOpe::Value {
-                value: value.clone(),
-            };
-            IrExpr::new(id, value.get_annot(), ope, assign)
+impl Display for IrFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}@{}:", self.name, self.namespace)?;
+        for node in self.body.iter() {
+            writeln!(f, "{node}")?;
         }
-        UnaOp(unary) => {
-            parse_expr(unary.operand(), exprs, max + 1, false);
-            let ope = IrExprOpe::UnaOp {
-                operator: unary.operator(),
-                operand: max + 1,
-            };
-            IrExpr::new(id, unary.get_annot(), ope, assign)
-        }
-        BinOp(binary) => {
-            let operator = binary.operator();
-            parse_expr(binary.rhs(), exprs, max + 1, false);
-            parse_expr(binary.lhs(), exprs, max + 2, operator.is_assign());
-            let ope = IrExprOpe::BinOp {
-                operator,
-                lhs: max + 2,
-                rhs: max + 1,
-                annot: binary.lhs().get_annot(),
-            };
-            IrExpr::new(id, binary.get_annot(), ope, false)
-        }
-        Func(call) => {
-            let mut args = Vec::new();
-            let mut max = max;
-            for arg in call.args() {
-                max += 1;
-                parse_expr(arg, exprs, max, false);
-                args.push((max, arg.get_annot()));
-            }
-            let ope = IrExprOpe::Func {
-                name: call.name().into(),
-                args,
-            };
-            IrExpr::new(id, call.get_annot(), ope, false)
-        }
-        Index(index) => {
-            parse_expr(index.index(), exprs, max + 1, false);
-            parse_expr(index.array(), exprs, max + 2, false);
-            let ope = IrExprOpe::Index {
-                array: max + 2,
-                index: max + 1,
-            };
-            IrExpr::new(id, index.get_annot(), ope, assign)
-        }
-        Cast(cast) => {
-            let value = cast.value();
-            parse_expr(value, exprs, max + 1, false);
-            let ope = IrExprOpe::Cast {
-                value: max + 1,
-                cast_from: value.get_annot(),
-            };
-            IrExpr::new(id, cast.get_annot(), ope, assign)
-        }
-        Alloc(alloc) => {
-            let mut args = Vec::new();
-            let mut max = max;
-            for arg in alloc.args() {
-                max += 1;
-                parse_expr(arg, exprs, max, false);
-                args.push((max, arg.get_annot()));
-            }
-            let ope = IrExprOpe::Alloc { args };
-            IrExpr::new(id, alloc.get_annot(), ope, false)
-        }
-        Field(field) => {
-            let value = field.value();
-            parse_expr(value, exprs, max + 1, false);
-            let ope = IrExprOpe::Field {
-                value: max + 1,
-                offset: field.offset(),
-                is_ref: field.is_ref(),
-            };
-            IrExpr::new(id, field.get_annot(), ope, assign)
-        }
-    };
+        Ok(())
+    }
+}
 
-    exprs.push(expr);
+impl Display for IrNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IrNode::Store { index, .. } => write!(f, "\tstore\t{index}"),
+            IrNode::Alloc { index, typ } => write!(f, "\talloc\t{index} {typ}"),
+            IrNode::Load { value } => write!(f, "\tload\t{value}"),
+            IrNode::Pop => write!(f, "\tpop"),
+            IrNode::UnaOp { ope, .. } => write!(f, "\tunaop\t{ope:?}"),
+            IrNode::BinOp { ope, .. } => write!(f, "\tbinop\t{ope:?}"),
+            IrNode::Arg => write!(f, "\targ"),
+            IrNode::Call { .. } => write!(f, "\tcall"),
+            IrNode::Index { .. } => write!(f, "\tindex"),
+            IrNode::Cast { from, to } => write!(f, "\tcast\tfrom {from} to {to}"),
+            IrNode::Field { offset, .. } => write!(f, "\tmember {}", offset.len()),
+            IrNode::Struct { fields } => write!(f, "\tstruct {}", fields.len()),
+            IrNode::Inc => write!(f, "\tinc\t"),
+            IrNode::Label { label } => write!(f, ".L{label}"),
+            IrNode::Jmp { label } => write!(f, "\tjmp\t.L{label}"),
+            IrNode::JmpEq { label } => write!(f, "\tjmpeq\t.L{label}"),
+            IrNode::JmpFalse { label } => write!(f, "\tjmpfalse .L{label}"),
+            IrNode::Return { .. } => write!(f, "\treturn"),
+        }
+    }
+}
+
+impl Display for IrArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IrArg::Var { index, typ } => write!(f, "var {index}: {typ}"),
+            IrArg::Literal { value } => write!(f, "literal {value}"),
+            IrArg::Global { ns, name, typ } => write!(f, "global {}@{name}: {typ}", *ns),
+        }
+    }
+}
+
+impl Display for IrLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IrLiteral::String { label } => write!(f, "[{label}]"),
+            IrLiteral::Byte(b) => write!(f, "{b}"),
+            IrLiteral::Int(i) => write!(f, "{i}"),
+            IrLiteral::Float(v) => write!(f, "{v}"),
+            IrLiteral::Bool(b) => write!(f, "{b}"),
+        }
+    }
 }

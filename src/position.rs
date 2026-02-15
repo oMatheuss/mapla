@@ -1,17 +1,18 @@
 use std::fmt::Display;
+use std::rc::Rc;
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Position<'a> {
-    file: &'a str,
+#[derive(Debug, Clone, Default)]
+pub struct Position {
+    file: Rc<String>,
     index: usize,
     column: usize,
     line: usize,
 }
 
-impl<'a> Position<'a> {
-    pub fn new(file: &'a str) -> Self {
+impl Position {
+    pub fn new(file: &str) -> Self {
         Self {
-            file,
+            file: Rc::new(String::from(file)),
             index: 0,
             column: 1,
             line: 1,
@@ -37,7 +38,7 @@ impl<'a> Position<'a> {
     }
 }
 
-impl<'a> Display for Position<'a> {
+impl<'a> Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}:{}", self.file, self.line, self.column)
     }

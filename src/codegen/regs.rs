@@ -62,14 +62,14 @@ where
         Self::get_reg(reg.0, mem_size)
     }
 
-    pub fn ensure(&mut self, ope: T) -> bool {
+    pub fn ensure(&self, ope: T) -> bool {
         match self.registers.get(Self::name(ope)) {
             Some(false) => true,
             Some(true) | None => false,
         }
     }
 
-    pub fn switch_size(&mut self, ope: T, mem_size: MemSize) -> T {
+    pub fn switch_size(&self, ope: T, mem_size: MemSize) -> T {
         Self::get_reg(Self::name(ope), mem_size)
     }
 }

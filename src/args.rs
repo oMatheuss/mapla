@@ -6,8 +6,8 @@ use crate::target::CompilerTarget;
 #[derive(Debug, Default)]
 pub struct CompilerConfig {
     pub dir: PathBuf,
-    pub input: String,
-    pub output: Option<String>,
+    pub input: PathBuf,
+    pub output: Option<PathBuf>,
     pub target: CompilerTarget,
 }
 
@@ -24,7 +24,7 @@ pub fn parse_args() -> Result<CompilerConfig> {
         match arg.as_str() {
             "-o" | "--output" => {
                 config.output = match args.next() {
-                    Some(output) => Some(output),
+                    Some(output) => Some(output.into()),
                     None => Error::cli("output path must be informed after -o flag")?,
                 }
             }
@@ -39,7 +39,7 @@ pub fn parse_args() -> Result<CompilerConfig> {
     }
 
     config.input = match input {
-        Some(input) => input,
+        Some(input) => input.into(),
         None => Error::cli("no input file provided")?,
     };
 

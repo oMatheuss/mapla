@@ -1,125 +1,98 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-
 use super::asm::{Mem, MemSize, Operand, Reg};
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ScopeContext {
+#[derive(Debug, Default)]
+pub struct Scope {
     // actual stack offset of local variables
-    pub local_off: isize,
+    local_off: isize,
 
     // actual stack offset of temp variables
-    pub temp_off: isize,
+    temp_off: isize,
 
     // max stack size needed for a function call
-    pub max_func: usize,
+    max_func: usize,
 
     // max stack offset needed temp variables
-    pub max_temp_off: isize,
+    max_temp_off: isize,
 
-    // label count used for jumps
-    pub lbl_count: usize,
+    // array with local variables (usize -> Operand)
+    locals: Vec<Option<Mem>>,
+
+    // expression stack
+    stack: Vec<Operand>,
 }
 
-impl ScopeContext {
+impl Scope {
+    pub fn set_fixed_var(&mut self, index: usize, mem: Mem) {
+        push_set(&mut self.locals, index, mem.into());
+    }
+
+    pub fn set_sized_var(&mut self, index: usize, size: usize, mem_size: MemSize) -> Operand {
+        self.local_off -= size as isize;
+        let mem = Mem::offset(Reg::Rbp, self.local_off, mem_size);
+        push_set(&mut self.locals, index, mem.into());
+        Operand::Mem(mem)
+    }
+
+    pub fn set_var(&mut self, index: usize, mem_size: MemSize) -> Operand {
+        self.set_sized_var(index, mem_size as usize, mem_size)
+    }
+
+    pub fn get_var(&self, index: usize) -> Option<Operand> {
+        let mem = self.locals.get(index)?.clone()?;
+        Some(mem.into())
+    }
+
+    pub fn new_sized_temp(&mut self, size: usize, mem_size: MemSize) -> Operand {
+        self.temp_off -= size as isize;
+        if self.temp_off < self.max_temp_off {
+            self.max_temp_off = self.temp_off;
+        }
+        let mem = Mem::offset(Reg::Rbp, self.local_off + self.temp_off, mem_size);
+        mem.into()
+    }
+
+    pub fn new_temp(&mut self, mem_size: MemSize) -> Operand {
+        self.new_sized_temp(mem_size as usize, mem_size)
+    }
+
+    pub fn push(&mut self, ope: Operand) {
+        self.stack.push(ope);
+    }
+
+    pub fn push_var(&mut self, index: usize) -> Option<()> {
+        self.push(self.get_var(index)?);
+        Some(())
+    }
+
+    pub fn pop(&mut self) -> Option<Operand> {
+        self.stack.pop()
+    }
+
+    pub fn new_call(&mut self, call_size: usize) {
+        if call_size > self.max_func {
+            self.max_func = call_size;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn reset_temps(&mut self) {
+        assert!(self.stack.is_empty());
+        self.temp_off = 0;
+    }
+
     pub fn get_max(&self) -> u64 {
         self.local_off.abs() as u64 + self.max_temp_off.abs() as u64 + self.max_func as u64
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Scope {
-    pub var: HashMap<String, Mem>,
-    pub ctx: Rc<RefCell<ScopeContext>>,
-    pub sup: Option<Box<Scope>>,
-}
-
-impl Scope {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn new_inner(&mut self) {
-        let cur = std::mem::take(self);
-        let mut src = Self::new();
-        src.sup = Some(Box::new(cur));
-        let _ = std::mem::replace(self, src);
-    }
-
-    pub fn continue_on(&mut self) {
-        let cur = std::mem::take(self);
-        let src = Self {
-            var: HashMap::new(),
-            ctx: cur.ctx.clone(),
-            sup: Some(Box::new(cur)),
-        };
-        let _ = std::mem::replace(self, src);
-    }
-
-    pub fn exit(&mut self) {
-        let cur = std::mem::take(self);
-        let outer = cur.sup.expect("at least global scope should exist");
-        let _ = std::mem::replace(self, *outer);
-    }
-
-    pub fn get(&self, ident: &str) -> Mem {
-        if let Some(local) = self.var.get(ident) {
-            *local
-        } else if let Some(sup) = &self.sup {
-            sup.get(ident)
-        } else {
-            panic!("'{ident}' was not found: variable does not exist")
+fn push_set<T: Default>(vec: &mut Vec<T>, index: usize, item: T) {
+    if index >= vec.len() {
+        for _ in vec.len()..=index {
+            vec.push(T::default());
         }
     }
-
-    #[inline]
-    pub fn set(&mut self, ident: &str, operand: Mem) -> Option<Mem> {
-        self.var.insert(String::from(ident), operand)
-    }
-
-    pub fn alloc(&mut self, ident: &str, size: usize, mem_size: MemSize) -> Operand {
-        let mut mem = self.ctx.borrow_mut();
-        mem.local_off -= size as isize;
-        let mem = Mem::offset(Reg::Rbp, mem.local_off, mem_size);
-        self.var.insert(String::from(ident), mem);
-        Operand::Mem(mem)
-    }
-
-    pub fn new_local(&mut self, ident: &str, mem_size: MemSize) -> Operand {
-        self.alloc(ident, mem_size as usize, mem_size)
-    }
-
-    pub fn alloc_temp(&mut self, size: usize) -> isize {
-        let mut mem = self.ctx.borrow_mut();
-        mem.temp_off -= size as isize;
-        if mem.temp_off < mem.max_temp_off {
-            mem.max_temp_off = mem.temp_off;
-        }
-        mem.local_off + mem.temp_off
-    }
-
-    pub fn new_temp(&mut self, mem_size: MemSize) -> Mem {
-        let offset = self.alloc_temp(mem_size as usize);
-        Mem::offset(Reg::Rbp, offset, mem_size)
-    }
-
-    pub fn new_call(&mut self, call_size: usize) {
-        let mut mem = self.ctx.borrow_mut();
-        if call_size > mem.max_func {
-            mem.max_func = call_size;
-        }
-    }
-
-    #[inline]
-    pub fn reset_temps(&mut self) {
-        self.ctx.borrow_mut().temp_off = 0;
-    }
-
-    #[inline]
-    pub fn new_label(&mut self) -> String {
-        let mut ctx = self.ctx.borrow_mut();
-        ctx.lbl_count += 1;
-        format!(".L{cnt}", cnt = ctx.lbl_count)
-    }
+    vec[index] = item;
 }

@@ -7,6 +7,7 @@ use crate::position::Position;
 pub struct Error {
     kind: ErrorKind,
     message: Cow<'static, str>,
+    position: Option<Position>,
 }
 
 impl std::error::Error for Error {}
@@ -15,6 +16,7 @@ impl std::error::Error for Error {}
 pub enum ErrorKind {
     LexicalError,
     SyntaxError,
+    TypeError,
     CliError,
     IoError,
 }
@@ -28,29 +30,38 @@ impl<T> From<Error> for Result<T> {
 }
 
 impl Error {
-    pub fn new(kind: ErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new(
+        kind: ErrorKind,
+        message: impl Into<Cow<'static, str>>,
+        position: Option<Position>,
+    ) -> Self {
         Self {
             kind,
             message: message.into(),
+            position,
         }
     }
 
-    pub fn lexical<T>(message: &str, position: Position) -> Result<T> {
-        Self::new(ErrorKind::LexicalError, format!("{position} -> {message}")).into()
+    pub fn lexical<T>(message: impl Into<Cow<'static, str>>, position: Position) -> Result<T> {
+        Self::new(ErrorKind::LexicalError, message, Some(position)).into()
     }
 
-    pub fn syntatic<T>(message: &str, position: Position) -> Result<T> {
-        Self::new(ErrorKind::SyntaxError, format!("{position} -> {message}")).into()
+    pub fn syntatic<T>(message: impl Into<Cow<'static, str>>, position: Position) -> Result<T> {
+        Self::new(ErrorKind::SyntaxError, message, Some(position)).into()
+    }
+
+    pub fn type_err<T>(message: impl Into<Cow<'static, str>>, position: Position) -> Result<T> {
+        Self::new(ErrorKind::TypeError, message, Some(position)).into()
     }
 
     pub fn cli<T>(message: impl Into<Cow<'static, str>>) -> Result<T> {
-        Self::new(ErrorKind::CliError, message).into()
+        Self::new(ErrorKind::CliError, message, None).into()
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        Self::new(ErrorKind::IoError, format!("{err}"))
+        Self::new(ErrorKind::IoError, format!("{err}"), None)
     }
 }
 
@@ -65,7 +76,7 @@ where
     fn with_position(self, position: Position) -> Result<T> {
         match self {
             Ok(ok) => Ok(ok),
-            Err(err) => Error::lexical(&err.to_string(), position),
+            Err(err) => Error::lexical(err.to_string(), position),
         }
     }
 }
@@ -75,6 +86,7 @@ impl std::fmt::Display for ErrorKind {
         match self {
             ErrorKind::LexicalError => write!(f, "Lexical Error"),
             ErrorKind::SyntaxError => write!(f, "Syntax Error"),
+            ErrorKind::TypeError => write!(f, "Type Error"),
             ErrorKind::CliError => write!(f, "Error"),
             ErrorKind::IoError => write!(f, "Io Error"),
         }
@@ -83,6 +95,9 @@ impl std::fmt::Display for ErrorKind {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.kind, self.message)
+        match &self.position {
+            Some(pos) => write!(f, "{}: {}: {}", self.kind, pos, self.message),
+            None => write!(f, "{}: {}", self.kind, self.message),
+        }
     }
 }

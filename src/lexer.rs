@@ -8,7 +8,7 @@ use std::str::Chars;
 pub struct Lexer<'a> {
     src: &'a str,
     chs: Peekable<Chars<'a>>,
-    pos: Position<'a>,
+    pos: Position,
 }
 
 impl<'a> Lexer<'a> {
@@ -16,7 +16,7 @@ impl<'a> Lexer<'a> {
         Self {
             src: input.src.as_str(),
             chs: input.src.chars().peekable(),
-            pos: Position::new(input.file),
+            pos: Position::new(input.file.to_string_lossy().as_ref()),
         }
     }
 
@@ -76,7 +76,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_number(&mut self) -> Result<Token<'a>> {
-        let num_pos = self.pos;
+        let num_pos = self.pos.clone();
         let start = self.index();
         let mut state = 0;
         while let Some(ch) = self.peek() {
@@ -117,7 +117,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_string(&mut self) -> Result<Token<'a>> {
-        let str_pos = self.pos;
+        let str_pos = self.pos.clone();
         self.next(); // discard quotation mark
         let start = self.index();
         while let Some(ch) = self.next() {
@@ -210,10 +210,14 @@ impl<'a> Lexer<'a> {
             }
             ('/', _) => Token::Div,
             (',', _) => Token::Comma,
+            (':', Some(':')) => {
+                self.next();
+                Token::DuoColon
+            }
             (':', _) => Token::Colon,
             (';', _) => Token::SemiColon,
             ('.', _) => Token::Dot,
-            _ => Error::lexical("invalid token", self.pos)?,
+            _ => Error::lexical("invalid token", self.pos.clone())?,
         };
 
         Ok(token)
@@ -225,7 +229,7 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            let position = self.pos;
+            let position = self.pos.clone();
             let token = match ch {
                 'a'..='z' | 'A'..='Z' | '_' => self.next_ident(),
                 '0'..='9' => self.next_number(),
@@ -236,7 +240,7 @@ impl<'a> Lexer<'a> {
             return TokenInfo::new(token, position).ok();
         }
 
-        TokenInfo::eof(self.pos).ok()
+        TokenInfo::eof(self.pos.clone()).ok()
     }
 }
 

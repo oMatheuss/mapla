@@ -447,6 +447,20 @@ pub trait MemSized {
     fn mem_size(&self) -> MemSize;
 }
 
+impl TryFrom<usize> for MemSize {
+    type Error = usize;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Byte),
+            2 => Ok(Self::DWord),
+            4 => Ok(Self::DWord),
+            8 => Ok(Self::QWord),
+            _ => Err(value),
+        }
+    }
+}
+
 impl Display for MemSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -712,19 +726,15 @@ thread_local! {
 }
 
 impl Lbl {
-    pub fn new() -> Self {
-        LABELS.with_borrow_mut(|labels| {
-            let id = labels.len();
-            labels.push(format!("L.str.{id}"));
-            Self(id)
-        })
-    }
-
     pub fn from_label(label: &str) -> Self {
         LABELS.with_borrow_mut(|labels| {
-            let id = labels.len();
-            labels.push(String::from(label));
-            Self(id)
+            if let Some((id, _)) = labels.iter().enumerate().find(|(_, l)| *l == label) {
+                Self(id)
+            } else {
+                let id = labels.len();
+                labels.push(String::from(label));
+                Self(id)
+            }
         })
     }
 }
@@ -743,15 +753,23 @@ impl Display for Lbl {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Operand {
+    Lbl(Lbl),
     Reg(Reg),
     Mem(Mem),
     Imm(Imm),
     Xmm(Xmm),
 }
 
+impl Default for Operand {
+    fn default() -> Self {
+        Self::Imm(Imm::TRUE)
+    }
+}
+
 impl Display for Operand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Lbl(lbl) => lbl.fmt(f),
             Self::Reg(reg) => reg.fmt(f),
             Self::Mem(mem) => mem.fmt(f),
             Self::Imm(imm) => imm.fmt(f),
@@ -824,6 +842,7 @@ impl Operand {
 impl MemSized for Operand {
     fn mem_size(&self) -> MemSize {
         match self {
+            Operand::Lbl(lbl) => lbl.mem_size(),
             Operand::Reg(reg) => reg.mem_size(),
             Operand::Mem(mem) => mem.mem_size(),
             Operand::Imm(imm) => imm.mem_size(),
