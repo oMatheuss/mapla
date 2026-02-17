@@ -51,6 +51,7 @@ pub enum IrArg {
     Var { index: usize, typ: Type },
     Literal { value: IrLiteral },
     Global { ns: Rc<String>, name: String, typ: Type },
+    Extern { name: String, typ: Type },
 }
 
 impl IrArg {
@@ -73,6 +74,7 @@ impl IrArg {
                 name: _,
                 typ,
             } => typ.clone(),
+            IrArg::Extern { name: _, typ } => typ.clone(),
         }
     }
 }
@@ -124,6 +126,7 @@ impl Display for IrArg {
             IrArg::Var { index, typ } => write!(f, "var {index}: {typ}"),
             IrArg::Literal { value } => write!(f, "literal {value}"),
             IrArg::Global { ns, name, typ } => write!(f, "global {}@{name}: {typ}", *ns),
+            IrArg::Extern { name, typ } => write!(f, "extern {name}: {typ}"),
         }
     }
 }

@@ -26,6 +26,7 @@ fn run() -> Result<()> {
     let main = Parser::parse(main)?;
     let mut binder = Binder::new();
 
+    let main_ns = main.namespace.clone();
     let mut files = main.imports.clone();
     let mut codes = Vec::new();
 
@@ -47,7 +48,8 @@ fn run() -> Result<()> {
     codegen.gen_intro();
 
     for func in binder.functions {
-        codegen.gen_func(func);
+        let is_entry = func.namespace == main_ns && func.name == "main";
+        codegen.gen_func(func, is_entry);
     }
 
     codegen.gen_data(binder.data);

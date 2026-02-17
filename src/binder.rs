@@ -5,7 +5,7 @@ use crate::ast::{Ast, AstArgument, AstNode, AstRoot, AstType, Expression, Identi
 use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
-use crate::symbols::{FuncDef, GlobalVar, SymbolTable, TypeDef};
+use crate::symbols::{FuncDef, GlobalVar, SymbolTable, SymbolValue, TypeDef};
 use crate::types::{Argument, Type, TypeCheck};
 
 pub struct Binder {
@@ -39,11 +39,11 @@ impl Binder {
                 let mut items = items.clone();
                 let type_name = items.pop().unwrap();
                 let ns = items.pop().unwrap_or(ns.into());
-                let Some(typ) = self.globals.get_any(&type_name, &ns) else {
+                let Some(typ) = self.globals.get(&type_name, &ns) else {
                     let msg = format!("type declaration for '{type_name}' was not found");
                     Error::type_err(msg, Position::default())?
                 };
-                typ
+                typ.as_type()
             }
         };
         Ok(typ)
@@ -245,12 +245,18 @@ impl<'a> FuncBinder<'a> {
     }
 
     fn bind_global(&mut self, id: Identifier, ns: Rc<String>) -> Result<IrArg> {
-        match self.binder.globals.get_any(&id.name, &ns) {
-            Some(typ) => Ok(IrArg::Global {
-                ns: self.namespace.clone(),
-                name: id.name,
-                typ,
-            }),
+        match self.binder.globals.get(&id.name, &ns) {
+            Some(val) => match val {
+                SymbolValue::FuncDef(func) if func.extrn => Ok(IrArg::Extern {
+                    name: id.name,
+                    typ: func.as_type(),
+                }),
+                others => Ok(IrArg::Global {
+                    ns,
+                    name: id.name,
+                    typ: others.as_type(),
+                }),
+            },
             None => Error::syntatic("symbol not found in scope", id.position)?,
         }
     }
@@ -363,14 +369,10 @@ impl<'a> FuncBinder<'a> {
                 Ok(typ)
             }
             Expression::Member { ns, member } => {
-                if let Some(typ) = self.binder.globals.get_any(&member.name, &ns.name) {
-                    let value = self.bind_global(member, ns.name.into())?;
-                    self.nodes.push(IrNode::Load { value });
-                    return Ok(typ);
-                } else {
-                    let msg = format!("member {} not found in namespace {}", member.name, ns.name);
-                    Error::syntatic(msg, Position::default())?
-                }
+                let value = self.bind_global(member, ns.name.into())?;
+                let typ = value.get_type();
+                self.nodes.push(IrNode::Load { value });
+                return Ok(typ);
             }
         }
     }

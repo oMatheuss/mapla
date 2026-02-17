@@ -15,16 +15,45 @@ pub struct FuncDef {
     pub extrn: bool,
 }
 
+impl FuncDef {
+    pub fn as_type(self) -> Type {
+        Type::Func(self.args, Box::new(self.ret))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub pos: Position,
     pub fields: Vec<Argument>,
 }
 
+impl TypeDef {
+    pub fn as_type(self) -> Type {
+        Type::Struct(self.fields)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GlobalVar {
     pub pos: Position,
     pub typ: Type,
+}
+
+#[derive(Debug, Clone)]
+pub enum SymbolValue {
+    FuncDef(FuncDef),
+    TypeDef(TypeDef),
+    GlobalVar(GlobalVar),
+}
+
+impl SymbolValue {
+    pub fn as_type(self) -> Type {
+        match self {
+            SymbolValue::FuncDef(func_def) => func_def.as_type(),
+            SymbolValue::TypeDef(type_def) => type_def.as_type(),
+            SymbolValue::GlobalVar(global_var) => global_var.typ,
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
@@ -87,49 +116,20 @@ impl SymbolTable {
         Ok(())
     }
 
-    pub fn get_var(&self, name: &str, ns: &str) -> Option<&GlobalVar> {
-        self.values.get(&SymbolKey {
-            name: name.into(),
-            namespace: String::from(ns).into(),
-        })
-    }
-
-    pub fn get_func(&self, name: &str, ns: &str) -> Option<&FuncDef> {
-        self.functions.get(&SymbolKey {
-            name: name.into(),
-            namespace: String::from(ns).into(),
-        })
-    }
-
-    pub fn get_type(&self, name: &str, ns: &str) -> Option<&TypeDef> {
-        self.types.get(&SymbolKey {
-            name: name.into(),
-            namespace: String::from(ns).into(),
-        })
-    }
-
-    pub fn get_any(&self, name: &str, ns: &str) -> Option<Type> {
+    pub fn get(&self, name: &str, ns: &str) -> Option<SymbolValue> {
         let key = SymbolKey {
             name: name.into(),
             namespace: String::from(ns).into(),
         };
-
-        match self.values.get(&key) {
-            Some(sym) => return Some(sym.typ.clone()),
-            None => {}
+        if let Some(value) = self.values.get(&key) {
+            Some(SymbolValue::GlobalVar(value.clone()))
+        } else if let Some(value) = self.functions.get(&key) {
+            Some(SymbolValue::FuncDef(value.clone()))
+        } else if let Some(value) = self.types.get(&key) {
+            Some(SymbolValue::TypeDef(value.clone()))
+        } else {
+            None
         }
-
-        match self.types.get(&key) {
-            Some(sym) => return Some(Type::Struct(sym.fields.clone())),
-            None => {}
-        }
-
-        match self.functions.get(&key) {
-            Some(sym) => return Some(Type::Func(sym.args.clone(), Box::new(sym.ret.clone()))),
-            None => {}
-        }
-
-        None
     }
 
     pub fn iter_extrns(&self) -> impl Iterator<Item = (&SymbolKey, &FuncDef)> {

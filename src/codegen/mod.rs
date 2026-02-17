@@ -163,15 +163,18 @@ impl CodeGen {
     pub fn gen_intro(&mut self) {
         asm::code!(self.code, "bits 64");
         asm::code!(self.code, "section .text");
-        asm::code!(self.code, "global main");
 
         for (sym, ..) in self.symbols.iter_extrns() {
             asm::code!(self.code, "extern {}", sym.name);
         }
     }
 
-    pub fn gen_func(&mut self, func: IrFunc) {
-        asm::code!(self.code, "{}:", func.name);
+    pub fn gen_func(&mut self, func: IrFunc, is_entry: bool) {
+        if is_entry {
+            asm::code!(self.code, "global main");
+            asm::code!(self.code, "main:");
+        }
+        asm::code!(self.code, "{}@{}:", func.namespace, func.name);
         asm::code!(self.code, Push, Reg::Rbp);
         asm::code!(self.code, Mov, Reg::Rbp, Reg::Rsp);
 
@@ -322,8 +325,13 @@ impl CodeGen {
                     IrLiteral::Float(f) => self.scope.push(Operand::Imm(Imm::from_f32(f))),
                     IrLiteral::Bool(b) => self.scope.push(Operand::Imm(Imm::Byte(b as u8))),
                 },
-                IrArg::Global { ns: _, name, typ } if typ.is_func() => {
+                IrArg::Extern { name, .. } => {
                     let lbl = Lbl::from_label(&name);
+                    self.scope.push(Operand::Lbl(lbl));
+                }
+                IrArg::Global { ns, name, typ } if typ.is_func() => {
+                    let magled = format!("{ns}@{name}");
+                    let lbl = Lbl::from_label(&magled);
                     self.scope.push(Operand::Lbl(lbl));
                 }
                 IrArg::Global { ns: _, name, typ } if typ.is_struct() => {}
