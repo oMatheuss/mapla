@@ -21,7 +21,7 @@ mod utils;
 fn run() -> Result<()> {
     let args = args::parse_args()?;
 
-    let sources = SourceManager::new(&args.input, &args.dir);
+    let mut sources = SourceManager::new(&args.input, &args.dir);
     let main = sources.main()?;
     let main = Parser::parse(main)?;
     let mut binder = Binder::new();
@@ -32,9 +32,12 @@ fn run() -> Result<()> {
 
     while let Some(file) = files.pop() {
         let code = sources.source(&file)?;
-        let code = Parser::parse(code)?;
-        binder.bind_globals(&code)?;
-        codes.push(code);
+        if !code.visited {
+            let code = Parser::parse(code)?;
+            files.append(&mut code.imports.clone());
+            binder.bind_globals(&code)?;
+            codes.push(code);
+        }
     }
 
     while let Some(code) = codes.pop() {
