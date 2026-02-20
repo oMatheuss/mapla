@@ -359,7 +359,9 @@ impl CodeGen {
                         Operand::Reg(reg)
                     }
                     UnaOpe::Dereference => {
-                        let size = self.type_size(&typ).try_into().unwrap();
+                        assert!(typ.is_ptr(), "expected value to be a pointer type");
+                        let inner = typ.inner().unwrap();
+                        let size = self.type_size(&inner).try_into().unwrap();
                         match value {
                             Operand::Reg(reg) => Operand::Mem(Mem::reg(reg, size)),
                             Operand::Mem(mem) => {

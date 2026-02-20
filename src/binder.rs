@@ -280,22 +280,18 @@ impl<'a> FuncBinder<'a> {
                 Ok(res)
             }
             Expression::UnaOp { operator, operand } => {
-                let operand = self.bind_expr(*operand)?;
-                let typ = TypeCheck::check_unaexpr(operator, operand, Position::default())?;
-                let res = typ.clone();
+                let typ = self.bind_expr(*operand)?;
+                let ope_type = typ.clone();
+                let res = TypeCheck::check_unaexpr(operator, ope_type, Position::default())?;
                 self.nodes.push(IrNode::UnaOp { ope: operator, typ });
                 Ok(res)
             }
             Expression::BinOp { operator, lhs, rhs } => {
                 let rhs = self.bind_expr(*rhs)?;
-                let ope_type = rhs.clone();
+                let typ = rhs.clone();
                 let lhs = self.bind_expr(*lhs)?;
-                let typ = TypeCheck::check_binexpr(operator, lhs, rhs, Position::default())?;
-                let res = typ.clone();
-                self.nodes.push(IrNode::BinOp {
-                    ope: operator,
-                    typ: ope_type,
-                });
+                let res = TypeCheck::check_binexpr(operator, lhs, rhs, Position::default())?;
+                self.nodes.push(IrNode::BinOp { ope: operator, typ });
                 Ok(res)
             }
             Expression::Call { expr, args } => {

@@ -69,6 +69,14 @@ impl Type {
             _ => false,
         }
     }
+
+    pub fn inner(&self) -> Option<Self> {
+        match self {
+            Type::Pointer(inner) => Some(*inner.clone()),
+            Type::Array(inner, _) => Some(*inner.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
