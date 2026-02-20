@@ -74,7 +74,7 @@ impl Parser {
     fn parse_atom(&self, ts: &mut TokenStream) -> Result<Expression> {
         let expr = match self.next_or_err(ts)? {
             Token::StrLiteral(string) => Expression::Literal {
-                value: self.parse_str(ts, string)?,
+                lit: self.parse_str(ts, string)?,
             },
             Token::IntLiteral(int) => Expression::int(int as i32),
             Token::FloatLiteral(float) => Expression::float(float),
@@ -109,6 +109,10 @@ impl Parser {
             let prec = op.precedence();
             let operand = self.parse_expr(ts, prec)?;
             Expression::una_op(op, operand)
+        } else if let Some(Token::SizeOf) = ts.peek() {
+            ts.next();
+            let expr = self.parse_expr(ts, 12)?;
+            Expression::sizeof(expr)
         } else {
             self.parse_atom(ts)?
         };

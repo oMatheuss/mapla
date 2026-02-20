@@ -55,19 +55,19 @@ pub enum Expression {
         id: Identifier,
     },
     Literal {
-        value: Literal,
+        lit: Literal,
     },
     UnaOp {
-        operator: UnaOpe,
-        operand: Box<Expression>,
+        ope: UnaOpe,
+        val: Box<Expression>,
     },
     BinOp {
-        operator: BinOpe,
+        ope: BinOpe,
         lhs: Box<Expression>,
         rhs: Box<Expression>,
     },
     Call {
-        expr: Box<Expression>,
+        func: Box<Expression>,
         args: Vec<Expression>,
     },
     Index {
@@ -75,8 +75,8 @@ pub enum Expression {
         index: Box<Expression>,
     },
     Cast {
-        value: Box<Expression>,
-        as_type: AstType,
+        val: Box<Expression>,
+        typ: AstType,
     },
     Field {
         expr: Box<Expression>,
@@ -86,14 +86,17 @@ pub enum Expression {
         ns: Identifier,
         member: Identifier,
     },
+    SizeOf {
+        val: Box<Expression>,
+    },
 }
 
 impl Expression {
     pub const TRUE: Self = Self::Literal {
-        value: Literal::Bool(true),
+        lit: Literal::Bool(true),
     };
     pub const FALSE: Self = Self::Literal {
-        value: Literal::Bool(false),
+        lit: Literal::Bool(false),
     };
 
     #[inline]
@@ -106,38 +109,38 @@ impl Expression {
     #[inline]
     pub fn float(f: f32) -> Self {
         Self::Literal {
-            value: Literal::Float(f),
+            lit: Literal::Float(f),
         }
     }
 
     #[inline]
     pub fn int(i: i32) -> Self {
         Self::Literal {
-            value: Literal::Int(i),
+            lit: Literal::Int(i),
         }
     }
 
     #[inline]
-    pub fn bin_op(op: BinOpe, lhs: Expression, rhs: Expression) -> Self {
+    pub fn bin_op(ope: BinOpe, lhs: Expression, rhs: Expression) -> Self {
         Self::BinOp {
-            operator: op,
+            ope,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
         }
     }
 
     #[inline]
-    pub fn una_op(op: UnaOpe, operand: Expression) -> Self {
+    pub fn una_op(ope: UnaOpe, operand: Expression) -> Self {
         Self::UnaOp {
-            operator: op,
-            operand: Box::new(operand),
+            ope,
+            val: Box::new(operand),
         }
     }
 
     #[inline]
     pub fn call(func: Expression, args: Vec<Expression>) -> Self {
         Self::Call {
-            expr: Box::new(func),
+            func: Box::new(func),
             args,
         }
     }
@@ -153,8 +156,8 @@ impl Expression {
     #[inline]
     pub fn cast(expr: Expression, as_type: AstType) -> Self {
         Self::Cast {
-            value: Box::new(expr),
-            as_type,
+            val: Box::new(expr),
+            typ: as_type,
         }
     }
 
@@ -167,6 +170,12 @@ impl Expression {
 
     pub fn member(ns: Identifier, member: Identifier) -> Self {
         Self::Member { ns, member }
+    }
+
+    pub fn sizeof(expr: Expression) -> Self {
+        Self::SizeOf {
+            val: Box::new(expr),
+        }
     }
 }
 

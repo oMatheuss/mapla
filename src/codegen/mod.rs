@@ -883,6 +883,19 @@ impl CodeGen {
                 self.regs.push(base_reg);
                 self.scope.push(base_mem);
             }
+            IrNode::SizeOf { typ } => {
+                let size = match typ {
+                    Type::Array(inner, arr_size) => {
+                        let size = self.type_size(&inner) as u32;
+                        Imm::Dword(size * arr_size).into()
+                    }
+                    _ => {
+                        let size = self.type_size(&typ) as u32;
+                        Imm::Dword(size).into()
+                    }
+                };
+                self.scope.push(size);
+            }
             IrNode::Inc => {
                 let value = self.scope.pop().unwrap();
                 asm::code!(self.code, Inc, value);

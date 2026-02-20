@@ -229,6 +229,12 @@ impl<'a> FuncBinder<'a> {
         self.labels
     }
 
+    fn emit(&mut self, node: IrNode, do_emit: bool) {
+        if do_emit {
+            self.nodes.push(node);
+        }
+    }
+
     fn bind_value(&mut self, value: Literal) -> Result<IrArg> {
         let value = match value {
             Literal::String(s) => {
@@ -244,7 +250,7 @@ impl<'a> FuncBinder<'a> {
         Ok(value)
     }
 
-    fn bind_global(&mut self, id: Identifier, ns: Rc<String>) -> Result<IrArg> {
+    fn bind_global(&self, id: Identifier, ns: Rc<String>) -> Result<IrArg> {
         match self.binder.globals.get(&id.name, &ns) {
             Some(val) => match val {
                 SymbolValue::FuncDef(func) if func.extrn => Ok(IrArg::Extern {
@@ -261,7 +267,7 @@ impl<'a> FuncBinder<'a> {
         }
     }
 
-    fn bind_expr(&mut self, expr: Expression) -> Result<Type> {
+    fn bind_expr(&mut self, expr: Expression, emit: bool) -> Result<Type> {
         match expr {
             Expression::Identifier { id } => {
                 let value = match self.scope.get(&id.name) {
@@ -270,50 +276,50 @@ impl<'a> FuncBinder<'a> {
                     None => self.bind_global(id, self.namespace.clone())?,
                 };
                 let res = value.get_type();
-                self.nodes.push(IrNode::Load { value });
+                self.emit(IrNode::Load { value }, emit);
                 Ok(res)
             }
-            Expression::Literal { value } => {
+            Expression::Literal { lit: value } => {
                 let value = self.bind_value(value)?;
                 let res = value.get_type();
-                self.nodes.push(IrNode::Load { value });
+                self.emit(IrNode::Load { value }, emit);
                 Ok(res)
             }
-            Expression::UnaOp { operator, operand } => {
-                let typ = self.bind_expr(*operand)?;
+            Expression::UnaOp { ope, val } => {
+                let typ = self.bind_expr(*val, emit)?;
                 let ope_type = typ.clone();
-                let res = TypeCheck::check_unaexpr(operator, ope_type, Position::default())?;
-                self.nodes.push(IrNode::UnaOp { ope: operator, typ });
+                let res = TypeCheck::check_unaexpr(ope, ope_type, Position::default())?;
+                self.emit(IrNode::UnaOp { ope, typ }, emit);
                 Ok(res)
             }
-            Expression::BinOp { operator, lhs, rhs } => {
-                let rhs = self.bind_expr(*rhs)?;
+            Expression::BinOp { ope, lhs, rhs } => {
+                let rhs = self.bind_expr(*rhs, emit)?;
                 let typ = rhs.clone();
-                let lhs = self.bind_expr(*lhs)?;
-                let res = TypeCheck::check_binexpr(operator, lhs, rhs, Position::default())?;
-                self.nodes.push(IrNode::BinOp { ope: operator, typ });
+                let lhs = self.bind_expr(*lhs, emit)?;
+                let res = TypeCheck::check_binexpr(ope, lhs, rhs, Position::default())?;
+                self.emit(IrNode::BinOp { ope, typ }, emit);
                 Ok(res)
             }
-            Expression::Call { expr, args } => {
+            Expression::Call { func, args } => {
                 let mut args_types = Vec::new();
                 for arg in args {
-                    let arg_type = self.bind_expr(arg)?;
-                    self.nodes.push(IrNode::Arg);
+                    let arg_type = self.bind_expr(arg, emit)?;
+                    self.emit(IrNode::Arg, emit);
                     args_types.push(arg_type);
                 }
-                match self.bind_expr(*expr)? {
+                match self.bind_expr(*func, emit)? {
                     Type::Func(func_args, ret) => {
                         TypeCheck::check_callargs(&func_args, &args_types)?;
                         let args = func_args;
                         let func_ret = *ret.clone();
-                        self.nodes.push(IrNode::Call { args, ret: *ret });
+                        self.emit(IrNode::Call { args, ret: *ret }, emit);
                         Ok(func_ret)
                     }
                     Type::Struct(fields) => {
                         TypeCheck::check_callargs(&fields, &args_types)?;
                         let typ = Type::Struct(fields.clone());
                         let fields = fields.into_iter().map(|f| f.arg_type).collect();
-                        self.nodes.push(IrNode::Struct { fields });
+                        self.emit(IrNode::Struct { fields }, emit);
                         Ok(typ)
                     }
                     typ => {
@@ -323,22 +329,22 @@ impl<'a> FuncBinder<'a> {
                 }
             }
             Expression::Index { array, index } => {
-                let array = self.bind_expr(*array)?;
-                let index = self.bind_expr(*index)?;
+                let array = self.bind_expr(*array, emit)?;
+                let index = self.bind_expr(*index, emit)?;
                 let typ = TypeCheck::check_index(array, index, Position::default())?;
-                self.nodes.push(IrNode::Index { typ: typ.clone() });
+                self.emit(IrNode::Index { typ: typ.clone() }, emit);
                 Ok(typ)
             }
-            Expression::Cast { value, as_type } => {
-                let from = self.bind_expr(*value)?;
-                let to = self.binder.bind_type(&as_type, &self.namespace)?;
+            Expression::Cast { val, typ } => {
+                let from = self.bind_expr(*val, emit)?;
+                let to = self.binder.bind_type(&typ, &self.namespace)?;
                 let res = to.clone();
                 TypeCheck::check_cast(&from, &to, Position::default())?;
-                self.nodes.push(IrNode::Cast { from, to });
+                self.emit(IrNode::Cast { from, to }, emit);
                 Ok(res)
             }
             Expression::Field { expr, field } => {
-                let typ = self.bind_expr(*expr)?;
+                let typ = self.bind_expr(*expr, emit)?;
                 let (mut fields, by_ref) = if let Type::Pointer(inner) = &typ
                     && let Type::Struct(ref fields) = **inner
                 {
@@ -361,14 +367,19 @@ impl<'a> FuncBinder<'a> {
                         break item.arg_type;
                     }
                 };
-                self.nodes.push(IrNode::Field { offset, by_ref });
+                self.emit(IrNode::Field { offset, by_ref }, emit);
                 Ok(typ)
             }
             Expression::Member { ns, member } => {
                 let value = self.bind_global(member, ns.name.into())?;
                 let typ = value.get_type();
-                self.nodes.push(IrNode::Load { value });
+                self.emit(IrNode::Load { value }, emit);
                 return Ok(typ);
+            }
+            Expression::SizeOf { val } => {
+                let typ = self.bind_expr(*val, false)?;
+                self.emit(IrNode::SizeOf { typ }, emit);
+                return Ok(Type::Int);
             }
         }
     }
@@ -376,7 +387,7 @@ impl<'a> FuncBinder<'a> {
     fn bind_node(&mut self, node: AstNode) -> Result<()> {
         match node {
             AstNode::TypedVar(typ, name, Some(expr)) => {
-                self.bind_expr(expr)?;
+                self.bind_expr(expr, true)?;
                 let typ = self.binder.bind_type(&typ, &self.namespace)?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
@@ -387,7 +398,7 @@ impl<'a> FuncBinder<'a> {
                 self.nodes.push(IrNode::Alloc { index, typ });
             }
             AstNode::Var(name, expr) => {
-                let typ = self.bind_expr(expr)?;
+                let typ = self.bind_expr(expr, true)?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
             }
@@ -395,7 +406,7 @@ impl<'a> FuncBinder<'a> {
             AstNode::If(expr, nodes) => {
                 self.scope.enter();
                 let label = self.new_label();
-                self.bind_expr(expr)?;
+                self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::JmpFalse { label });
                 for node in nodes {
                     self.bind_node(node)?;
@@ -408,7 +419,7 @@ impl<'a> FuncBinder<'a> {
                 let start = self.new_label();
                 let end = self.new_label();
                 self.nodes.push(IrNode::Label { label: start });
-                self.bind_expr(expr)?;
+                self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::JmpFalse { label: end });
                 for node in nodes {
                     self.bind_node(node)?;
@@ -431,7 +442,7 @@ impl<'a> FuncBinder<'a> {
                 let counter = IrArg::var(index, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
                 self.nodes.push(IrNode::Label { label: start });
-                let expr_end = self.bind_expr(expr_end)?;
+                let expr_end = self.bind_expr(expr_end, true)?;
                 if !expr_end.is_int() {
                     Error::type_err("expected int expression", Position::default())?;
                 }
@@ -449,11 +460,11 @@ impl<'a> FuncBinder<'a> {
                 self.scope.exit();
             }
             AstNode::Expr(expr) => {
-                self.bind_expr(expr)?;
+                self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::Pop);
             }
             AstNode::Ret(expr) => {
-                let typ = self.bind_expr(expr)?;
+                let typ = self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::Return { typ });
             }
         };
