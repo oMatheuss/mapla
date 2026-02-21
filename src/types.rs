@@ -52,6 +52,10 @@ impl Type {
         matches!(self, Type::Bool)
     }
 
+    pub fn is_void(&self) -> bool {
+        matches!(self, Type::Void)
+    }
+
     pub fn is_func(&self) -> bool {
         matches!(self, Type::Func(..))
     }

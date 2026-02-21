@@ -920,6 +920,10 @@ impl CodeGen {
                 asm::code!(self.code, Je, format!(".L{label}"));
                 self.regs.try_push(val);
             }
+            IrNode::Return { typ } if typ.is_void() => {
+                asm::code!(self.code, Jmp, ".R");
+                self.scope.reset_temps();
+            }
             IrNode::Return { typ } => {
                 let result = self.scope.pop().unwrap();
                 let size = self.type_size(&typ);

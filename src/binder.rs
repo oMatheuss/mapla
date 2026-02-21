@@ -463,7 +463,11 @@ impl<'a> FuncBinder<'a> {
                 self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::Pop);
             }
-            AstNode::Ret(expr) => {
+            AstNode::Ret(None) => {
+                let typ = Type::Void;
+                self.nodes.push(IrNode::Return { typ });
+            }
+            AstNode::Ret(Some(expr)) => {
                 let typ = self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::Return { typ });
             }

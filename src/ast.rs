@@ -216,7 +216,7 @@ pub enum AstNode {
     While(Expression, Vec<AstNode>),
     For(String, Option<Literal>, Expression, Vec<AstNode>),
     Expr(Expression),
-    Ret(Expression),
+    Ret(Option<Expression>),
 }
 
 impl AstNode {

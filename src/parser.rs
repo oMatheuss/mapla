@@ -384,7 +384,10 @@ impl Parser {
 
     fn consume_ret(&self, ts: &mut TokenStream) -> Result<AstNode> {
         ts.next(); // discard return token
-        let expr = self.parse_expr(ts, 1)?;
+        let expr = match ts.peek() {
+            Some(Token::SemiColon) => None,
+            _ => Some(self.parse_expr(ts, 1)?),
+        };
         self.consume_semi(ts)?;
         let expr = AstNode::Ret(expr);
         Ok(expr)
