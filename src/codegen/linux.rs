@@ -57,7 +57,7 @@ pub fn compile_call(
             match arg {
                 Operand::Reg(arg) if reg == *arg => {}
                 Operand::Xmm(xmm) => asm::code!(c.code, Movd, reg, xmm),
-                Operand::Lbl(lbl) => asm::code!(c.code, Lea, reg, lbl),
+                Operand::Lbl(lbl) => asm::code!(c.code, Lea, reg, Mem::lbl(*lbl, MemSize::QWord)),
                 _ => asm::code!(c.code, Mov, reg, arg),
             }
         } else {
@@ -73,9 +73,9 @@ pub fn compile_call(
                     asm::code!(c.code, Mov, mem, reg);
                     c.regs.push(reg);
                 }
-                Operand::Lbl(..) => {
+                Operand::Lbl(lbl) => {
                     let reg = c.regs.take_any(mem_size);
-                    asm::code!(c.code, Lea, reg, arg);
+                    asm::code!(c.code, Lea, reg, Mem::lbl(*lbl, MemSize::QWord));
                     asm::code!(c.code, Mov, mem, reg);
                     c.regs.push(reg);
                 }
@@ -97,9 +97,9 @@ pub fn compile_call(
                     asm::code!(c.code, Movss, xmm, arg);
                 }
                 Operand::Reg(reg) => asm::code!(c.code, Movd, xmm, reg),
-                Operand::Lbl(..) => {
+                Operand::Lbl(lbl) => {
                     let reg = c.regs.take_any(mem_size);
-                    asm::code!(c.code, Lea, reg, arg);
+                    asm::code!(c.code, Lea, reg, Mem::lbl(*lbl, MemSize::QWord));
                     asm::code!(c.code, Movq, xmm, reg);
                     c.regs.push(reg);
                 }
