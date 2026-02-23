@@ -34,10 +34,10 @@ pub enum AstType {
     Named(Vec<String>),
 }
 
-#[derive(Debug, Clone)]
-pub struct AstArgument {
-    pub name: String,
-    pub arg_type: AstType,
+#[derive(Debug, Clone, Default)]
+pub struct Arguments {
+    pub items: Vec<(String, AstType)>,
+    pub variadic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -197,9 +197,9 @@ impl Identifier {
 #[derive(Debug)]
 pub enum AstRoot {
     Global(AstType, Identifier, Option<Literal>),
-    Struct(Identifier, Vec<AstArgument>),
-    Func(AstType, Identifier, Vec<AstArgument>, Vec<AstNode>),
-    ExternFunc(AstType, Identifier, Vec<AstArgument>),
+    Struct(Identifier, Vec<(String, AstType)>),
+    Func(AstType, Identifier, Arguments, Vec<AstNode>),
+    ExternFunc(AstType, Identifier, Arguments),
 }
 
 impl AstRoot {

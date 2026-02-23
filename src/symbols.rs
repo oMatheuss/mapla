@@ -13,11 +13,12 @@ pub struct FuncDef {
     pub args: Vec<Argument>,
     pub ret: Type,
     pub extrn: bool,
+    pub variadic: bool,
 }
 
 impl FuncDef {
     pub fn as_type(self) -> Type {
-        Type::Func(self.args, Box::new(self.ret))
+        Type::Func(self.args, Box::new(self.ret), self.variadic)
     }
 }
 

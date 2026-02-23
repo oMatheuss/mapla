@@ -137,7 +137,8 @@ impl CodeGen {
             Type::Void => 0,
             Type::Byte | Type::Char | Type::Bool => 1,
             Type::Int | Type::Real => 4,
-            Type::Func(..) | Type::Pointer(..) | Type::Array(..) => 8,
+            Type::Func(..) | Type::Pointer(..) => 8,
+            Type::Array(inner, size) => self.type_size(inner) * (*size as usize),
             Type::Struct(fields) => fields.iter().map(|f| self.type_size(&f.arg_type)).sum(),
         }
     }
@@ -315,7 +316,7 @@ impl CodeGen {
                 }
                 IrArg::Var { index, .. } => self.scope.push_var(index).unwrap(),
                 IrArg::Literal { value } => match value {
-                    IrLiteral::String { label } => {
+                    IrLiteral::String { label, size: _ } => {
                         let reg = self.regs.take_any(MemSize::QWord);
                         asm::code!(self.code, Lea, reg, format!("[rel {label}]"));
                         self.scope.push(reg.into());
@@ -750,9 +751,9 @@ impl CodeGen {
                 self.clear_all_regs();
                 let func = self.scope.pop().unwrap();
                 let mut values = Vec::new();
-                for arg in args.into_iter().rev() {
+                for arg_type in args.into_iter().rev() {
                     let value = self.scope.pop().unwrap();
-                    values.push((value, arg.arg_type));
+                    values.push((value, arg_type));
                 }
                 values.reverse();
                 let ret = match self.target {
@@ -840,6 +841,15 @@ impl CodeGen {
                     // assuming the size is correct, anything can be a pointer
                     assert!(value.mem_size() == MemSize::QWord);
                     self.scope.push(value);
+                } else if from.is_int() && to.is_byte() {
+                    let reg = self.move_operand_to_reg(&from, value).expect_reg();
+                    let reg = self.regs.switch_size(reg, MemSize::Byte);
+                    self.scope.push(reg.into());
+                } else if from.is_byte() && to.is_int() {
+                    let reg = self.move_operand_to_reg(&from, value).expect_reg();
+                    let reg = self.regs.switch_size(reg, MemSize::DWord);
+                    asm::code!(self.code, And, reg, Imm::Dword(0xFF));
+                    self.scope.push(reg.into());
                 } else {
                     todo!("conversion between {from} to {to} not implemented yet");
                 }
@@ -884,17 +894,8 @@ impl CodeGen {
                 self.scope.push(base_mem);
             }
             IrNode::SizeOf { typ } => {
-                let size = match typ {
-                    Type::Array(inner, arr_size) => {
-                        let size = self.type_size(&inner) as u32;
-                        Imm::Dword(size * arr_size).into()
-                    }
-                    _ => {
-                        let size = self.type_size(&typ) as u32;
-                        Imm::Dword(size).into()
-                    }
-                };
-                self.scope.push(size);
+                let size = self.type_size(&typ) as u32;
+                self.scope.push(Imm::Dword(size).into());
             }
             IrNode::Inc => {
                 let value = self.scope.pop().unwrap();

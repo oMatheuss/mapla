@@ -14,7 +14,6 @@ pub struct IrFunc {
 }
 
 #[derive(Debug, Clone)]
-#[rustfmt::skip]
 pub enum IrNode {
     Store { index: usize, typ: Type },
     Alloc { index: usize, typ: Type },
@@ -23,7 +22,7 @@ pub enum IrNode {
     UnaOp { ope: UnaOpe, typ: Type },
     BinOp { ope: BinOpe, typ: Type },
     Arg,
-    Call { args: Vec<Argument>, ret: Type },
+    Call { args: Vec<Type>, ret: Type },
     Index { typ: Type },
     Cast { from: Type, to: Type },
     Field { offset: Vec<Type>, by_ref: bool },
@@ -39,7 +38,7 @@ pub enum IrNode {
 
 #[derive(Debug, Clone)]
 pub enum IrLiteral {
-    String { label: String },
+    String { label: String, size: u32 },
     Byte(u8),
     Int(i32),
     Float(f32),
@@ -64,7 +63,7 @@ impl IrArg {
         match self {
             IrArg::Var { index: _, typ } => typ.clone(),
             IrArg::Literal { value } => match value {
-                IrLiteral::String { .. } => Type::ptr_to(Type::Char),
+                IrLiteral::String { label: _, size } => Type::Array(Box::new(Type::Char), *size),
                 IrLiteral::Byte(_) => Type::Byte,
                 IrLiteral::Int(_) => Type::Int,
                 IrLiteral::Float(_) => Type::Real,
@@ -136,7 +135,7 @@ impl Display for IrArg {
 impl Display for IrLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IrLiteral::String { label } => write!(f, "[{label}]"),
+            IrLiteral::String { label, size: _ } => write!(f, "[{label}]"),
             IrLiteral::Byte(b) => write!(f, "{b}"),
             IrLiteral::Int(i) => write!(f, "{i}"),
             IrLiteral::Float(v) => write!(f, "{v}"),

@@ -67,6 +67,7 @@ pub enum Token<'a> {
     VBar,
     Hat,
     Dot,
+    Ellipsis,
     Eof,
 }
 

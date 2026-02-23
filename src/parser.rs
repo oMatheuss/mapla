@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::ast::{Ast, AstArgument, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
+use crate::ast::{Arguments, Ast, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
 use crate::error::{Error, PositionResult, Result};
 use crate::source::Source;
 use crate::token::{Token, TokenStream};
@@ -299,35 +299,36 @@ impl Parser {
         AstRoot::Global(typ, id, expr).ok()
     }
 
-    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<Vec<AstArgument>> {
-        let Token::OpenParen = self.next_or_err(ts)? else {
-            Error::syntatic("expected open parenthesis `(`", ts.pos())?
-        };
-        let mut state = 1u8;
-        let mut args = Vec::new();
+    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<Arguments> {
+        let mut state = 1;
+        let mut items = Vec::new();
+        let mut variadic = false;
         loop {
             match (state, self.next_or_err(ts)?) {
-                (1 | 2, Token::CloseParen) => break,
-                (1 | 3, Token::Identifier(name)) => {
-                    state = 2;
+                (1, Token::OpenParen) => state = 2,
+                (2 | 4, Token::Identifier(name)) => {
+                    state = 3;
                     let Token::Colon = self.next_or_err(ts)? else {
                         Error::syntatic("expected token `:`", ts.pos())?
                     };
                     let arg_type = self.parse_annot(ts)?;
-                    args.push(AstArgument {
-                        name: name.into(),
-                        arg_type,
-                    });
+                    items.push((name.into(), arg_type));
                 }
-                (2, Token::Comma) => state = 3,
-                (1 | 2, _) => {
-                    Error::syntatic("expected close parenthesis `)` or argument", ts.pos())?
+                (3, Token::Comma) => state = 4,
+                (2 | 4, Token::Ellipsis) => {
+                    state = 6;
+                    variadic = true;
                 }
-                (3, _) => Error::syntatic("expected another argument after comma", ts.pos())?,
+                (2 | 3 | 6, Token::CloseParen) => break,
+
+                (1, _) => Error::syntatic("expected open parenthesis `(`", ts.pos())?,
+                (4, _) => Error::syntatic("expected another argument after comma", ts.pos())?,
+                (2 | 3 | 6, _) => Error::syntatic("expected close parenthesis `)`", ts.pos())?,
+
                 _ => unreachable!("The state machine is out of control"),
             };
         }
-        Ok(args)
+        Ok(Arguments { items, variadic })
     }
 
     fn parse_callargs(&self, ts: &mut TokenStream) -> Result<Vec<Expression>> {
@@ -354,6 +355,34 @@ impl Parser {
                 (2, ..) => {
                     Error::syntatic("expected close parenthesis `)` or comma `,`", ts.pos())?
                 }
+                _ => unreachable!("The state machine is out of control"),
+            };
+        }
+        Ok(args)
+    }
+
+    fn parse_fields(&self, ts: &mut TokenStream) -> Result<Vec<(String, AstType)>> {
+        let mut state = 1;
+        let mut args = Vec::new();
+        loop {
+            match (state, self.next_or_err(ts)?) {
+                (1, Token::OpenParen) => state = 2,
+                (2 | 4, Token::Identifier(name)) => {
+                    state = 3;
+                    let Token::Colon = self.next_or_err(ts)? else {
+                        Error::syntatic("expected token `:`", ts.pos())?
+                    };
+                    let arg_type = self.parse_annot(ts)?;
+                    args.push((name.into(), arg_type));
+                }
+                (3, Token::Comma) => state = 4,
+                (3, Token::CloseParen) => break,
+
+                (1, _) => Error::syntatic("expected open parenthesis `(`", ts.pos())?,
+                (2, _) => Error::syntatic("expected field declaration", ts.pos())?,
+                (3, _) => Error::syntatic("expected close parenthesis `)`", ts.pos())?,
+                (4, _) => Error::syntatic("expected another field after comma", ts.pos())?,
+
                 _ => unreachable!("The state machine is out of control"),
             };
         }
@@ -446,7 +475,7 @@ impl Parser {
             return Error::syntatic("expected name of the struct", ts.pos());
         };
         let id = Identifier::new(name, ts.pos());
-        let fields = self.parse_args(ts)?;
+        let fields = self.parse_fields(ts)?;
         self.consume_semi(ts)?;
         AstRoot::Struct(id, fields).ok()
     }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Ast, AstArgument, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
+use crate::ast::{Ast, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
 use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
@@ -49,12 +49,12 @@ impl Binder {
         Ok(typ)
     }
 
-    fn bind_args(&self, ast_args: Vec<AstArgument>, ns: &str) -> Result<Vec<Argument>> {
+    fn bind_args(&self, ast_args: Vec<(String, AstType)>, ns: &str) -> Result<Vec<Argument>> {
         let mut args = Vec::new();
-        for ast_arg in ast_args.into_iter() {
+        for (name, ast_type) in ast_args.into_iter() {
             let arg = Argument {
-                name: ast_arg.name,
-                arg_type: self.bind_type(&ast_arg.arg_type, ns)?,
+                name: name,
+                arg_type: self.bind_type(&ast_type, ns)?,
             };
             args.push(arg);
         }
@@ -93,18 +93,20 @@ impl Binder {
                 AstRoot::Func(typ, id, args, ..) => {
                     let symbol = FuncDef {
                         pos: id.position.clone(),
-                        args: self.bind_args(args.clone(), &ns)?,
+                        args: self.bind_args(args.items.clone(), &ns)?,
                         ret: self.bind_type(typ, &ns)?,
                         extrn: false,
+                        variadic: args.variadic,
                     };
                     self.globals.set_func(&id.name, ns, symbol)?;
                 }
                 AstRoot::ExternFunc(typ, id, args, ..) => {
                     let symbol = FuncDef {
                         pos: id.position.clone(),
-                        args: self.bind_args(args.clone(), &ns)?,
+                        args: self.bind_args(args.items.clone(), &ns)?,
                         ret: self.bind_type(typ, &ns)?,
                         extrn: true,
+                        variadic: args.variadic,
                     };
                     self.globals.set_func(&id.name, ns, symbol)?;
                 }
@@ -117,7 +119,7 @@ impl Binder {
         for root in ast.nodes {
             match root {
                 AstRoot::Func(typ, id, args, ast_nodes) => {
-                    let args = self.bind_args(args, &ast.namespace)?;
+                    let args = self.bind_args(args.items, &ast.namespace)?;
                     let body =
                         FuncBinder::new(self, ast.namespace.clone()).bind_func(&args, ast_nodes)?;
                     self.functions.push(IrFunc {
@@ -239,8 +241,9 @@ impl<'a> FuncBinder<'a> {
         let value = match value {
             Literal::String(s) => {
                 let label = format!("L.str.{}", self.binder.data.len());
+                let size = s.len() as u32 - 1;
                 self.binder.data.insert(label.clone(), s.into_bytes());
-                IrLiteral::String { label }.into()
+                IrLiteral::String { label, size }.into()
             }
             Literal::Byte(b) => IrLiteral::Byte(b).into(),
             Literal::Int(i) => IrLiteral::Int(i).into(),
@@ -308,15 +311,15 @@ impl<'a> FuncBinder<'a> {
                     args_types.push(arg_type);
                 }
                 match self.bind_expr(*func, emit)? {
-                    Type::Func(func_args, ret) => {
-                        TypeCheck::check_callargs(&func_args, &args_types)?;
-                        let args = func_args;
+                    Type::Func(func_args, ret, variadic) => {
+                        TypeCheck::check_callargs(&func_args, &args_types, variadic)?;
+                        let args = args_types;
                         let func_ret = *ret.clone();
                         self.emit(IrNode::Call { args, ret: *ret }, emit);
                         Ok(func_ret)
                     }
                     Type::Struct(fields) => {
-                        TypeCheck::check_callargs(&fields, &args_types)?;
+                        TypeCheck::check_callargs(&fields, &args_types, false)?;
                         let typ = Type::Struct(fields.clone());
                         let fields = fields.into_iter().map(|f| f.arg_type).collect();
                         self.emit(IrNode::Struct { fields }, emit);
@@ -387,8 +390,9 @@ impl<'a> FuncBinder<'a> {
     fn bind_node(&mut self, node: AstNode) -> Result<()> {
         match node {
             AstNode::TypedVar(typ, name, Some(expr)) => {
-                self.bind_expr(expr, true)?;
-                let typ = self.binder.bind_type(&typ, &self.namespace)?;
+                let exp_typ = self.bind_expr(expr, true)?;
+                let var_typ = self.binder.bind_type(&typ, &self.namespace)?;
+                let typ = TypeCheck::check_assign(var_typ, exp_typ, Position::default())?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
             }

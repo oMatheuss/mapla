@@ -216,6 +216,13 @@ impl<'a> Lexer<'a> {
             }
             (':', _) => Token::Colon,
             (';', _) => Token::SemiColon,
+            ('.', Some('.')) => {
+                self.next();
+                let Some('.') = self.next() else {
+                    Error::lexical("invalid token", self.pos.clone())?
+                };
+                Token::Ellipsis
+            }
             ('.', _) => Token::Dot,
             _ => Error::lexical("invalid token", self.pos.clone())?,
         };

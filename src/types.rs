@@ -10,7 +10,7 @@ pub enum Type {
     Char,
     Bool,
     Void,
-    Func(Vec<Argument>, Box<Type>),
+    Func(Vec<Argument>, Box<Type>, bool),
     Pointer(Box<Type>),
     Array(Box<Type>, u32),
     Struct(Vec<Argument>),
@@ -44,6 +44,10 @@ impl Type {
         matches!(self, Type::Int)
     }
 
+    pub fn is_byte(&self) -> bool {
+        matches!(self, Type::Char | Type::Byte)
+    }
+
     pub fn is_number(&self) -> bool {
         matches!(self, Type::Int | Type::Real)
     }
@@ -68,6 +72,7 @@ impl Type {
         match (self, other) {
             (_, _) if self == other => true,
             (Self::Array(first, ..), Self::Pointer(second)) if *first == *second => true,
+            (Self::Array(..), second) if second.is_void_ptr() => true,
             (Self::Pointer(..), second) if second.is_void_ptr() => true,
             (Self::Func(..), second) if second.is_void_ptr() => true,
             _ => false,
@@ -92,7 +97,10 @@ impl std::fmt::Display for Type {
             Self::Char => write!(f, "char"),
             Self::Bool => write!(f, "bool"),
             Self::Void => write!(f, "void"),
-            Self::Func(args, ret) => write!(f, "func({args:?}): {ret}"),
+            Self::Func(args, ret, variadic) => match variadic {
+                true => write!(f, "func({args:?}, ...): {ret}"),
+                false => write!(f, "func({args:?}): {ret}"),
+            },
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
             Self::Struct(fields) => write!(f, "struct({fields:?})"),
@@ -159,6 +167,14 @@ impl TypeCheck {
         }
     }
 
+    pub fn check_assign(lhs: Type, rhs: Type, pos: Position) -> Result<Type> {
+        if rhs.is_compatible(&lhs) {
+            Ok(lhs)
+        } else {
+            Error::type_err(format!("cannot assign {rhs} to {lhs}"), pos)
+        }
+    }
+
     pub fn check_unaexpr(op: UnaOpe, ope: Type, pos: Position) -> Result<Type> {
         match op {
             UnaOpe::AddressOf => Ok(Type::ptr_to(ope)),
@@ -169,6 +185,7 @@ impl TypeCheck {
             UnaOpe::Dereference => match ope {
                 Type::Int => Ok(Type::Void),
                 Type::Pointer(inner) => Ok(*inner),
+                Type::Array(inner, ..) => Ok(*inner),
                 _ => Error::type_err("can only dereference addresses", pos),
             },
 
@@ -181,10 +198,17 @@ impl TypeCheck {
     }
 
     pub fn check_cast(from: &Type, to: &Type, pos: Position) -> Result<()> {
+        if from == to {
+            let msg = format!("ambiguous cast from {from} to {to}");
+            return Error::type_err(msg, pos);
+        }
+
         let allowed = from.is_number() && to.is_number()
             || from.is_void_ptr() && to.is_ptr()
             || from.is_ptr() && to.is_void_ptr()
-            || from.is_func() && to.is_void_ptr();
+            || from.is_func() && to.is_void_ptr()
+            || from.is_int() && to.is_byte()
+            || from.is_byte() && to.is_int();
 
         if !allowed {
             let msg = format!("cannot cast from {from} to {to}");
@@ -209,15 +233,17 @@ impl TypeCheck {
         Ok(result)
     }
 
-    pub fn check_callargs(func_args: &Vec<Argument>, args: &Vec<Type>) -> Result<()> {
+    pub fn check_callargs(args: &Vec<Argument>, vals: &Vec<Type>, variadic: bool) -> Result<()> {
         let pos = Position::default();
-        if func_args.len() != args.len() {
+        if (!variadic && args.len() != vals.len()) || (variadic && vals.len() < args.len()) {
             return Error::type_err("wrong number of arguments provided to the function", pos);
         }
 
-        for (func_arg, arg) in func_args.iter().zip(args) {
-            if !arg.is_compatible(&func_arg.arg_type) {
-                return Error::type_err("wrong type provided to the function", pos);
+        for (func_arg, arg) in args.iter().zip(vals) {
+            let arg_type = &func_arg.arg_type;
+            if !arg.is_compatible(arg_type) {
+                let msg = format!("expected {arg_type}, but found {arg}");
+                return Error::type_err(msg, pos);
             }
         }
 
