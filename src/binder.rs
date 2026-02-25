@@ -271,6 +271,7 @@ impl<'a> FuncBinder<'a> {
     }
 
     fn bind_expr(&mut self, expr: Expression, emit: bool) -> Result<Type> {
+        let pos = expr.pos();
         match expr {
             Expression::Identifier { id } => {
                 let value = match self.scope.get(&id.name) {
@@ -282,8 +283,8 @@ impl<'a> FuncBinder<'a> {
                 self.emit(IrNode::Load { value }, emit);
                 Ok(res)
             }
-            Expression::Literal { lit: value } => {
-                let value = self.bind_value(value)?;
+            Expression::Literal { lit, pos: _ } => {
+                let value = self.bind_value(lit)?;
                 let res = value.get_type();
                 self.emit(IrNode::Load { value }, emit);
                 Ok(res)
@@ -291,15 +292,15 @@ impl<'a> FuncBinder<'a> {
             Expression::UnaOp { ope, val } => {
                 let typ = self.bind_expr(*val, emit)?;
                 let ope_type = typ.clone();
-                let res = TypeCheck::check_unaexpr(ope, ope_type, Position::default())?;
+                let res = TypeCheck::check_unaexpr(ope, ope_type, pos)?;
                 self.emit(IrNode::UnaOp { ope, typ }, emit);
                 Ok(res)
             }
-            Expression::BinOp { ope, lhs, rhs } => {
+            Expression::BinOp { ope, pos, lhs, rhs } => {
                 let rhs = self.bind_expr(*rhs, emit)?;
                 let typ = rhs.clone();
                 let lhs = self.bind_expr(*lhs, emit)?;
-                let res = TypeCheck::check_binexpr(ope, lhs, rhs, Position::default())?;
+                let res = TypeCheck::check_binexpr(ope, lhs, rhs, pos)?;
                 self.emit(IrNode::BinOp { ope, typ }, emit);
                 Ok(res)
             }
@@ -310,6 +311,7 @@ impl<'a> FuncBinder<'a> {
                     self.emit(IrNode::Arg, emit);
                     args_types.push(arg_type);
                 }
+                let pos = func.pos();
                 match self.bind_expr(*func, emit)? {
                     Type::Func(func_args, ret, variadic) => {
                         TypeCheck::check_callargs(&func_args, &args_types, variadic)?;
@@ -321,20 +323,20 @@ impl<'a> FuncBinder<'a> {
                     Type::Struct(fields) => {
                         TypeCheck::check_callargs(&fields, &args_types, false)?;
                         let typ = Type::Struct(fields.clone());
-                        let fields = fields.into_iter().map(|f| f.arg_type).collect();
+                        let fields = fields.items.into_iter().map(|f| f.arg_type).collect();
                         self.emit(IrNode::Struct { fields }, emit);
                         Ok(typ)
                     }
                     typ => {
                         let msg = format!("symbol has type {typ} which is not a func or struct");
-                        Error::syntatic(msg, Position::default())?
+                        Error::syntatic(msg, pos)?
                     }
                 }
             }
             Expression::Index { array, index } => {
                 let array = self.bind_expr(*array, emit)?;
                 let index = self.bind_expr(*index, emit)?;
-                let typ = TypeCheck::check_index(array, index, Position::default())?;
+                let typ = TypeCheck::check_index(array, index, pos)?;
                 self.emit(IrNode::Index { typ: typ.clone() }, emit);
                 Ok(typ)
             }
@@ -342,7 +344,7 @@ impl<'a> FuncBinder<'a> {
                 let from = self.bind_expr(*val, emit)?;
                 let to = self.binder.bind_type(&typ, &self.namespace)?;
                 let res = to.clone();
-                TypeCheck::check_cast(&from, &to, Position::default())?;
+                TypeCheck::check_cast(&from, &to, pos)?;
                 self.emit(IrNode::Cast { from, to }, emit);
                 Ok(res)
             }
@@ -356,14 +358,14 @@ impl<'a> FuncBinder<'a> {
                     (fields.clone(), false)
                 } else {
                     let msg = format!("cannot do a member access into the type {typ}");
-                    Error::syntatic(msg, Position::default())?
+                    Error::syntatic(msg, pos)?
                 };
                 fields.reverse();
                 let mut offset = Vec::new();
                 let typ = loop {
                     let Some(item) = fields.pop() else {
                         let msg = format!("field {} does not exists in type {typ}", field.name);
-                        Error::syntatic(msg, Position::default())?
+                        Error::syntatic(msg, field.position)?
                     };
                     offset.push(item.arg_type.clone());
                     if item.name == field.name {
@@ -379,7 +381,7 @@ impl<'a> FuncBinder<'a> {
                 self.emit(IrNode::Load { value }, emit);
                 return Ok(typ);
             }
-            Expression::SizeOf { val } => {
+            Expression::SizeOf { val, pos: _ } => {
                 let typ = self.bind_expr(*val, false)?;
                 self.emit(IrNode::SizeOf { typ }, emit);
                 return Ok(Type::Int);
@@ -390,9 +392,10 @@ impl<'a> FuncBinder<'a> {
     fn bind_node(&mut self, node: AstNode) -> Result<()> {
         match node {
             AstNode::TypedVar(typ, name, Some(expr)) => {
+                let pos = expr.pos();
                 let exp_typ = self.bind_expr(expr, true)?;
                 let var_typ = self.binder.bind_type(&typ, &self.namespace)?;
-                let typ = TypeCheck::check_assign(var_typ, exp_typ, Position::default())?;
+                let typ = TypeCheck::check_assign(var_typ, exp_typ, pos)?;
                 let index = self.scope.set(name, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
             }
@@ -446,9 +449,10 @@ impl<'a> FuncBinder<'a> {
                 let counter = IrArg::var(index, typ.clone());
                 self.nodes.push(IrNode::Store { index, typ });
                 self.nodes.push(IrNode::Label { label: start });
+                let expr_end_pos = expr_end.pos();
                 let expr_end = self.bind_expr(expr_end, true)?;
                 if !expr_end.is_int() {
-                    Error::type_err("expected int expression", Position::default())?;
+                    Error::type_err("expected int expression", expr_end_pos)?;
                 }
                 self.nodes.push(IrNode::Load {
                     value: counter.clone(),

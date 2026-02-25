@@ -75,11 +75,12 @@ impl Parser {
         let expr = match self.next_or_err(ts)? {
             Token::StrLiteral(string) => Expression::Literal {
                 lit: self.parse_str(ts, string)?,
+                pos: ts.pos(),
             },
-            Token::IntLiteral(int) => Expression::int(int as i32),
-            Token::FloatLiteral(float) => Expression::float(float),
-            Token::True => Expression::TRUE,
-            Token::False => Expression::FALSE,
+            Token::IntLiteral(int) => Expression::int(int as i32, ts.pos()),
+            Token::FloatLiteral(float) => Expression::float(float, ts.pos()),
+            Token::True => Expression::boolean(true, ts.pos()),
+            Token::False => Expression::boolean(false, ts.pos()),
             Token::Identifier(ns) if matches!(ts.peek(), Some(Token::DuoColon)) => {
                 ts.next(); // consume duo colon
                 let ns = Identifier::new(ns, ts.pos());
@@ -111,8 +112,9 @@ impl Parser {
             Expression::una_op(op, operand)
         } else if let Some(Token::SizeOf) = ts.peek() {
             ts.next();
+            let pos = ts.pos();
             let expr = self.parse_expr(ts, 12)?;
-            Expression::sizeof(expr)
+            Expression::sizeof(expr, pos)
         } else {
             self.parse_atom(ts)?
         };
@@ -126,9 +128,10 @@ impl Parser {
                 let min_prec = if op.is_assign() { prec } else { prec + 1 };
 
                 ts.next(); // consume operator
+                let pos = ts.pos();
 
                 let rhs = self.parse_expr(ts, min_prec)?;
-                lhs = Expression::bin_op(op, lhs, rhs);
+                lhs = Expression::bin_op(op, lhs, rhs, pos);
             } else if let Some(Token::OpenParen) = ts.peek() {
                 let args = self.parse_callargs(ts)?;
                 lhs = Expression::call(lhs, args);

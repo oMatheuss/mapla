@@ -10,10 +10,10 @@ pub enum Type {
     Char,
     Bool,
     Void,
-    Func(Vec<Argument>, Box<Type>, bool),
+    Func(ArgList, Box<Type>, bool),
     Pointer(Box<Type>),
     Array(Box<Type>, u32),
-    Struct(Vec<Argument>),
+    Struct(ArgList),
 }
 
 impl Type {
@@ -98,12 +98,12 @@ impl std::fmt::Display for Type {
             Self::Bool => write!(f, "bool"),
             Self::Void => write!(f, "void"),
             Self::Func(args, ret, variadic) => match variadic {
-                true => write!(f, "func({args:?}, ...): {ret}"),
-                false => write!(f, "func({args:?}): {ret}"),
+                true => write!(f, "func({args}, ...): {ret}"),
+                false => write!(f, "func({args}): {ret}"),
             },
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
-            Self::Struct(fields) => write!(f, "struct({fields:?})"),
+            Self::Struct(fields) => write!(f, "struct({fields})"),
         }
     }
 }
@@ -118,6 +118,43 @@ impl std::fmt::Display for Argument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, arg_type } = self;
         write!(f, "{name}: {arg_type}")
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct ArgList {
+    pub items: Vec<Argument>,
+}
+
+impl From<Vec<Argument>> for ArgList {
+    fn from(items: Vec<Argument>) -> Self {
+        Self { items }
+    }
+}
+
+impl std::ops::DerefMut for ArgList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.items
+    }
+}
+
+impl std::ops::Deref for ArgList {
+    type Target = Vec<Argument>;
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
+impl std::fmt::Display for ArgList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Some(arg) = self.first() else {
+            return Ok(());
+        };
+        write!(f, "{}: {}", arg.name, arg.arg_type)?;
+        for arg in self.iter().skip(1) {
+            write!(f, ", {}: {}", arg.name, arg.arg_type)?;
+        }
+        Ok(())
     }
 }
 
@@ -163,7 +200,10 @@ impl TypeCheck {
                 Ok(lhs)
             }
 
-            _ => Error::type_err("invalid operation between types", pos),
+            _ => {
+                let msg = format!("cannot apply operator {op:?} between {lhs} and {rhs}");
+                Error::type_err(msg, pos)
+            }
         }
     }
 

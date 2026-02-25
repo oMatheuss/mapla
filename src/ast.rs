@@ -56,6 +56,7 @@ pub enum Expression {
     },
     Literal {
         lit: Literal,
+        pos: Position,
     },
     UnaOp {
         ope: UnaOpe,
@@ -63,6 +64,7 @@ pub enum Expression {
     },
     BinOp {
         ope: BinOpe,
+        pos: Position,
         lhs: Box<Expression>,
         rhs: Box<Expression>,
     },
@@ -88,16 +90,25 @@ pub enum Expression {
     },
     SizeOf {
         val: Box<Expression>,
+        pos: Position,
     },
 }
 
 impl Expression {
-    pub const TRUE: Self = Self::Literal {
-        lit: Literal::Bool(true),
-    };
-    pub const FALSE: Self = Self::Literal {
-        lit: Literal::Bool(false),
-    };
+    pub fn pos(&self) -> Position {
+        match self {
+            Self::Identifier { id } => id.position.clone(),
+            Self::Literal { lit: _, pos } => pos.clone(),
+            Self::UnaOp { ope: _, val } => val.pos(),
+            Self::BinOp { ope: _, pos, .. } => pos.clone(),
+            Self::Call { func, args: _ } => func.pos(),
+            Self::Index { array, index: _ } => array.pos(),
+            Self::Cast { val, typ: _ } => val.pos(),
+            Self::Field { expr, field: _ } => expr.pos(),
+            Self::Member { ns, member: _ } => ns.position.clone(),
+            Self::SizeOf { val: _, pos } => pos.clone(),
+        }
+    }
 
     #[inline]
     pub fn id(name: &str, pos: Position) -> Self {
@@ -107,25 +118,36 @@ impl Expression {
     }
 
     #[inline]
-    pub fn float(f: f32) -> Self {
+    pub fn float(f: f32, pos: Position) -> Self {
         Self::Literal {
             lit: Literal::Float(f),
+            pos,
         }
     }
 
     #[inline]
-    pub fn int(i: i32) -> Self {
+    pub fn int(i: i32, pos: Position) -> Self {
         Self::Literal {
             lit: Literal::Int(i),
+            pos,
         }
     }
 
     #[inline]
-    pub fn bin_op(ope: BinOpe, lhs: Expression, rhs: Expression) -> Self {
+    pub fn boolean(bool: bool, pos: Position) -> Self {
+        Self::Literal {
+            lit: Literal::Bool(bool),
+            pos,
+        }
+    }
+
+    #[inline]
+    pub fn bin_op(ope: BinOpe, lhs: Expression, rhs: Expression, pos: Position) -> Self {
         Self::BinOp {
             ope,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
+            pos,
         }
     }
 
@@ -172,9 +194,10 @@ impl Expression {
         Self::Member { ns, member }
     }
 
-    pub fn sizeof(expr: Expression) -> Self {
+    pub fn sizeof(expr: Expression, pos: Position) -> Self {
         Self::SizeOf {
             val: Box::new(expr),
+            pos,
         }
     }
 }

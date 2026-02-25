@@ -18,7 +18,7 @@ pub struct FuncDef {
 
 impl FuncDef {
     pub fn as_type(self) -> Type {
-        Type::Func(self.args, Box::new(self.ret), self.variadic)
+        Type::Func(self.args.into(), Box::new(self.ret), self.variadic)
     }
 }
 
@@ -30,7 +30,7 @@ pub struct TypeDef {
 
 impl TypeDef {
     pub fn as_type(self) -> Type {
-        Type::Struct(self.fields)
+        Type::Struct(self.fields.into())
     }
 }
 
