@@ -768,15 +768,23 @@ impl CodeGen {
 
                 let size = self.type_size(&typ);
                 let reg = match index {
-                    Operand::Reg(reg) => reg,
+                    Operand::Reg(reg) => {
+                        let qreg = self.regs.switch_size(reg, MemSize::QWord);
+                        asm::code!(self.code, Movsxd, qreg, reg);
+                        qreg
+                    }
+                    Operand::Imm(imm) => {
+                        let reg = self.regs.take_any(MemSize::QWord);
+                        asm::code!(self.code, Mov, reg, imm.s_qword_ext());
+                        reg
+                    }
                     offset => {
-                        let reg = self.regs.take_any(offset.mem_size());
+                        let reg = self.regs.take_any(MemSize::QWord);
                         self.regs.try_push(offset);
-                        asm::code!(self.code, Mov, reg, offset);
+                        asm::code!(self.code, Movsxd, reg, offset);
                         reg
                     }
                 };
-                let reg = self.regs.switch_size(reg, MemSize::QWord);
                 asm::code!(self.code, Imul, reg, Imm::Qword(size as u64));
                 asm::code!(self.code, Add, reg, array);
                 self.regs.try_push(array);

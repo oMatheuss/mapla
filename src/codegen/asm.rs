@@ -34,6 +34,7 @@ pub enum OpCode {
     Mov,
     Movd,
     Movq,
+    Movsxd,
     Cmp,
     Lea,
 
@@ -103,6 +104,7 @@ impl Display for OpCode {
             OpCode::Mov => write!(f, "mov"),
             OpCode::Movd => write!(f, "movd"),
             OpCode::Movq => write!(f, "movq"),
+            OpCode::Movsxd => write!(f, "movsxd"),
             OpCode::Cmp => write!(f, "cmp"),
             OpCode::Lea => write!(f, "lea"),
             OpCode::Push => write!(f, "push"),
@@ -616,6 +618,14 @@ impl Imm {
 
     pub fn from_f32(v: f32) -> Self {
         Self::Dword(v.to_bits())
+    }
+
+    pub fn s_qword_ext(self) -> Self {
+        match self {
+            Self::Byte(i) => Self::Qword(i as i8 as i64 as u64),
+            Self::Dword(i) => Self::Qword(i as i32 as i64 as u64),
+            Self::Qword(i) => Self::Qword(i),
+        }
     }
 }
 
