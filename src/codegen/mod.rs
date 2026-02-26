@@ -384,9 +384,7 @@ impl CodeGen {
                                     let reg = self.regs.take_any(value.mem_size());
                                     asm::code!(self.code, Mov, reg, value);
                                     asm::code!(self.code, Neg, reg);
-                                    asm::code!(self.code, Mov, value, reg);
-                                    self.regs.push(reg);
-                                    value
+                                    reg.into()
                                 }
                                 _ => panic!("operator minus could not be applied"),
                             }
