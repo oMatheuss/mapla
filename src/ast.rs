@@ -223,6 +223,7 @@ pub enum AstRoot {
     Struct(Identifier, Vec<(String, AstType)>),
     Func(AstType, Identifier, Arguments, Vec<AstNode>),
     ExternFunc(AstType, Identifier, Arguments),
+    ExternVar(AstType, Identifier),
 }
 
 impl AstRoot {

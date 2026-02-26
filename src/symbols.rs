@@ -38,6 +38,7 @@ impl TypeDef {
 pub struct GlobalVar {
     pub pos: Position,
     pub typ: Type,
+    pub extrn: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -133,8 +134,10 @@ impl SymbolTable {
         }
     }
 
-    pub fn iter_extrns(&self) -> impl Iterator<Item = (&SymbolKey, &FuncDef)> {
-        self.functions.iter().filter(|f| f.1.extrn)
+    pub fn iter_extrns(&self) -> impl Iterator<Item = &SymbolKey> {
+        let vars = self.values.iter().filter(|f| f.1.extrn).map(|f| f.0);
+        let funcs = self.functions.iter().filter(|f| f.1.extrn).map(|f| f.0);
+        vars.chain(funcs)
     }
 }
 

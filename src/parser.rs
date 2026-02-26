@@ -428,24 +428,37 @@ impl Parser {
         Ok(expr)
     }
 
-    fn consume_extern(&mut self, ts: &mut TokenStream) -> Result<AstRoot> {
-        self.next_or_err(ts)?; // discard extern token
-        let Token::Function = self.next_or_err(ts)? else {
-            return Error::syntatic("expected `func` keyword", ts.pos());
-        };
+    fn consume_extern_func(&mut self, ts: &mut TokenStream) -> Result<AstRoot> {
+        ts.next(); // discard func token
         let Token::Identifier(name) = self.next_or_err(ts)? else {
             return Error::syntatic("expected name of the function", ts.pos());
         };
         let id = Identifier::new(name, ts.pos());
         let args = self.parse_args(ts)?;
         let annot = if let Some(Token::Colon) = ts.peek() {
-            self.next_or_err(ts)?;
+            ts.next(); // discard colon token
             self.parse_annot(ts)?
         } else {
             AstType::Void
         };
         self.consume_semi(ts)?;
         AstRoot::ExternFunc(annot, id, args).ok()
+    }
+
+    fn consume_extern_var(&mut self, ts: &mut TokenStream) -> Result<AstRoot> {
+        ts.next(); // discard var token
+        let Token::Identifier(name) = self.next_or_err(ts)? else {
+            return Error::syntatic("expected name of the function", ts.pos());
+        };
+        let id = Identifier::new(name, ts.pos());
+        let annot = if let Some(Token::Colon) = ts.peek() {
+            ts.next(); // discard colon token
+            self.parse_annot(ts)?
+        } else {
+            return Error::syntatic("expected type annotation for external var", ts.pos());
+        };
+        self.consume_semi(ts)?;
+        AstRoot::ExternVar(annot, id).ok()
     }
 
     fn consume_ns(&mut self, ts: &mut TokenStream) -> Result<String> {
@@ -563,9 +576,16 @@ impl Parser {
                 }
 
                 Token::Function => self.consume_func(ts),
-                Token::Extern => self.consume_extern(ts),
+                Token::Extern => {
+                    ts.next(); // discard extern
+                    match ts.peek() {
+                        Some(Token::Function) => self.consume_extern_func(ts),
+                        Some(Token::Var) => self.consume_extern_var(ts),
+                        _ => Error::syntatic("expected func or var keyword", ts.peek_pos()),
+                    }
+                }
 
-                Token::Eof | Token::Use => unreachable!(),
+                Token::Eof | Token::Namespace | Token::Import | Token::Use => unreachable!(),
                 _ => Error::syntatic("wrong placement for this token", ts.peek_pos()),
             }?;
 

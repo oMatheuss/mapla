@@ -165,7 +165,7 @@ impl CodeGen {
         asm::code!(self.code, "bits 64");
         asm::code!(self.code, "section .text");
 
-        for (sym, ..) in self.symbols.iter_extrns() {
+        for sym in self.symbols.iter_extrns() {
             asm::code!(self.code, "extern {}", sym.name);
         }
     }

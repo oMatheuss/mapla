@@ -69,6 +69,7 @@ impl Binder {
                     let symbol = GlobalVar {
                         pos: id.position.clone(),
                         typ: self.bind_type(var_type, &ns)?,
+                        extrn: false,
                     };
                     self.globals.set_var(&id.name, ns, symbol)?;
 
@@ -109,6 +110,14 @@ impl Binder {
                         variadic: args.variadic,
                     };
                     self.globals.set_func(&id.name, ns, symbol)?;
+                }
+                AstRoot::ExternVar(var_type, id) => {
+                    let symbol = GlobalVar {
+                        pos: id.position.clone(),
+                        typ: self.bind_type(var_type, &ns)?,
+                        extrn: true,
+                    };
+                    self.globals.set_var(&id.name, ns, symbol)?;
                 }
             }
         }
