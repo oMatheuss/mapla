@@ -356,6 +356,7 @@ impl CodeGen {
                             panic!("operator AddressOf can only be used on memory");
                         };
                         let reg = self.regs.take_any(MemSize::QWord);
+                        self.regs.try_push(value);
                         asm::code!(self.code, Lea, reg, mem);
                         Operand::Reg(reg)
                     }
@@ -367,6 +368,7 @@ impl CodeGen {
                             Operand::Reg(reg) => Operand::Mem(Mem::reg(reg, size)),
                             Operand::Mem(mem) => {
                                 let reg = self.regs.take_any(MemSize::QWord);
+                                self.regs.try_push(value);
                                 asm::code!(self.code, Mov, reg, mem);
                                 Operand::Mem(Mem::reg(reg, size))
                             }
@@ -382,6 +384,7 @@ impl CodeGen {
                                 }
                                 Operand::Imm(..) | Operand::Mem(..) => {
                                     let reg = self.regs.take_any(value.mem_size());
+                                    self.regs.try_push(value);
                                     asm::code!(self.code, Mov, reg, value);
                                     asm::code!(self.code, Neg, reg);
                                     reg.into()
@@ -440,6 +443,7 @@ impl CodeGen {
                         }
                         Operand::Xmm(xmm) => {
                             let tmp = self.scope.new_temp(xmm.mem_size());
+                            self.xmms.push(xmm);
                             asm::code!(self.code, Movss, tmp, xmm);
                             asm::code!(self.code, Not, tmp);
                             tmp
@@ -870,6 +874,7 @@ impl CodeGen {
                     self.move_operand_to_reg(&field_type, item).expect_reg()
                 } else {
                     let reg = self.regs.take_any(MemSize::QWord);
+                    self.regs.try_push(item);
                     asm::code!(self.code, Lea, reg, item);
                     reg
                 };
