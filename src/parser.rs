@@ -149,6 +149,9 @@ impl Parser {
                 };
                 lhs = Expression::index(lhs, index);
             } else if let Some(Token::As) = ts.peek() {
+                if min_prec >= 12 {
+                    break; // unary expressions have higher precedence than casts
+                }
                 ts.next(); // consume as token
                 let target = self.parse_annot(ts)?;
                 lhs = Expression::cast(lhs, target);
