@@ -210,7 +210,18 @@ impl Parser {
             Error::syntatic("expected `then`", ts.pos())?
         };
         let inner = self.consume_inner(ts)?;
-        AstNode::If(expr, inner).ok()
+        let else_branch = match ts.peek() {
+            Some(Token::Else) => {
+                ts.next(); // discard else
+                let branch = match ts.peek() {
+                    Some(Token::If) => self.consume_if(ts)?,
+                    _ => AstNode::Else(self.consume_inner(ts)?),
+                };
+                Some(Box::new(branch))
+            }
+            _ => None,
+        };
+        AstNode::If(expr, inner, else_branch).ok()
     }
 
     fn parse_annot(&self, ts: &mut TokenStream) -> Result<AstType> {
@@ -504,6 +515,9 @@ impl Parser {
         while let Some(token) = ts.peek() {
             if let Token::End = token {
                 ts.next();
+                break;
+            } else if let Token::Else = token {
+                // do not consume the token
                 break;
             }
 

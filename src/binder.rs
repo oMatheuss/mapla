@@ -398,7 +398,7 @@ impl<'a> FuncBinder<'a> {
         }
     }
 
-    fn bind_node(&mut self, node: AstNode) -> Result<()> {
+    fn bind_node(&mut self, node: AstNode, jmp_to: Option<usize>) -> Result<()> {
         match node {
             AstNode::TypedVar(typ, name, Some(expr)) => {
                 let pos = expr.pos();
@@ -419,17 +419,38 @@ impl<'a> FuncBinder<'a> {
                 self.nodes.push(IrNode::Store { index, typ });
             }
 
-            AstNode::If(expr, nodes) => {
+            AstNode::If(expr, nodes, else_branch) => {
                 self.scope.enter();
-                let label = self.new_label();
+                let end = jmp_to.or_else(|| Some(self.new_label()));
+                let label = match else_branch {
+                    Some(..) => self.new_label(),
+                    None => end.unwrap(),
+                };
                 self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::JmpFalse { label });
                 for node in nodes {
-                    self.bind_node(node)?;
+                    self.bind_node(node, None)?;
                 }
-                self.nodes.push(IrNode::Label { label });
+                if else_branch.is_some() {
+                    self.nodes.push(IrNode::Jmp {
+                        label: end.unwrap(),
+                    });
+                }
                 self.scope.exit();
+                self.nodes.push(IrNode::Label { label });
+                if let Some(node) = else_branch {
+                    self.bind_node(*node, end)?;
+                }
             }
+            AstNode::Else(nodes) => {
+                for node in nodes {
+                    self.bind_node(node, jmp_to)?;
+                }
+                self.nodes.push(IrNode::Label {
+                    label: jmp_to.unwrap(),
+                });
+            }
+
             AstNode::While(expr, nodes) => {
                 self.scope.enter();
                 let start = self.new_label();
@@ -438,7 +459,7 @@ impl<'a> FuncBinder<'a> {
                 self.bind_expr(expr, true)?;
                 self.nodes.push(IrNode::JmpFalse { label: end });
                 for node in nodes {
-                    self.bind_node(node)?;
+                    self.bind_node(node, None)?;
                 }
                 self.nodes.push(IrNode::Jmp { label: start });
                 self.nodes.push(IrNode::Label { label: end });
@@ -468,7 +489,7 @@ impl<'a> FuncBinder<'a> {
                 });
                 self.nodes.push(IrNode::JmpEq { label: end });
                 for node in nodes {
-                    self.bind_node(node)?;
+                    self.bind_node(node, None)?;
                 }
                 self.nodes.push(IrNode::Load { value: counter });
                 self.nodes.push(IrNode::Inc);
@@ -498,7 +519,7 @@ impl<'a> FuncBinder<'a> {
             self.scope.set(name.clone(), arg_type.clone());
         }
         for node in nodes {
-            self.bind_node(node)?;
+            self.bind_node(node, None)?;
         }
         Ok(self.nodes)
     }

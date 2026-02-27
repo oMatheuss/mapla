@@ -236,7 +236,8 @@ impl AstRoot {
 pub enum AstNode {
     TypedVar(AstType, String, Option<Expression>),
     Var(String, Expression),
-    If(Expression, Vec<AstNode>),
+    If(Expression, Vec<AstNode>, Option<Box<AstNode>>),
+    Else(Vec<AstNode>),
     While(Expression, Vec<AstNode>),
     For(String, Option<Literal>, Expression, Vec<AstNode>),
     Expr(Expression),
