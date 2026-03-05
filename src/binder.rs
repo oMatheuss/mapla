@@ -269,6 +269,10 @@ impl<'a> FuncBinder<'a> {
                     name: id.name,
                     typ: func.as_type(),
                 }),
+                SymbolValue::GlobalVar(var) if var.extrn => Ok(IrArg::Extern {
+                    name: id.name,
+                    typ: var.typ,
+                }),
                 others => Ok(IrArg::Global {
                     ns,
                     name: id.name,
