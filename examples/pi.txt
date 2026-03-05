@@ -1,16 +1,16 @@
-extern func printf(fmt: char*, arg: int);
+extern func printf(fmt: char*, ...);
 
 func main(): int do
-    real sum = 0.0;
-    real flip = -1.0;
-    real i = 1.0;
+    var sum = 0.0;
+    var flip = -1.0;
+    var i = 1.0;
 
     for j to 100000 do
         flip = -flip;
         sum += flip / ( 2.0 * i - 1.0 );
         i += 1.0;
     end
-    
+
     printf("PI = %d", (sum * 4.0 * 100.0) as int);
     return 0;
 end

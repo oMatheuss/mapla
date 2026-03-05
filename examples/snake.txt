@@ -28,43 +28,43 @@ extern func IsKeyDown(key: int): bool;
 extern func IsKeyPressed(key: int): bool;
 extern func IsKeyReleased(key: int): bool;
 
-extern func SetRandomSeed(seed: int); 
+extern func SetRandomSeed(seed: int);
 extern func GetRandomValue(min: int, max: int): int;
 
-int SCREEN_WIDTH  = 664;
-int SCREEN_HEIGHT = 700;
+var SCREEN_WIDTH: int  = 664;
+var SCREEN_HEIGHT: int = 700;
 
-int GRID_WIDTH  = 20;
-int GRID_HEIGHT = 20;
+var GRID_WIDTH: int  = 20;
+var GRID_HEIGHT: int = 20;
 
-int GRID_X = 12;
-int GRID_Y = 48;
+var GRID_X: int = 12;
+var GRID_Y: int = 48;
 
-int BLOCK_SIZE = 32;
+var BLOCK_SIZE: int = 32;
 
-int BLACK  = 0xFF140800;
-int WHITE  = 0xFFFFFFFF;
-int RED    = 0xFF4947BC;
-int BLUE   = 0xFF91601E;
+var BLACK: int  = 0xFF140800;
+var WHITE: int  = 0xFFFFFFFF;
+var RED: int    = 0xFF4947BC;
+var BLUE: int   = 0xFF91601E;
 
-int GREEN1 = 0xFF76D5AA;
-int GREEN2 = 0xFF50CC8B;
-int GREEN3 = 0xFF015524;
+var GREEN1: int = 0xFF76D5AA;
+var GREEN2: int = 0xFF50CC8B;
+var GREEN3: int = 0xFF015524;
 
-int KEY_RIGHT = 262;
-int KEY_LEFT  = 263;
-int KEY_DOWN  = 264;
-int KEY_UP    = 265;
-int KEY_SPACE = 32;
+var KEY_RIGHT: int = 262;
+var KEY_LEFT: int  = 263;
+var KEY_DOWN: int  = 264;
+var KEY_UP: int    = 265;
+var KEY_SPACE: int = 32;
 
-real SNAKE_MOVE_DELAY_MS = 0.2;
+var SNAKE_MOVE_DELAY_MS: real = 0.2;
 
 func DrawGrid() do
     for j to GRID_HEIGHT do
-        int y = GRID_Y + j * BLOCK_SIZE;
+        var y = GRID_Y + j * BLOCK_SIZE;
         for i to GRID_WIDTH do
-            int x = GRID_X + i * BLOCK_SIZE;
-            int swap = (i + j) % 2;
+            var x = GRID_X + i * BLOCK_SIZE;
+            var swap = (i + j) % 2;
             if swap == 0 then
                 DrawRectangle(x, y, BLOCK_SIZE, BLOCK_SIZE, GREEN1);
             end
@@ -76,9 +76,9 @@ func DrawGrid() do
 end
 
 func DrawApple(i: int, j: int) do
-    int radius = BLOCK_SIZE / 2;
-    int x = GRID_X + i * BLOCK_SIZE;
-    int y = GRID_Y + j * BLOCK_SIZE;
+    var radius = BLOCK_SIZE / 2;
+    var x = GRID_X + i * BLOCK_SIZE;
+    var y = GRID_Y + j * BLOCK_SIZE;
     DrawCircle(x + radius, y + radius, radius as real, RED);
 end
 
@@ -87,34 +87,34 @@ func Lerp(v0: real, v1: real, t: real): real do
 end
 
 func DrawSnake(snake: int*, moveTiming: real) do
-    int radius = BLOCK_SIZE / 2;
-    real frameTime = moveTiming / SNAKE_MOVE_DELAY_MS;
+    var radius = BLOCK_SIZE / 2;
+    var frameTime = moveTiming / SNAKE_MOVE_DELAY_MS;
 
     for j to GRID_HEIGHT do
-        int dj = j * GRID_WIDTH;
+        var dj = j * GRID_WIDTH;
         for i to GRID_WIDTH do
-            int value = snake[dj + i];
+            var value = snake[dj + i];
             if value != 0 then
-                int x = GRID_X + i * BLOCK_SIZE;
-                int y = GRID_Y + j * BLOCK_SIZE;
+                var x = GRID_X + i * BLOCK_SIZE;
+                var y = GRID_Y + j * BLOCK_SIZE;
 
                 if value == 1 then
-                    int oldX = GRID_X + (i - 1) * BLOCK_SIZE;
+                    var oldX = GRID_X + (i - 1) * BLOCK_SIZE;
                     x = Lerp(oldX as real, x as real, frameTime) as int;
                 end
                 if value == 2 then
-                    int oldY = GRID_Y + (j - 1) * BLOCK_SIZE;
+                    var oldY = GRID_Y + (j - 1) * BLOCK_SIZE;
                     y = Lerp(oldY as real, y as real, frameTime) as int;
                 end
                 if value == 3 then
-                    int oldX = GRID_X + (i + 1) * BLOCK_SIZE;
+                    var oldX = GRID_X + (i + 1) * BLOCK_SIZE;
                     x = Lerp(oldX as real, x as real, frameTime) as int;
                 end
                 if value == 4 then
-                    int oldY = GRID_Y + (j + 1) * BLOCK_SIZE;
+                    var oldY = GRID_Y + (j + 1) * BLOCK_SIZE;
                     y = Lerp(oldY as real, y as real, frameTime) as int;
                 end
-                
+
                 DrawCircle(x + radius, y + radius, radius as real, BLUE);
             end
         end
@@ -122,7 +122,7 @@ func DrawSnake(snake: int*, moveTiming: real) do
 end
 
 func InitField(snake: int*) do
-    int size = GRID_WIDTH * GRID_HEIGHT;
+    var size = GRID_WIDTH * GRID_HEIGHT;
     for i to size do
         snake[i] = 0;
     end
@@ -144,8 +144,8 @@ func GetIndex(x: int, y: int): int do
 end
 
 func NextHeadSnake(snakeHead: int, dir: int): int do
-    int x = snakeHead % GRID_WIDTH;
-    int y = snakeHead / GRID_WIDTH;
+    var x = snakeHead % GRID_WIDTH;
+    var y = snakeHead / GRID_WIDTH;
     if dir == 1 then x += 1; end
     if dir == 2 then y += 1; end
     if dir == 3 then x -= 1; end
@@ -154,8 +154,8 @@ func NextHeadSnake(snakeHead: int, dir: int): int do
 end
 
 func PreviousTailSnake(snakeHead: int, dir: int): int do
-    int x = snakeHead % GRID_WIDTH;
-    int y = snakeHead / GRID_WIDTH;
+    var x = snakeHead % GRID_WIDTH;
+    var y = snakeHead / GRID_WIDTH;
     if dir == 1 then x -= 1; end
     if dir == 2 then y -= 1; end
     if dir == 3 then x += 1; end
@@ -164,9 +164,9 @@ func PreviousTailSnake(snakeHead: int, dir: int): int do
 end
 
 func RemoveTail(snake: int*, snakeHead: int): int do
-    int head = snakeHead;
+    var head = snakeHead;
     while true do
-        int tail = PreviousTailSnake(head, snake[head]);
+        var tail = PreviousTailSnake(head, snake[head]);
         if snake[tail] == 0 || tail == snakeHead then
             snake[head] = 0;
             return 0;
@@ -176,14 +176,14 @@ func RemoveTail(snake: int*, snakeHead: int): int do
 end
 
 func CanMoveSnake(snake: int*, snakeHead: int, dir: int): bool do
-    int nextHead = NextHeadSnake(snakeHead, dir);
+    var nextHead = NextHeadSnake(snakeHead, dir);
     return snake[nextHead] == 0;
 end
 
 func NewApple(snake: int*): int do
-    int max = GRID_WIDTH * GRID_HEIGHT;
+    var max = GRID_WIDTH * GRID_HEIGHT;
     while true do
-        int next = GetRandomValue(0, max);
+        var next = GetRandomValue(0, max);
         if snake[next] == 0 then
             return next;
         end
@@ -191,22 +191,22 @@ func NewApple(snake: int*): int do
 end
 
 func main(): int do
-    int[400] snake;
+    var snake: int[400];
 
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Snake");
     SetTargetFPS(120);
 
     InitField(snake);
-    int snakeHead = InitSnake(snake);
-    int apple = NewApple(snake);
-    int points = 0;
+    var snakeHead = InitSnake(snake);
+    var apple = NewApple(snake);
+    var points = 0;
 
-    real moveCooldown = 0.0;
-    int moveDir = 1;
-    int nextDir = 1;
+    var moveCooldown = 0.0;
+    var moveDir = 1;
+    var nextDir = 1;
 
     while !WindowShouldClose() do
-        real dt = GetFrameTime();
+        var dt = GetFrameTime();
         moveCooldown += dt;
 
         if IsKeyDown(KEY_RIGHT) && moveDir != 3 then nextDir = 1; end
@@ -222,7 +222,7 @@ func main(): int do
                 return 0;
             end
 
-            int newSnakeHead = NextHeadSnake(snakeHead, moveDir);
+            var newSnakeHead = NextHeadSnake(snakeHead, moveDir);
 
             if newSnakeHead != apple then
                 RemoveTail(snake, snakeHead);
@@ -235,7 +235,7 @@ func main(): int do
                 apple = NewApple(snake);
                 points += 1;
             end
-            
+
             moveCooldown = 0.0;
         end
 
@@ -246,9 +246,9 @@ func main(): int do
         DrawSnake(snake, moveCooldown);
         DrawFPS(10, 10);
 
-        char* pointsText = TextFormat("Points: %d", points);
-        int pointsTextSize = MeasureText(pointsText, 20);
-        int pointsPosX = SCREEN_WIDTH - pointsTextSize - 10;
+        var pointsText = TextFormat("Points: %d", points);
+        var pointsTextSize = MeasureText(pointsText, 20);
+        var pointsPosX = SCREEN_WIDTH - pointsTextSize - 10;
         DrawText(pointsText, pointsPosX, 10, 20, WHITE);
 
         EndDrawing();

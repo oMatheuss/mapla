@@ -1,21 +1,21 @@
-extern func malloc(size: int): int*;
+extern func malloc(size: int): void*;
 extern func free(mem: int*);
 extern func memcpy(dst: int*, src: int*, cnt: int): int*;
 extern func putchar(ch: int): int;
-extern func printf(fmt: char*, arg1: int);
+extern func printf(fmt: char*, ...);
 extern func usleep(ms: int);
 extern func srand(seed: int);
 extern func rand(): int;
 
-int WIDTH  = 64;
-int HEIGHT = 32;
+var WIDTH: int  = 32;
+var HEIGHT: int = 16;
 
-int DEAD_CELL = 32;
-int ALIVE_CELL = 35;
+var DEAD_CELL: int = 32;
+var ALIVE_CELL: int = 35;
 
 func printBoard(board: int*) do
     for y to HEIGHT do
-        int dy = y * WIDTH;
+        var dy = y * WIDTH;
         for x to WIDTH do
             putchar(board[dy + x]);
         end
@@ -24,9 +24,9 @@ func printBoard(board: int*) do
 end
 
 func createBoard(): int* do
-    int* board = malloc(WIDTH * HEIGHT * 4);
+    var board = malloc(WIDTH * HEIGHT * 4) as int*;
     for y to HEIGHT do
-        int dy = y * WIDTH;
+        var dy = y * WIDTH;
         for x to WIDTH do
             board[dy + x] = DEAD_CELL;
         end
@@ -36,18 +36,18 @@ end
 
 func wrapAround(value: int, maxValue: int): int do
     if value >= maxValue then value -= maxValue; end
-    if value < 0 then value += maxValue; end
+    else if value < 0 then value += maxValue; end
     return value;
 end
 
 func checkNeighbors(board: int*, posX: int, posY: int): int do
-    int sum = 0;
+    var sum = 0;
     for j = -1 to 2 do
-        int y = wrapAround(posY + j, HEIGHT);
-        int dy = y * WIDTH;
+        var y = wrapAround(posY + j, HEIGHT);
+        var dy = y * WIDTH;
         for i = -1 to 2 do
             if i != 0 || j != 0 then
-                int x = wrapAround(posX + i, WIDTH);
+                var x = wrapAround(posX + i, WIDTH);
                 if board[dy + x] == ALIVE_CELL then
                     sum += 1;
                 end
@@ -58,13 +58,13 @@ func checkNeighbors(board: int*, posX: int, posY: int): int do
 end
 
 func updateBoard(actualState: int*) do
-    int* nextState = createBoard();
+    var nextState = createBoard();
     memcpy(nextState, actualState, WIDTH * HEIGHT * 4);
     for y to HEIGHT do
-        int dy = y * WIDTH;
+        var dy = y * WIDTH;
         for x to WIDTH do
-            int actual = actualState[dy + x];
-            int alives = checkNeighbors(actualState, x, y);
+            var actual = actualState[dy + x];
+            var alives = checkNeighbors(actualState, x, y);
             if actual == ALIVE_CELL && alives < 2 || alives > 3 then
                 nextState[dy + x] = DEAD_CELL;
             end
@@ -80,7 +80,7 @@ end
 func randomizeBoard(board: int*) do
     srand(1283);
     for y to HEIGHT do
-        int dy = y * WIDTH;
+        var dy = y * WIDTH;
         for x to WIDTH do
             if rand() > 15000 then
                 board[dy + x] = ALIVE_CELL;
@@ -95,7 +95,7 @@ func clearTerminal() do
 end
 
 func main(): int do
-    int* board = createBoard();
+    var board = createBoard();
     randomizeBoard(board);
 
     while true do

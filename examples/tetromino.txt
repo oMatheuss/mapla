@@ -23,43 +23,43 @@ extern func IsKeyDown(key: int): bool;
 extern func IsKeyPressed(key: int): bool;
 extern func IsKeyReleased(key: int): bool;
 
-extern func SetRandomSeed(seed: int); 
+extern func SetRandomSeed(seed: int);
 extern func GetRandomValue(min: int, max: int): int;
 
-int SCREEN_WIDTH  = 438;
-int SCREEN_HEIGHT = 778;
+var SCREEN_WIDTH: int  = 438;
+var SCREEN_HEIGHT: int = 778;
 
-int GRID_WIDTH  = 10;
-int GRID_HEIGHT = 20;
+var GRID_WIDTH: int  = 10;
+var GRID_HEIGHT: int = 20;
 
-int GRID_X = 48;
-int GRID_Y = 48;
+var GRID_X: int = 48;
+var GRID_Y: int = 48;
 
-int BLOCK_SIZE = 32;
+var BLOCK_SIZE: int = 32;
 
-int BLACK  = 0xFF140800;
-int WHITE  = 0xFFFFFFFF;
-int YELLOW = 0xFF00C3FF;
-int GOLD   = 0xFFA0D6FF;
+var BLACK: int  = 0xFF140800;
+var WHITE: int  = 0xFFFFFFFF;
+var YELLOW: int = 0xFF00C3FF;
+var GOLD: int   = 0xFFA0D6FF;
 
-int KEY_RIGHT = 262;
-int KEY_LEFT  = 263;
-int KEY_DOWN  = 264;
-int KEY_UP    = 265;
-int KEY_SPACE = 32;
+var KEY_RIGHT: int = 262;
+var KEY_LEFT: int  = 263;
+var KEY_DOWN: int  = 264;
+var KEY_UP: int    = 265;
+var KEY_SPACE: int = 32;
 
-int STROKE_COLOR = 0xFF663500;
-int STROKE_WIDTH = 2;
+var STROKE_COLOR: int = 0xFF663500;
+var STROKE_WIDTH: int = 2;
 
 func DrawGrid() do
-    int v_lines = GRID_WIDTH + 1;
-    int h_lines = GRID_HEIGHT + 1;
+    var v_lines = GRID_WIDTH + 1;
+    var h_lines = GRID_HEIGHT + 1;
 
-    int v_lineLength = GRID_HEIGHT * BLOCK_SIZE + h_lines * STROKE_WIDTH;
-    int h_lineLength = GRID_WIDTH * BLOCK_SIZE + v_lines * STROKE_WIDTH;
+    var v_lineLength = GRID_HEIGHT * BLOCK_SIZE + h_lines * STROKE_WIDTH;
+    var h_lineLength = GRID_WIDTH * BLOCK_SIZE + v_lines * STROKE_WIDTH;
 
-    int startX = GRID_X;
-    int endY = GRID_Y + v_lineLength;
+    var startX = GRID_X;
+    var endY = GRID_Y + v_lineLength;
 
     for i to v_lines do
         for line to STROKE_WIDTH do
@@ -69,8 +69,8 @@ func DrawGrid() do
         startX += BLOCK_SIZE;
     end
 
-    int startY = GRID_Y;
-    int endX = GRID_X + h_lineLength;
+    var startY = GRID_Y;
+    var endX = GRID_X + h_lineLength;
 
     for i to h_lines do
         for line to STROKE_WIDTH do
@@ -82,23 +82,23 @@ func DrawGrid() do
 end
 
 func DrawBlock(i: int, j: int, color: int) do
-    int x = GRID_X + STROKE_WIDTH + i * (BLOCK_SIZE + STROKE_WIDTH);
-    int y = GRID_Y + STROKE_WIDTH + j * (BLOCK_SIZE + STROKE_WIDTH);
+    var x = GRID_X + STROKE_WIDTH + i * (BLOCK_SIZE + STROKE_WIDTH);
+    var y = GRID_Y + STROKE_WIDTH + j * (BLOCK_SIZE + STROKE_WIDTH);
     DrawRectangle(x, y, BLOCK_SIZE, BLOCK_SIZE, color);
 end
 
 func DrawPiece(piece: int*, color: int) do
     for i to 4 do
-        int index = piece[i];
-        int x = index % GRID_WIDTH;
-        int y = index / GRID_WIDTH;
+        var index = piece[i];
+        var x = index % GRID_WIDTH;
+        var y = index / GRID_WIDTH;
         DrawBlock(x, y, color);
     end
 end
 
 func DrawBoard(board: int*) do
     for j to GRID_HEIGHT do
-        int dj = j * GRID_WIDTH;
+        var dj = j * GRID_WIDTH;
         for i to GRID_WIDTH do
             if board[dj + i] != 0 then
                 DrawBlock(i, j, board[dj + i]);
@@ -108,14 +108,14 @@ func DrawBoard(board: int*) do
 end
 
 func InitBoard(board: int*) do
-    int size = GRID_WIDTH * GRID_HEIGHT;
+    var size = GRID_WIDTH * GRID_HEIGHT;
     for i to size do
         board[i] = 0;
     end
 end
 
 func InitPiece(piece: int*): int do
-    int r = GetRandomValue(1, 7);
+    var r = GetRandomValue(1, 7);
 
     if r == 1 then
         piece[0] = 0;
@@ -181,7 +181,7 @@ end
 
 func CanMovePieceDown(board: int*, piece: int*): bool do
     for j to 4 do
-        int i = piece[j];
+        var i = piece[j];
         if i / GRID_WIDTH + 1 >= GRID_HEIGHT then
             return false;
         end
@@ -194,7 +194,7 @@ end
 
 func CanMovePieceLeft(board: int*, piece: int*): bool do
     for j to 4 do
-        int i = piece[j];
+        var i = piece[j];
         if i % GRID_WIDTH <= 0 then
             return false;
         end
@@ -207,7 +207,7 @@ end
 
 func CanMovePieceRight(board: int*, piece: int*): bool do
     for j to 4 do
-        int i = piece[j];
+        var i = piece[j];
         if i % GRID_WIDTH + 1 >= GRID_WIDTH then
             return false;
         end
@@ -240,14 +240,14 @@ func MovePieceRight(piece: int*) do
 end
 
 func CanRotateCw(board: int*, piece: int*): bool do
-    int cx = piece[2] % GRID_WIDTH;
-    int cy = piece[2] / GRID_WIDTH;
+    var cx = piece[2] % GRID_WIDTH;
+    var cy = piece[2] / GRID_WIDTH;
     for i to 4 do
-        int x = piece[i] % GRID_WIDTH;
-        int y = piece[i] / GRID_WIDTH;
+        var x = piece[i] % GRID_WIDTH;
+        var y = piece[i] / GRID_WIDTH;
 
-        int dx = -y + cy + cx;
-        int dy = x - cx + cy;
+        var dx = -y + cy + cx;
+        var dy = x - cx + cy;
 
         if dx < 0 || dx >= GRID_WIDTH || dy < 0 || dy >= GRID_HEIGHT then
             return false;
@@ -261,14 +261,14 @@ func CanRotateCw(board: int*, piece: int*): bool do
 end
 
 func RotateCw(piece: int*) do
-    int cx = piece[2] % GRID_WIDTH;
-    int cy = piece[2] / GRID_WIDTH;
+    var cx = piece[2] % GRID_WIDTH;
+    var cy = piece[2] / GRID_WIDTH;
     for i to 4 do
-        int x = piece[i] % GRID_WIDTH;
-        int y = piece[i] / GRID_WIDTH;
+        var x = piece[i] % GRID_WIDTH;
+        var y = piece[i] / GRID_WIDTH;
 
-        int dx = -y + cy + cx;
-        int dy = x - cx + cy;
+        var dx = -y + cy + cx;
+        var dy = x - cx + cy;
 
         piece[i] = dy * GRID_WIDTH + dx;
     end
@@ -284,15 +284,15 @@ func CheckLine(board: int*, dj: int): bool do
 end
 
 func ClearLine(board: int*, line: int) do
-    int dj = line * GRID_WIDTH;
+    var dj = line * GRID_WIDTH;
     for i to GRID_WIDTH do
         board[dj + i] = 0;
     end
-    int j = line - 1;
+    var j = line - 1;
     while j >= 0 do
         dj = j * GRID_WIDTH;
         for i to GRID_WIDTH do
-            int color = board[dj + i];
+            var color = board[dj + i];
             board[dj + i] = 0;
             board[dj + i + GRID_WIDTH] = color;
         end
@@ -301,7 +301,7 @@ func ClearLine(board: int*, line: int) do
 end
 
 func ClearLines(board: int*): int do
-    int lines = 0;
+    var lines = 0;
     for j to GRID_HEIGHT do
         if CheckLine(board, j * GRID_WIDTH) then
             ClearLine(board, j);
@@ -313,8 +313,8 @@ func ClearLines(board: int*): int do
 end
 
 func main(): int do
-    int[200] board;
-    int[004] piece;
+    var board: int[200];
+    var piece: int[004];
 
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Tetraminós");
     SetTargetFPS(120);
@@ -322,19 +322,19 @@ func main(): int do
     InitBoard(board);
     InitPiece(piece);
 
-    int points = 0;
+    var points = 0;
 
-    real moveDownCooldown = 0.0;
-    real moveSideCooldown = 0.0;
-    int lastMoveH = 0;
-    bool isFastMoving = false;
-    bool isSideMoving = false;
+    var moveDownCooldown = 0.0;
+    var moveSideCooldown = 0.0;
+    var lastMoveH = 0;
+    var isFastMoving = false;
+    var isSideMoving = false;
 
     while WindowShouldClose() == false do
-        real dt = GetFrameTime();
+        var dt = GetFrameTime();
         moveDownCooldown += dt;
 
-        int lines = 0;
+        var lines = 0;
 
         if IsKeyPressed(KEY_SPACE) then
             while CanMovePieceDown(board, piece) do
@@ -363,7 +363,7 @@ func main(): int do
             points += (lines * 100) + (100 * 1 << (lines - 2));
         end
 
-        int moveH = 0;
+        var moveH = 0;
         if IsKeyDown(KEY_RIGHT) then moveH += 1; end
         if IsKeyDown(KEY_LEFT) then moveH -= 1; end
 
@@ -388,7 +388,7 @@ func main(): int do
                 end
                 isSideMoving = true;
             end
-            
+
             if isFastMoving && moveSideCooldown > 0.05 then
                 if CanMovePieceRight(board, piece) then
                     MovePieceRight(piece);
@@ -404,7 +404,7 @@ func main(): int do
                 end
                 isSideMoving = true;
             end
-            
+
             if isFastMoving && moveSideCooldown > 0.05 then
                 if CanMovePieceLeft(board, piece) then
                     MovePieceLeft(piece);
@@ -428,11 +428,11 @@ func main(): int do
         DrawPiece(piece, GOLD);
         DrawFPS(10, 10);
 
-        char* pointsText = TextFormat("Points: %d", points);
-        int pointsTextSize = MeasureText(pointsText, 20);
-        int pointsPosX = SCREEN_WIDTH - pointsTextSize - 10;
+        var pointsText = TextFormat("Points: %d", points);
+        var pointsTextSize = MeasureText(pointsText, 20);
+        var pointsPosX = SCREEN_WIDTH - pointsTextSize - 10;
         DrawText(pointsText, pointsPosX, 10, 20, WHITE);
-        
+
         EndDrawing();
     end
 

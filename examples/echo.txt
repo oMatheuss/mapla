@@ -1,8 +1,8 @@
-extern func printf(fmt: char*);
+extern func printf(fmt: char*, ...);
 extern func scanf(fmt: char*, buf: char*);
 
 func main(): int do
-    char[124] buffer;
+    var buffer: char[124];
 
     printf("What's your name?\n");
     scanf("%s", buffer);

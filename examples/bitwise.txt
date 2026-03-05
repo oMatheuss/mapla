@@ -1,7 +1,7 @@
-extern func printf(fmt: char*, arg: int);
+extern func printf(fmt: char*, ...);
+
 func main(): int do
-    
-    int x = 1 << 6;
+    var x = 1 << 6;
     printf("1 << 6 = %d\n", x);
 
     x = 64 >> 2;

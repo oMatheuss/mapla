@@ -1,8 +1,8 @@
-extern func printf(fmt: char*, arg: int);
+extern func printf(fmt: char*, ...);
 
 func main(): int do
     for x = 2 to 100 do
-        int y = 2;
+        var y = 2;
         while y * y < x && x % y > 0 do
             y += 1;
         end
