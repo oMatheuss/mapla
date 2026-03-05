@@ -271,40 +271,42 @@ impl Parser {
     }
 
     fn consume_var(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
-        if let Some(Token::Var) = ts.peek() {
-            self.next_or_err(ts)?;
-            let Token::Identifier(ident) = self.next_or_err(ts)? else {
-                Error::syntatic("expected identifier", ts.pos())?
-            };
-            let Token::Assign = self.next_or_err(ts)? else {
-                Error::syntatic("expected assign operator", ts.pos())?
-            };
+        ts.next(); // consume var keyword
+        let Token::Identifier(name) = self.next_or_err(ts)? else {
+            Error::syntatic("expected identifier", ts.pos())?
+        };
+        if let Some(Token::Colon) = ts.peek() {
+            ts.next();
+            let typ = self.parse_annot(ts)?;
+            if let Some(Token::Assign) = ts.peek() {
+                ts.next();
+                let expr = self.parse_expr(ts, 1)?;
+                self.consume_semi(ts)?;
+                AstNode::TypedVar(typ, name.into(), Some(expr)).ok()
+            } else {
+                self.consume_semi(ts)?;
+                AstNode::TypedVar(typ, name.into(), None).ok()
+            }
+        } else if let Some(Token::Assign) = ts.peek() {
+            ts.next();
             let expr = self.parse_expr(ts, 1)?;
             self.consume_semi(ts)?;
-            AstNode::Var(ident.into(), expr).ok()
+            AstNode::Var(name.into(), expr).ok()
         } else {
-            let annot = self.parse_annot(ts)?;
-            let Token::Identifier(ident) = self.next_or_err(ts)? else {
-                Error::syntatic("expected identifier", ts.pos())?
-            };
-            let expr = if let Some(Token::Assign) = ts.peek() {
-                self.next_or_err(ts)?; // discard assign signal
-                let expr = self.parse_expr(ts, 1)?;
-                Some(expr)
-            } else {
-                None
-            };
-            self.consume_semi(ts)?;
-            AstNode::TypedVar(annot, ident.into(), expr).ok()
+            Error::syntatic("expected type annotation or assignment", ts.pos())?
         }
     }
 
     fn consume_global(&mut self, ts: &mut TokenStream) -> Result<AstRoot> {
-        let typ = self.parse_annot(ts)?;
+        ts.next(); // consume var keyword
         let Token::Identifier(name) = self.next_or_err(ts)? else {
             Error::syntatic("expected identifier", ts.pos())?
         };
         let id = Identifier::new(name, ts.pos());
+        let Token::Colon = self.next_or_err(ts)? else {
+            Error::syntatic("expected type annotation", ts.pos())?
+        };
+        let typ = self.parse_annot(ts)?;
         let expr = if let Some(Token::Assign) = ts.peek() {
             ts.next(); // discard assign signal
             let expr = self.parse_value(ts)?;
@@ -530,9 +532,7 @@ impl Parser {
                 Token::While => self.consume_while(ts),
                 Token::For => self.consume_for(ts),
 
-                Token::Var | Token::Int | Token::Real | Token::Char | Token::Bool | Token::Byte => {
-                    self.consume_var(ts)
-                }
+                Token::Var => self.consume_var(ts),
 
                 Token::OpenParen
                 | Token::True
@@ -584,11 +584,7 @@ impl Parser {
 
             let node = match token {
                 Token::Struct => self.consume_struct(ts),
-
-                Token::Int | Token::Real | Token::Char | Token::Bool | Token::Byte => {
-                    self.consume_global(ts)
-                }
-
+                Token::Var => self.consume_global(ts),
                 Token::Function => self.consume_func(ts),
                 Token::Extern => {
                     ts.next(); // discard extern
