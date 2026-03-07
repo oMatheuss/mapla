@@ -188,6 +188,18 @@ impl std::fmt::Display for FieldList {
     }
 }
 
+#[derive(Debug)]
+pub struct TypeWithPos {
+    pub typ: Type,
+    pub pos: Position,
+}
+
+impl TypeWithPos {
+    pub fn new(typ: Type, pos: Position) -> Self {
+        Self { typ, pos }
+    }
+}
+
 pub struct TypeCheck;
 
 impl TypeCheck {
@@ -303,22 +315,19 @@ impl TypeCheck {
         Ok(result)
     }
 
-    pub fn check_callargs(
-        args: &ArgList,
-        vals: &Vec<(Type, Position)>,
-        call_pos: Position,
-    ) -> Result<()> {
+    pub fn check_callargs(args: &ArgList, vals: &Vec<TypeWithPos>, pos: Position) -> Result<()> {
         let variadic = args.variadic;
         if (!variadic && args.items.len() != vals.len())
             || (variadic && vals.len() < args.items.len())
         {
             let msg = "wrong number of arguments provided to the function";
-            return Error::type_err(msg, call_pos);
+            return Error::type_err(msg, pos);
         }
 
-        for (arg_type, (arg, pos)) in args.items.iter().zip(vals) {
-            if !arg.is_compatible(arg_type) {
-                let msg = format!("expected {arg_type}, but found {arg}");
+        for (arg_type, val) in args.items.iter().zip(vals) {
+            if !val.typ.is_compatible(arg_type) {
+                let TypeWithPos { typ, pos } = val;
+                let msg = format!("expected {arg_type}, but found {typ}");
                 return Error::type_err(msg, pos.clone());
             }
         }
@@ -326,10 +335,11 @@ impl TypeCheck {
         Ok(())
     }
 
-    pub fn check_struct(fields: &FieldList, vals: &Vec<(Type, Position)>) -> Result<()> {
-        for (field, (arg, pos)) in fields.iter().zip(vals) {
-            if !arg.is_compatible(&field.typ) {
+    pub fn check_struct(fields: &FieldList, vals: &Vec<TypeWithPos>) -> Result<()> {
+        for (field, val) in fields.iter().zip(vals) {
+            if !val.typ.is_compatible(&field.typ) {
                 let Field { name, typ } = field;
+                let TypeWithPos { typ: arg, pos } = val;
                 let msg = format!("field {name} expects {typ}, but found {arg}");
                 return Error::type_err(msg, pos.clone());
             }

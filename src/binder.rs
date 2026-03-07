@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
 use crate::symbols::{FuncDef, GlobalVar, Symbol, SymbolTable, SymbolValue, TypeDef};
-use crate::types::{Type, TypeCheck};
+use crate::types::{Type, TypeCheck, TypeWithPos};
 
 pub struct Binder {
     pub globals: SymbolTable,
@@ -322,13 +322,13 @@ impl<'a> FuncBinder<'a> {
                     let pos = arg.pos();
                     let arg_type = self.bind_expr(arg, emit)?;
                     self.emit(IrNode::Arg, emit);
-                    args_types.push((arg_type, pos));
+                    args_types.push(TypeWithPos::new(arg_type, pos));
                 }
                 let pos = func.pos();
                 match self.bind_expr(*func, emit)? {
                     Type::Func(func_args, ret) => {
                         TypeCheck::check_callargs(&func_args, &args_types, pos)?;
-                        let args = args_types.into_iter().map(|a| a.0).collect();
+                        let args = args_types.into_iter().map(|a| a.typ).collect();
                         let func_ret = *ret.clone();
                         self.emit(IrNode::Call { args, ret: *ret }, emit);
                         Ok(func_ret)
