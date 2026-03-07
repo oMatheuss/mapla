@@ -10,10 +10,10 @@ pub enum Type {
     Char,
     Bool,
     Void,
-    Func(ArgList, Box<Type>, bool),
+    Func(ArgList, Box<Type>),
     Pointer(Box<Type>),
     Array(Box<Type>, u32),
-    Struct(ArgList),
+    Struct(FieldList),
 }
 
 impl Type {
@@ -97,10 +97,7 @@ impl std::fmt::Display for Type {
             Self::Char => write!(f, "char"),
             Self::Bool => write!(f, "bool"),
             Self::Void => write!(f, "void"),
-            Self::Func(args, ret, variadic) => match variadic {
-                true => write!(f, "func({args}, ...): {ret}"),
-                false => write!(f, "func({args}): {ret}"),
-            },
+            Self::Func(args, ret) => write!(f, "func({args}): {ret}"),
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
             Self::Struct(fields) => write!(f, "struct({fields})"),
@@ -108,51 +105,84 @@ impl std::fmt::Display for Type {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Argument {
-    pub name: String,
-    pub arg_type: Type,
-}
-
-impl std::fmt::Display for Argument {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name, arg_type } = self;
-        write!(f, "{name}: {arg_type}")
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ArgList {
-    pub items: Vec<Argument>,
-}
-
-impl From<Vec<Argument>> for ArgList {
-    fn from(items: Vec<Argument>) -> Self {
-        Self { items }
-    }
-}
-
-impl std::ops::DerefMut for ArgList {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.items
-    }
-}
-
-impl std::ops::Deref for ArgList {
-    type Target = Vec<Argument>;
-    fn deref(&self) -> &Self::Target {
-        &self.items
-    }
+    pub items: Vec<Type>,
+    pub variadic: bool,
 }
 
 impl std::fmt::Display for ArgList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Some(arg) = self.first() else {
+        let Some(arg) = self.items.first() else {
             return Ok(());
         };
-        write!(f, "{}: {}", arg.name, arg.arg_type)?;
-        for arg in self.iter().skip(1) {
-            write!(f, ", {}: {}", arg.name, arg.arg_type)?;
+        write!(f, "{}", arg)?;
+        for typ in self.items.iter().skip(1) {
+            write!(f, ", {}", typ)?;
+        }
+        if self.variadic {
+            write!(f, ", ...")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct Field {
+    pub name: String,
+    pub typ: Type,
+}
+
+impl Field {
+    pub fn new(name: String, typ: Type) -> Self {
+        Self { name, typ }
+    }
+}
+
+impl std::fmt::Display for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.name, self.typ)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct FieldList {
+    inner: Vec<Field>,
+}
+
+impl From<Vec<Field>> for FieldList {
+    fn from(inner: Vec<Field>) -> Self {
+        Self { inner }
+    }
+}
+
+impl FieldList {
+    pub fn as_type_vec(self) -> Vec<Type> {
+        self.inner.into_iter().map(|f| f.typ).collect()
+    }
+}
+
+impl std::ops::DerefMut for FieldList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl std::ops::Deref for FieldList {
+    type Target = Vec<Field>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::fmt::Display for FieldList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Some(field) = self.inner.first() else {
+            return Ok(());
+        };
+        write!(f, "{}", field)?;
+        for field in self.inner.iter().skip(1) {
+            write!(f, ", {}", field)?;
         }
         Ok(())
     }
@@ -273,17 +303,35 @@ impl TypeCheck {
         Ok(result)
     }
 
-    pub fn check_callargs(args: &Vec<Argument>, vals: &Vec<Type>, variadic: bool) -> Result<()> {
-        let pos = Position::default();
-        if (!variadic && args.len() != vals.len()) || (variadic && vals.len() < args.len()) {
-            return Error::type_err("wrong number of arguments provided to the function", pos);
+    pub fn check_callargs(
+        args: &ArgList,
+        vals: &Vec<(Type, Position)>,
+        call_pos: Position,
+    ) -> Result<()> {
+        let variadic = args.variadic;
+        if (!variadic && args.items.len() != vals.len())
+            || (variadic && vals.len() < args.items.len())
+        {
+            let msg = "wrong number of arguments provided to the function";
+            return Error::type_err(msg, call_pos);
         }
 
-        for (func_arg, arg) in args.iter().zip(vals) {
-            let arg_type = &func_arg.arg_type;
+        for (arg_type, (arg, pos)) in args.items.iter().zip(vals) {
             if !arg.is_compatible(arg_type) {
                 let msg = format!("expected {arg_type}, but found {arg}");
-                return Error::type_err(msg, pos);
+                return Error::type_err(msg, pos.clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn check_struct(fields: &FieldList, vals: &Vec<(Type, Position)>) -> Result<()> {
+        for (field, (arg, pos)) in fields.iter().zip(vals) {
+            if !arg.is_compatible(&field.typ) {
+                let Field { name, typ } = field;
+                let msg = format!("field {name} expects {typ}, but found {arg}");
+                return Error::type_err(msg, pos.clone());
             }
         }
 

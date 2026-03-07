@@ -139,7 +139,7 @@ impl CodeGen {
             Type::Int | Type::Real => 4,
             Type::Func(..) | Type::Pointer(..) => 8,
             Type::Array(inner, size) => self.type_size(inner) * (*size as usize),
-            Type::Struct(fields) => fields.iter().map(|f| self.type_size(&f.arg_type)).sum(),
+            Type::Struct(fields) => fields.iter().map(|f| self.type_size(&f.typ)).sum(),
         }
     }
 

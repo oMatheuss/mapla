@@ -1,7 +1,8 @@
 use crate::codegen::asm;
 use crate::codegen::asm::{Imm, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use crate::codegen::regs::OperandManager;
-use crate::types::{Argument, Type};
+use crate::symbols::Symbol;
+use crate::types::Type;
 
 use super::CodeGen;
 
@@ -145,7 +146,7 @@ pub fn compile_call(
     }
 }
 
-pub fn compile_args(c: &mut CodeGen, args: &[Argument], fn_type: &Type) {
+pub fn compile_args(c: &mut CodeGen, args: &[Symbol], fn_type: &Type) {
     let mut i = 0;
     let mut mem_offset = 48; // rip + rbp + shadow space
     if c.type_size(fn_type) > 8 {
@@ -154,10 +155,10 @@ pub fn compile_args(c: &mut CodeGen, args: &[Argument], fn_type: &Type) {
         asm::code!(c.code, Mov, mem, reg);
         i += 1; // first register will be allocated to the return value
     }
-    for Argument { name: _, arg_type } in args.iter() {
-        let size = c.type_size(arg_type);
+    for Symbol { name: _, typ, .. } in args.iter() {
+        let size = c.type_size(typ);
         let mem_size = size.try_into().unwrap();
-        let is_float = matches!(arg_type, Type::Real);
+        let is_float = matches!(typ, Type::Real);
         if is_float && let Some(xmm) = call_xmms(i, mem_size) {
             let mem = c.scope.set_sized_var(i, size, mem_size);
             asm::code!(c.code, Movss, mem, xmm);

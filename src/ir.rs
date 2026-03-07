@@ -2,13 +2,14 @@ use std::fmt::Display;
 use std::rc::Rc;
 
 use crate::ast::{BinOpe, UnaOpe};
-use crate::types::{Argument, Type};
+use crate::symbols::Symbol;
+use crate::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct IrFunc {
     pub name: String,
     pub namespace: Rc<String>,
-    pub args: Vec<Argument>,
+    pub args: Vec<Symbol>,
     pub typ: Type,
     pub body: Vec<IrNode>,
 }

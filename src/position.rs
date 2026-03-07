@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::rc::Rc;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Position {
     file: Rc<String>,
     index: usize,

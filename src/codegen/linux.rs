@@ -1,7 +1,8 @@
 use crate::codegen::asm;
 use crate::codegen::asm::{Imm, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use crate::codegen::regs::OperandManager;
-use crate::types::{Argument, Type};
+use crate::symbols::Symbol;
+use crate::types::Type;
 
 use super::CodeGen;
 
@@ -139,13 +140,13 @@ pub fn compile_call(
     }
 }
 
-pub fn compile_args(c: &mut CodeGen, args: &[Argument], fn_type: &Type) {
+pub fn compile_args(c: &mut CodeGen, args: &[Symbol], fn_type: &Type) {
     let mut mem_offset = 16; // rip + rbp
     if c.type_size(fn_type) > 8 {
         todo!("implement return value greater than 8 bytes");
     }
     for (arg_num, arg) in args.iter().enumerate() {
-        let size = c.type_size(&arg.arg_type);
+        let size = c.type_size(&arg.typ);
         let mem_size = size.try_into().unwrap();
         if let Some(reg) = cdecl(arg_num, mem_size) {
             let mem = c.scope.set_sized_var(arg_num, size, mem_size);

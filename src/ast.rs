@@ -34,10 +34,18 @@ pub enum AstType {
     Named(Vec<String>),
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct Arguments {
-    pub items: Vec<(String, AstType)>,
-    pub variadic: bool,
+#[derive(Debug, Clone)]
+pub struct AstSymbol {
+    pub name: String,
+    pub typ: AstType,
+    pub pos: Position,
+}
+
+impl AstSymbol {
+    pub fn new(name: &str, typ: AstType, pos: Position) -> Self {
+        let name = name.into();
+        AstSymbol { name, typ, pos }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -220,9 +228,9 @@ impl Identifier {
 #[derive(Debug)]
 pub enum AstRoot {
     Global(AstType, Identifier, Option<Literal>),
-    Struct(Identifier, Vec<(String, AstType)>),
-    Func(AstType, Identifier, Arguments, Vec<AstNode>),
-    ExternFunc(AstType, Identifier, Arguments),
+    Struct(Identifier, Vec<AstSymbol>),
+    Func(AstType, Identifier, Vec<AstSymbol>, bool, Vec<AstNode>),
+    ExternFunc(AstType, Identifier, Vec<AstSymbol>, bool),
     ExternVar(AstType, Identifier),
 }
 

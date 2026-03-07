@@ -4,13 +4,27 @@ use std::rc::Rc;
 use crate::{
     error::{Error, Result},
     position::Position,
-    types::{Argument, Type},
+    types::{ArgList, Field, Type},
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Symbol {
+    pub name: String,
+    pub typ: Type,
+    pub pos: Position,
+}
+
+impl std::fmt::Display for Symbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name, typ, .. } = self;
+        write!(f, "{name}: {typ}")
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct FuncDef {
     pub pos: Position,
-    pub args: Vec<Argument>,
+    pub args: Vec<Symbol>,
     pub ret: Type,
     pub extrn: bool,
     pub variadic: bool,
@@ -18,19 +32,27 @@ pub struct FuncDef {
 
 impl FuncDef {
     pub fn as_type(self) -> Type {
-        Type::Func(self.args.into(), Box::new(self.ret), self.variadic)
+        let variadic = self.variadic;
+        let items = self.args.into_iter().map(|i| i.typ).collect();
+        let arg_list = ArgList { items, variadic };
+        Type::Func(arg_list, Box::new(self.ret))
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub pos: Position,
-    pub fields: Vec<Argument>,
+    pub fields: Vec<Symbol>,
 }
 
 impl TypeDef {
     pub fn as_type(self) -> Type {
-        Type::Struct(self.fields.into())
+        let fields = self
+            .fields
+            .into_iter()
+            .map(|f| Field::new(f.name, f.typ))
+            .collect::<Vec<Field>>();
+        Type::Struct(fields.into())
     }
 }
 

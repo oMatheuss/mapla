@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::ast::{Arguments, Ast, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
+use crate::ast::{Ast, AstNode, AstRoot, AstSymbol, AstType, Expression, Identifier, Literal};
 use crate::error::{Error, PositionResult, Result};
 use crate::source::Source;
 use crate::token::{Token, TokenStream};
@@ -318,7 +318,7 @@ impl Parser {
         AstRoot::Global(typ, id, expr).ok()
     }
 
-    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<Arguments> {
+    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<(Vec<AstSymbol>, bool)> {
         let mut state = 1;
         let mut items = Vec::new();
         let mut variadic = false;
@@ -327,11 +327,12 @@ impl Parser {
                 (1, Token::OpenParen) => state = 2,
                 (2 | 4, Token::Identifier(name)) => {
                     state = 3;
+                    let pos = ts.pos();
                     let Token::Colon = self.next_or_err(ts)? else {
                         Error::syntatic("expected token `:`", ts.pos())?
                     };
                     let arg_type = self.parse_annot(ts)?;
-                    items.push((name.into(), arg_type));
+                    items.push(AstSymbol::new(name, arg_type, pos));
                 }
                 (3, Token::Comma) => state = 4,
                 (2 | 4, Token::Ellipsis) => {
@@ -347,7 +348,7 @@ impl Parser {
                 _ => unreachable!("The state machine is out of control"),
             };
         }
-        Ok(Arguments { items, variadic })
+        Ok((items, variadic))
     }
 
     fn parse_callargs(&self, ts: &mut TokenStream) -> Result<Vec<Expression>> {
@@ -380,7 +381,7 @@ impl Parser {
         Ok(args)
     }
 
-    fn parse_fields(&self, ts: &mut TokenStream) -> Result<Vec<(String, AstType)>> {
+    fn parse_fields(&self, ts: &mut TokenStream) -> Result<Vec<AstSymbol>> {
         let mut state = 1;
         let mut args = Vec::new();
         loop {
@@ -388,11 +389,12 @@ impl Parser {
                 (1, Token::OpenParen) => state = 2,
                 (2 | 4, Token::Identifier(name)) => {
                     state = 3;
+                    let pos = ts.pos();
                     let Token::Colon = self.next_or_err(ts)? else {
                         Error::syntatic("expected token `:`", ts.pos())?
                     };
                     let arg_type = self.parse_annot(ts)?;
-                    args.push((name.into(), arg_type));
+                    args.push(AstSymbol::new(name, arg_type, pos));
                 }
                 (3, Token::Comma) => state = 4,
                 (3, Token::CloseParen) => break,
@@ -414,7 +416,7 @@ impl Parser {
             Error::syntatic("expected name of the function", ts.pos())?
         };
         let id = Identifier::new(name, ts.pos());
-        let args = self.parse_args(ts)?;
+        let (args, variadic) = self.parse_args(ts)?;
         let annot = match self.next_or_err(ts)? {
             Token::Colon => {
                 let ret_type = self.parse_annot(ts)?;
@@ -427,7 +429,7 @@ impl Parser {
             _ => Error::syntatic("expected type annotation or `do`", ts.pos())?,
         };
         let inner = self.consume_inner(ts)?;
-        AstRoot::Func(annot, id, args, inner).ok()
+        AstRoot::Func(annot, id, args, variadic, inner).ok()
     }
 
     fn consume_ret(&self, ts: &mut TokenStream) -> Result<AstNode> {
@@ -437,8 +439,7 @@ impl Parser {
             _ => Some(self.parse_expr(ts, 1)?),
         };
         self.consume_semi(ts)?;
-        let expr = AstNode::Ret(expr);
-        Ok(expr)
+        AstNode::Ret(expr).ok()
     }
 
     fn consume_extern_func(&mut self, ts: &mut TokenStream) -> Result<AstRoot> {
@@ -447,7 +448,7 @@ impl Parser {
             return Error::syntatic("expected name of the function", ts.pos());
         };
         let id = Identifier::new(name, ts.pos());
-        let args = self.parse_args(ts)?;
+        let (args, variadic) = self.parse_args(ts)?;
         let annot = if let Some(Token::Colon) = ts.peek() {
             ts.next(); // discard colon token
             self.parse_annot(ts)?
@@ -455,7 +456,7 @@ impl Parser {
             AstType::Void
         };
         self.consume_semi(ts)?;
-        AstRoot::ExternFunc(annot, id, args).ok()
+        AstRoot::ExternFunc(annot, id, args, variadic).ok()
     }
 
     fn consume_extern_var(&mut self, ts: &mut TokenStream) -> Result<AstRoot> {

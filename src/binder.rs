@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Ast, AstNode, AstRoot, AstType, Expression, Identifier, Literal};
+use crate::ast::{Ast, AstNode, AstRoot, AstSymbol, AstType, Expression, Identifier, Literal};
 use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
-use crate::symbols::{FuncDef, GlobalVar, SymbolTable, SymbolValue, TypeDef};
-use crate::types::{Argument, Type, TypeCheck};
+use crate::symbols::{FuncDef, GlobalVar, Symbol, SymbolTable, SymbolValue, TypeDef};
+use crate::types::{Type, TypeCheck};
 
 pub struct Binder {
     pub globals: SymbolTable,
@@ -49,13 +49,11 @@ impl Binder {
         Ok(typ)
     }
 
-    fn bind_args(&self, ast_args: Vec<(String, AstType)>, ns: &str) -> Result<Vec<Argument>> {
+    fn bind_args(&self, ast_args: Vec<AstSymbol>, ns: &str) -> Result<Vec<Symbol>> {
         let mut args = Vec::new();
-        for (name, ast_type) in ast_args.into_iter() {
-            let arg = Argument {
-                name: name,
-                arg_type: self.bind_type(&ast_type, ns)?,
-            };
+        for AstSymbol { name, typ, pos } in ast_args.into_iter() {
+            let typ = self.bind_type(&typ, ns)?;
+            let arg = Symbol { name, typ, pos };
             args.push(arg);
         }
         Ok(args)
@@ -91,23 +89,23 @@ impl Binder {
                     };
                     self.globals.set_type(&id.name, ns, symbol)?;
                 }
-                AstRoot::Func(typ, id, args, ..) => {
+                AstRoot::Func(typ, id, args, variadic, ..) => {
                     let symbol = FuncDef {
                         pos: id.position.clone(),
-                        args: self.bind_args(args.items.clone(), &ns)?,
+                        args: self.bind_args(args.clone(), &ns)?,
                         ret: self.bind_type(typ, &ns)?,
                         extrn: false,
-                        variadic: args.variadic,
+                        variadic: *variadic,
                     };
                     self.globals.set_func(&id.name, ns, symbol)?;
                 }
-                AstRoot::ExternFunc(typ, id, args, ..) => {
+                AstRoot::ExternFunc(typ, id, args, variadic) => {
                     let symbol = FuncDef {
                         pos: id.position.clone(),
-                        args: self.bind_args(args.items.clone(), &ns)?,
+                        args: self.bind_args(args.clone(), &ns)?,
                         ret: self.bind_type(typ, &ns)?,
                         extrn: true,
-                        variadic: args.variadic,
+                        variadic: *variadic,
                     };
                     self.globals.set_func(&id.name, ns, symbol)?;
                 }
@@ -127,8 +125,9 @@ impl Binder {
     pub fn bind_ast(&mut self, ast: Ast) -> Result<()> {
         for root in ast.nodes {
             match root {
-                AstRoot::Func(typ, id, args, ast_nodes) => {
-                    let args = self.bind_args(args.items, &ast.namespace)?;
+                AstRoot::Func(typ, id, args, _, ast_nodes) => {
+                    // TODO: handle variadics
+                    let args = self.bind_args(args, &ast.namespace)?;
                     let body =
                         FuncBinder::new(self, ast.namespace.clone()).bind_func(&args, ast_nodes)?;
                     self.functions.push(IrFunc {
@@ -320,23 +319,24 @@ impl<'a> FuncBinder<'a> {
             Expression::Call { func, args } => {
                 let mut args_types = Vec::new();
                 for arg in args {
+                    let pos = arg.pos();
                     let arg_type = self.bind_expr(arg, emit)?;
                     self.emit(IrNode::Arg, emit);
-                    args_types.push(arg_type);
+                    args_types.push((arg_type, pos));
                 }
                 let pos = func.pos();
                 match self.bind_expr(*func, emit)? {
-                    Type::Func(func_args, ret, variadic) => {
-                        TypeCheck::check_callargs(&func_args, &args_types, variadic)?;
-                        let args = args_types;
+                    Type::Func(func_args, ret) => {
+                        TypeCheck::check_callargs(&func_args, &args_types, pos)?;
+                        let args = args_types.into_iter().map(|a| a.0).collect();
                         let func_ret = *ret.clone();
                         self.emit(IrNode::Call { args, ret: *ret }, emit);
                         Ok(func_ret)
                     }
                     Type::Struct(fields) => {
-                        TypeCheck::check_callargs(&fields, &args_types, false)?;
+                        TypeCheck::check_struct(&fields, &args_types)?;
                         let typ = Type::Struct(fields.clone());
-                        let fields = fields.items.into_iter().map(|f| f.arg_type).collect();
+                        let fields = fields.as_type_vec();
                         self.emit(IrNode::Struct { fields }, emit);
                         Ok(typ)
                     }
@@ -380,9 +380,9 @@ impl<'a> FuncBinder<'a> {
                         let msg = format!("field {} does not exists in type {typ}", field.name);
                         Error::syntatic(msg, field.position)?
                     };
-                    offset.push(item.arg_type.clone());
+                    offset.push(item.typ.clone());
                     if item.name == field.name {
-                        break item.arg_type;
+                        break item.typ;
                     }
                 };
                 self.emit(IrNode::Field { offset, by_ref }, emit);
@@ -517,10 +517,10 @@ impl<'a> FuncBinder<'a> {
         Ok(())
     }
 
-    fn bind_func(mut self, args: &Vec<Argument>, nodes: Vec<AstNode>) -> Result<Vec<IrNode>> {
+    fn bind_func(mut self, args: &Vec<Symbol>, nodes: Vec<AstNode>) -> Result<Vec<IrNode>> {
         self.scope.enter();
-        for Argument { name, arg_type } in args.iter() {
-            self.scope.set(name.clone(), arg_type.clone());
+        for Symbol { name, typ, .. } in args.iter() {
+            self.scope.set(name.clone(), typ.clone());
         }
         for node in nodes {
             self.bind_node(node, None)?;
