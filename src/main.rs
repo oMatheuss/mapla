@@ -28,24 +28,24 @@ fn run() -> Result<()> {
 
     let main_ns = main.namespace.clone();
     let mut files = main.imports.clone();
-    let mut codes = Vec::new();
+    let mut codes = vec![main];
 
     while let Some(file) = files.pop() {
         let code = sources.source(&file)?;
         if !code.visited {
             let code = Parser::parse(code)?;
             files.append(&mut code.imports.clone());
-            binder.bind_globals(&code)?;
             codes.push(code);
         }
+    }
+
+    for code in codes.iter() {
+        binder.bind_globals(&code)?;
     }
 
     while let Some(code) = codes.pop() {
         binder.bind_ast(code)?;
     }
-
-    binder.bind_globals(&main)?;
-    binder.bind_ast(main)?;
 
     let mut codegen = CodeGen::new(args.target, binder.globals);
     codegen.gen_intro();
