@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::ast::{Ast, AstNode, AstRoot, AstSymbol, AstType, Expression, Identifier, Literal};
+use crate::ast::{
+    Ast, AstFuncType, AstNode, AstRoot, AstSymbol, AstType, Expression, Identifier, Literal,
+};
 use crate::error::{Error, PositionResult, Result};
 use crate::source::Source;
 use crate::token::{Token, TokenStream};
@@ -232,6 +234,51 @@ impl Parser {
             Token::Byte => AstType::Byte,
             Token::Bool => AstType::Bool,
             Token::Void => AstType::Void,
+            Token::Function => {
+                let Token::OpenParen = self.next_or_err(ts)? else {
+                    Error::syntatic("expected open parenthesis", ts.pos())?
+                };
+                let mut args = Vec::new();
+                let mut state = 1;
+                let mut variadic = false;
+                loop {
+                    match (state, ts.peek()) {
+                        (1 | 2 | 3, Some(Token::CloseParen)) => {
+                            ts.next();
+                            break;
+                        }
+                        (1, Some(Token::Ellipsis)) => {
+                            ts.next();
+                            variadic = true;
+                            state = 3;
+                        }
+                        (1, _) => {
+                            args.push(self.parse_annot(ts)?);
+                            state = 2;
+                        }
+                        (2, Some(Token::Comma)) => {
+                            ts.next();
+                            state = 1;
+                        }
+                        (2, _) => {
+                            let pos = ts.peek_pos();
+                            Error::syntatic("expected comma or close parenthesis", pos)?
+                        }
+                        (3, _) => {
+                            let pos = ts.peek_pos();
+                            Error::syntatic("expected close parenthesis after variadic", pos)?
+                        }
+                        (_, _) => unreachable!(),
+                    }
+                }
+                let ret = if let Some(Token::Colon) = ts.peek() {
+                    ts.next();
+                    self.parse_annot(ts)?.into()
+                } else {
+                    AstType::Void.into()
+                };
+                AstType::Func(AstFuncType::new(args, variadic, ret))
+            }
             Token::Identifier(name) => {
                 let mut segments = vec![name.into()];
                 while let Some(Token::DuoColon) = ts.peek() {
@@ -242,6 +289,13 @@ impl Parser {
                     segments.push(segment.into());
                 }
                 AstType::Named(segments)
+            }
+            Token::OpenParen => {
+                let typ = self.parse_annot(ts)?;
+                let Token::CloseParen = self.next_or_err(ts)? else {
+                    Error::syntatic("expected close parenthesis", ts.pos())?
+                };
+                typ
             }
             _ => Error::syntatic("expected type annotation", ts.pos())?,
         };

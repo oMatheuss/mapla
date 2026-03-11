@@ -29,9 +29,27 @@ pub enum AstType {
     Char,
     Bool,
     Void,
+    Func(AstFuncType),
     Pointer(Box<AstType>),
     Array(Box<AstType>, u32),
     Named(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstFuncType {
+    pub args: Vec<AstType>,
+    pub variadic: bool,
+    pub ret: Box<AstType>,
+}
+
+impl AstFuncType {
+    pub fn new(args: Vec<AstType>, variadic: bool, ret: AstType) -> Self {
+        Self {
+            args,
+            variadic,
+            ret: ret.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

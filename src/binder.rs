@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
 use crate::symbols::{FuncDef, GlobalVar, Symbol, SymbolTable, SymbolValue, TypeDef};
-use crate::types::{Type, TypeCheck, TypeWithPos};
+use crate::types::{FuncType, Type, TypeCheck, TypeWithPos};
 
 pub struct Binder {
     pub globals: SymbolTable,
@@ -31,6 +31,15 @@ impl Binder {
             AstType::Char => Type::Char,
             AstType::Bool => Type::Bool,
             AstType::Void => Type::Void,
+            AstType::Func(func) => Type::Func(FuncType {
+                args: func
+                    .args
+                    .iter()
+                    .map(|typ| self.bind_type(typ, ns))
+                    .collect::<Result<Vec<_>>>()?,
+                variadic: func.variadic,
+                ret: self.bind_type(&func.ret, ns)?.into(),
+            }),
             AstType::Pointer(ast_type) => Type::Pointer(self.bind_type(ast_type, ns)?.into()),
             AstType::Array(ast_type, size) => {
                 Type::Array(self.bind_type(ast_type, ns)?.into(), *size)
@@ -326,11 +335,12 @@ impl<'a> FuncBinder<'a> {
                 }
                 let pos = func.pos();
                 match self.bind_expr(*func, emit)? {
-                    Type::Func(func_args, ret) => {
-                        TypeCheck::check_callargs(&func_args, &args_types, pos)?;
+                    Type::Func(func_typ) => {
+                        TypeCheck::check_callargs(&func_typ, &args_types, pos)?;
                         let args = args_types.into_iter().map(|a| a.typ).collect();
-                        let func_ret = *ret.clone();
-                        self.emit(IrNode::Call { args, ret: *ret }, emit);
+                        let ret = *func_typ.ret;
+                        let func_ret = ret.clone();
+                        self.emit(IrNode::Call { args, ret }, emit);
                         Ok(func_ret)
                     }
                     Type::Struct(fields) => {

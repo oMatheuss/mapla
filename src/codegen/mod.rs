@@ -76,6 +76,11 @@ impl CodeGen {
                 asm::code!(self.code, Movss, xmm, tmp);
                 Operand::Xmm(xmm)
             }
+            Operand::Lbl(lbl) if matches!(typ, Type::Func(..)) => {
+                let reg = self.regs.take_any(lbl.mem_size());
+                asm::code!(self.code, Lea, reg, Mem::lbl(lbl, lbl.mem_size()));
+                Operand::Reg(reg)
+            }
             Operand::Mem(mem) => {
                 let reg = self.regs.take_any(mem.mem_size());
                 self.regs.try_push(operand);
@@ -271,7 +276,7 @@ impl CodeGen {
                                 let src = self.regs.take_any(MemSize::QWord);
                                 let aux = self.regs.take_any(MemSize::QWord);
                                 asm::code!(self.code, Lea, dst, local);
-                                asm::code!(self.code, Mov, src, ret);
+                                asm::code!(self.code, Lea, src, ret);
 
                                 self.copy_bytes_inline(dst, src, aux, size);
 
@@ -351,15 +356,22 @@ impl CodeGen {
             IrNode::UnaOp { ope, typ } => {
                 let value = self.scope.pop().unwrap();
                 let value = match ope {
-                    UnaOpe::AddressOf => {
-                        let Operand::Mem(mem) = value else {
-                            panic!("operator AddressOf can only be used on memory");
-                        };
-                        let reg = self.regs.take_any(MemSize::QWord);
-                        self.regs.try_push(value);
-                        asm::code!(self.code, Lea, reg, mem);
-                        Operand::Reg(reg)
-                    }
+                    UnaOpe::AddressOf => match value {
+                        Operand::Lbl(lbl) => {
+                            let reg = self.regs.take_any(MemSize::QWord);
+                            let mem = Mem::lbl(lbl, MemSize::QWord);
+                            asm::code!(self.code, Lea, reg, mem);
+                            Operand::Reg(reg)
+                        }
+                        Operand::Mem(mem) => {
+                            let reg = self.regs.take_any(MemSize::QWord);
+                            self.regs.try_push(value);
+                            asm::code!(self.code, Lea, reg, mem);
+                            Operand::Reg(reg)
+                        }
+                        _ => panic!("operator AddressOf can only be used on memory"),
+                    },
+                    UnaOpe::Dereference if typ.is_func_ptr() => value,
                     UnaOpe::Dereference => {
                         assert!(typ.is_ptr(), "expected value to be a pointer type");
                         let inner = typ.inner().unwrap();

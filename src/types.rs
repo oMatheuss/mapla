@@ -10,10 +10,10 @@ pub enum Type {
     Char,
     Bool,
     Void,
-    Func(ArgList, Box<Type>),
+    Func(FuncType),
     Pointer(Box<Type>),
     Array(Box<Type>, u32),
-    Struct(FieldList),
+    Struct(StructType),
 }
 
 impl Type {
@@ -26,6 +26,13 @@ impl Type {
             return false;
         };
         matches!(**ty, Type::Void)
+    }
+
+    pub fn is_func_ptr(&self) -> bool {
+        let Type::Pointer(ty) = self else {
+            return false;
+        };
+        matches!(**ty, Type::Func(..))
     }
 
     pub fn is_ptr(&self) -> bool {
@@ -97,7 +104,7 @@ impl std::fmt::Display for Type {
             Self::Char => write!(f, "char"),
             Self::Bool => write!(f, "bool"),
             Self::Void => write!(f, "void"),
-            Self::Func(args, ret) => write!(f, "func({args}): {ret}"),
+            Self::Func(func) => write!(f, "{func}"),
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
             Self::Struct(fields) => write!(f, "struct({fields})"),
@@ -106,24 +113,27 @@ impl std::fmt::Display for Type {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct ArgList {
-    pub items: Vec<Type>,
+pub struct FuncType {
+    pub args: Vec<Type>,
     pub variadic: bool,
+    pub ret: Box<Type>,
 }
 
-impl std::fmt::Display for ArgList {
+impl std::fmt::Display for FuncType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Some(arg) = self.items.first() else {
-            return Ok(());
-        };
-        write!(f, "{}", arg)?;
-        for typ in self.items.iter().skip(1) {
-            write!(f, ", {}", typ)?;
+        write!(f, "func(")?;
+        if let Some(arg) = self.args.first() {
+            write!(f, "{}", arg)?;
+            for typ in self.args.iter().skip(1) {
+                write!(f, ", {}", typ)?;
+            }
+            if self.variadic {
+                write!(f, ", ...")?;
+            }
+        } else if self.variadic {
+            write!(f, "...")?;
         }
-        if self.variadic {
-            write!(f, ", ...")?;
-        }
-        Ok(())
+        write!(f, "): {}", *self.ret)
     }
 }
 
@@ -146,42 +156,42 @@ impl std::fmt::Display for Field {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct FieldList {
-    inner: Vec<Field>,
+pub struct StructType {
+    pub fields: Vec<Field>,
 }
 
-impl From<Vec<Field>> for FieldList {
-    fn from(inner: Vec<Field>) -> Self {
-        Self { inner }
+impl From<Vec<Field>> for StructType {
+    fn from(fields: Vec<Field>) -> Self {
+        Self { fields }
     }
 }
 
-impl FieldList {
+impl StructType {
     pub fn as_type_vec(self) -> Vec<Type> {
-        self.inner.into_iter().map(|f| f.typ).collect()
+        self.fields.into_iter().map(|f| f.typ).collect()
     }
 }
 
-impl std::ops::DerefMut for FieldList {
+impl std::ops::DerefMut for StructType {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+        &mut self.fields
     }
 }
 
-impl std::ops::Deref for FieldList {
+impl std::ops::Deref for StructType {
     type Target = Vec<Field>;
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        &self.fields
     }
 }
 
-impl std::fmt::Display for FieldList {
+impl std::fmt::Display for StructType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Some(field) = self.inner.first() else {
+        let Some(field) = self.fields.first() else {
             return Ok(());
         };
         write!(f, "{}", field)?;
-        for field in self.inner.iter().skip(1) {
+        for field in self.fields.iter().skip(1) {
             write!(f, ", {}", field)?;
         }
         Ok(())
@@ -315,16 +325,16 @@ impl TypeCheck {
         Ok(result)
     }
 
-    pub fn check_callargs(args: &ArgList, vals: &Vec<TypeWithPos>, pos: Position) -> Result<()> {
+    pub fn check_callargs(args: &FuncType, vals: &Vec<TypeWithPos>, pos: Position) -> Result<()> {
         let variadic = args.variadic;
-        if (!variadic && args.items.len() != vals.len())
-            || (variadic && vals.len() < args.items.len())
+        if (!variadic && args.args.len() != vals.len())
+            || (variadic && vals.len() < args.args.len())
         {
             let msg = "wrong number of arguments provided to the function";
             return Error::type_err(msg, pos);
         }
 
-        for (arg_type, val) in args.items.iter().zip(vals) {
+        for (arg_type, val) in args.args.iter().zip(vals) {
             if !val.typ.is_compatible(arg_type) {
                 let TypeWithPos { typ, pos } = val;
                 let msg = format!("expected {arg_type}, but found {typ}");
@@ -335,7 +345,7 @@ impl TypeCheck {
         Ok(())
     }
 
-    pub fn check_struct(fields: &FieldList, vals: &Vec<TypeWithPos>) -> Result<()> {
+    pub fn check_struct(fields: &StructType, vals: &Vec<TypeWithPos>) -> Result<()> {
         for (field, val) in fields.iter().zip(vals) {
             if !val.typ.is_compatible(&field.typ) {
                 let Field { name, typ } = field;

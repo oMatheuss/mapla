@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::{
     error::{Error, Result},
     position::Position,
-    types::{ArgList, Field, Type},
+    types::{Field, FuncType, Type},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,10 +32,11 @@ pub struct FuncDef {
 
 impl FuncDef {
     pub fn as_type(self) -> Type {
-        let variadic = self.variadic;
-        let items = self.args.into_iter().map(|i| i.typ).collect();
-        let arg_list = ArgList { items, variadic };
-        Type::Func(arg_list, Box::new(self.ret))
+        Type::Func(FuncType {
+            args: self.args.into_iter().map(|i| i.typ).collect(),
+            variadic: self.variadic,
+            ret: self.ret.into(),
+        })
     }
 }
 
