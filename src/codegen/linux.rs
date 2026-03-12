@@ -122,17 +122,16 @@ pub fn compile_call(
         }
     }
 
-    let mem_size = c.type_size(typ).try_into().unwrap();
-
     match typ {
         Type::Void => Operand::Imm(Imm::Dword(0)),
         Type::Real => {
-            let xmm = Xmm::xmm0(mem_size);
+            let xmm = Xmm::xmm0(MemSize::DWord);
             assert!(c.xmms.take(xmm), "return register should be available");
             Operand::Xmm(xmm)
         }
         Type::Struct(..) => todo!(),
         _ => {
+            let mem_size = c.type_size(typ).try_into().unwrap();
             let reg = Reg::acc(mem_size);
             assert!(c.regs.take(reg), "return register should be available");
             Operand::Reg(reg)

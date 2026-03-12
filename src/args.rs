@@ -9,6 +9,9 @@ pub struct CompilerConfig {
     pub input: PathBuf,
     pub output: Option<PathBuf>,
     pub target: CompilerTarget,
+    pub run: bool,
+    pub emit_asm: bool,
+    pub emit_obj: bool,
 }
 
 pub fn parse_args() -> Result<CompilerConfig> {
@@ -34,6 +37,9 @@ pub fn parse_args() -> Result<CompilerConfig> {
                     None => Error::cli("target must be informed after -t flag")?,
                 }
             }
+            "-S" | "--asm" => config.emit_asm = true,
+            "-O" | "--obj" => config.emit_obj = true,
+            "--run" => config.run = true,
             _ => input = Some(arg),
         }
     }
@@ -47,10 +53,11 @@ pub fn parse_args() -> Result<CompilerConfig> {
 }
 
 impl CompilerConfig {
-    pub fn output_path(&self) -> PathBuf {
+    pub fn output_file(&self, ext: &str) -> PathBuf {
         self.output
             .as_ref()
             .and_then(|o| Some(self.dir.join(o)))
-            .unwrap_or_else(|| self.dir.join(&self.input).with_extension("asm"))
+            .unwrap_or_else(|| self.dir.join(&self.input))
+            .with_extension(ext)
     }
 }

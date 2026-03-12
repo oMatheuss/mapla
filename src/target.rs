@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use crate::error::Error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CompilerTarget {
     Linux,
     Windows,
@@ -26,6 +26,15 @@ impl FromStr for CompilerTarget {
             "linux" => Ok(CompilerTarget::Linux),
             "windows" | "win" => Ok(CompilerTarget::Windows),
             _ => Error::cli("unknown compiler target"),
+        }
+    }
+}
+
+impl CompilerTarget {
+    pub fn is_current_platform(&self) -> bool {
+        match self {
+            CompilerTarget::Linux => cfg!(unix),
+            CompilerTarget::Windows => cfg!(windows),
         }
     }
 }

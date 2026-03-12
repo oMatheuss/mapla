@@ -24,7 +24,7 @@ Intial support for arrays and pointers are also implemented with the following s
 
 The following statements are supported:
 
-- `if`: conditional block (else block is not yet supported);
+- `if`: conditional block;
 - `while`: conditional block loop;
 - `for`: conditional block loop with integer variable;
 
@@ -64,15 +64,13 @@ For this steps you will need the following tools:
 After downloading and installing, you can compile any program with the following commands:
 
 ```shell
-target/debug/mapla.exe -t windows examples/helloworld.txt
-nasm -fwin64 examples/helloworld.asm
-cc examples/helloworld.obj -o examples/helloworld.exe
+target/debug/mapla examples/helloworld.txt
 ```
 
 After compiling the code into an executable, you can run the result program:
 
 ```shell
-examples/helloworld.exe
+examples/helloworld
 ```
 
 ## Examples

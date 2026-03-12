@@ -1,5 +1,11 @@
 use crate::{
-    binder::Binder, codegen::CodeGen, error::Result, parser::Parser, source::SourceManager,
+    args::CompilerConfig,
+    binder::Binder,
+    codegen::CodeGen,
+    error::{Error, Result},
+    parser::Parser,
+    source::SourceManager,
+    target::CompilerTarget,
 };
 
 mod args;
@@ -20,7 +26,59 @@ mod utils;
 
 fn run() -> Result<()> {
     let args = args::parse_args()?;
+    let asm = compile(&args)?;
 
+    let asm_file = args.output_file("asm");
+    let obj_file = args.output_file("obj");
+    let exe_file = match args.target {
+        CompilerTarget::Linux => args.output_file(""),
+        CompilerTarget::Windows => args.output_file("exe"),
+    };
+
+    std::fs::write(&asm_file, asm)?;
+    if args.emit_asm && !args.emit_obj {
+        return Ok(());
+    }
+    
+    std::process::Command::new("nasm")
+        .arg(match args.target {
+            CompilerTarget::Linux => "-felf64",
+            CompilerTarget::Windows => "-fwin64",
+        })
+        .arg(&asm_file)
+        .arg("-o")
+        .arg(&obj_file)
+        .status()?;
+
+    if !args.emit_asm {
+        std::fs::remove_file(&asm_file)?;
+    }
+    if args.emit_obj {
+        return Ok(());
+    }
+
+    if !args.target.is_current_platform() {
+        std::fs::remove_file(&obj_file)?;
+        Error::cli("cross-compilation is not supported yet")?;
+    }
+
+    std::process::Command::new("cc")
+        .arg(&obj_file)
+        .arg("-o")
+        .arg(&exe_file)
+        .status()?;
+
+    std::fs::remove_file(&obj_file)?;
+
+    if args.run {
+        std::process::Command::new(&exe_file).status()?;
+        std::fs::remove_file(&exe_file)?;
+    }
+
+    Ok(())
+}
+
+fn compile(args: &CompilerConfig) -> Result<String> {
     let mut sources = SourceManager::new(&args.input, &args.dir);
     let main = sources.main()?;
     let main = Parser::parse(main)?;
@@ -57,9 +115,7 @@ fn run() -> Result<()> {
 
     codegen.gen_data(binder.data);
 
-    std::fs::write(args.output_path(), codegen.to_string())?;
-
-    Ok(())
+    Ok(codegen.to_string())
 }
 
 fn main() -> std::process::ExitCode {
