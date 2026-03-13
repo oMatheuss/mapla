@@ -139,10 +139,10 @@ impl CodeGen {
 
     pub(self) fn type_size(&self, typ: &Type) -> usize {
         match typ {
-            Type::Void => 0,
+            Type::Void | Type::Func(..) => 0,
             Type::Byte | Type::Char | Type::Bool => 1,
             Type::Int | Type::Real => 4,
-            Type::Func(..) | Type::Pointer(..) => 8,
+            Type::FuncPtr(..) | Type::Pointer(..) => 8,
             Type::Array(inner, size) => self.type_size(inner) * (*size as usize),
             Type::Struct(fields) => fields.iter().map(|f| self.type_size(&f.typ)).sum(),
         }
@@ -215,6 +215,23 @@ impl CodeGen {
         asm::code!(self.code, "section .data");
         for (label, bytes) in data.iter() {
             asm::code!(self.code, "  {label}: db {:x}", HexSlice::new(bytes));
+        }
+    }
+
+    pub fn gen_bss(&mut self) {
+        asm::code!(self.code, "section .bss");
+        for (sym, var) in self.symbols.iter_uninit() {
+            let label = sym.to_string();
+            let size = self.type_size(&var.typ);
+            match &var.typ {
+                Type::Void | Type::Func(..) => {}
+                Type::Int | Type::Real => asm::code!(self.code, "  {label} resd 1"),
+                Type::Byte | Type::Char | Type::Bool => asm::code!(self.code, "  {label} resb 1"),
+                Type::FuncPtr(..) | Type::Pointer(..) => asm::code!(self.code, "  {label} resq 1"),
+                Type::Array(..) | Type::Struct(..) => {
+                    asm::code!(self.code, "  {label} resb {size}")
+                }
+            }
         }
     }
 
@@ -335,16 +352,15 @@ impl CodeGen {
                     let lbl = Lbl::from_label(&name);
                     self.scope.push(Operand::Lbl(lbl));
                 }
-                IrArg::Global { ns, name, typ } if typ.is_func() => {
-                    let magled = format!("{ns}@{name}");
-                    let lbl = Lbl::from_label(&magled);
-                    self.scope.push(Operand::Lbl(lbl));
-                }
-                IrArg::Global { ns: _, name, typ } if typ.is_struct() => {}
-                IrArg::Global { ns: _, name, typ } => {
-                    let lbl = Lbl::from_label(&name);
-                    let mem_size = self.type_size(&typ).try_into().unwrap();
-                    self.scope.push(Operand::Mem(Mem::lbl(lbl, mem_size)));
+                IrArg::Global { ns, name, typ } if typ.is_struct() => {}
+                IrArg::Global { ns, name, typ } => {
+                    let lbl = Lbl::from_label(&format!("{ns}@{name}"));
+                    if typ.is_func() || typ.is_array() {
+                        self.scope.push(Operand::Lbl(lbl));
+                    } else {
+                        let size = self.type_size(&typ).try_into().unwrap_or(MemSize::QWord);
+                        self.scope.push(Operand::Mem(Mem::lbl(lbl, size)));
+                    }
                 }
             },
             IrNode::Pop => {
@@ -778,7 +794,13 @@ impl CodeGen {
             }
             IrNode::Index { typ } => {
                 let index = self.scope.pop().unwrap();
-                let array = self.scope.pop().unwrap();
+                let mut array = self.scope.pop().unwrap();
+
+                if let Operand::Lbl(lbl) = array {
+                    let reg = self.regs.take_any(MemSize::QWord);
+                    asm::code!(self.code, Lea, reg, Mem::lbl(lbl, MemSize::QWord));
+                    array = reg.into();
+                }
 
                 let size = self.type_size(&typ);
                 let reg = match index {

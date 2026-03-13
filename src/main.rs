@@ -39,7 +39,7 @@ fn run() -> Result<()> {
     if args.emit_asm && !args.emit_obj {
         return Ok(());
     }
-    
+
     std::process::Command::new("nasm")
         .arg(match args.target {
             CompilerTarget::Linux => "-felf64",
@@ -114,6 +114,7 @@ fn compile(args: &CompilerConfig) -> Result<String> {
     }
 
     codegen.gen_data(binder.data);
+    codegen.gen_bss();
 
     Ok(codegen.to_string())
 }

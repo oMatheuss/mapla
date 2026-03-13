@@ -814,31 +814,23 @@ impl From<Xmm> for Operand {
 
 impl Operand {
     pub fn is_reg(&self) -> bool {
-        match self {
-            Operand::Reg(..) => true,
-            _ => false,
-        }
+        matches!(self, Operand::Reg(..))
     }
 
     pub fn is_mem(&self) -> bool {
-        match self {
-            Operand::Mem(..) => true,
-            _ => false,
-        }
+        matches!(self, Operand::Mem(..))
     }
 
     pub fn is_imm(&self) -> bool {
-        match self {
-            Operand::Imm(..) => true,
-            _ => false,
-        }
+        matches!(self, Operand::Imm(..))
     }
 
     pub fn is_xmm(&self) -> bool {
-        match self {
-            Operand::Xmm(..) => true,
-            _ => false,
-        }
+        matches!(self, Operand::Xmm(..))
+    }
+
+    pub fn is_lbl(&self) -> bool {
+        matches!(self, Operand::Lbl(..))
     }
 
     pub fn expect_reg(self) -> Reg {

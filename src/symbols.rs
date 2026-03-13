@@ -62,6 +62,7 @@ pub struct GlobalVar {
     pub pos: Position,
     pub typ: Type,
     pub extrn: bool,
+    pub uninit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -162,10 +163,14 @@ impl SymbolTable {
         let funcs = self.functions.iter().filter(|f| f.1.extrn).map(|f| f.0);
         vars.chain(funcs)
     }
+
+    pub fn iter_uninit(&self) -> impl Iterator<Item = (&SymbolKey, &GlobalVar)> {
+        self.values.iter().filter(|f| !f.1.extrn && f.1.uninit)
+    }
 }
 
 impl std::fmt::Display for SymbolKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.namespace, self.name)
+        write!(f, "{}@{}", self.namespace, self.name)
     }
 }

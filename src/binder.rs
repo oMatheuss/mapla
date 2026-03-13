@@ -31,7 +31,7 @@ impl Binder {
             AstType::Char => Type::Char,
             AstType::Bool => Type::Bool,
             AstType::Void => Type::Void,
-            AstType::Func(func) => Type::Func(FuncType {
+            AstType::Func(func) => Type::FuncPtr(FuncType {
                 args: func
                     .args
                     .iter()
@@ -77,11 +77,12 @@ impl Binder {
                         pos: id.position.clone(),
                         typ: self.bind_type(var_type, &ns)?,
                         extrn: false,
+                        uninit: value.is_none(),
                     };
-                    self.globals.set_var(&id.name, ns, symbol)?;
+                    self.globals.set_var(&id.name, ns.clone(), symbol)?;
 
                     if let Some(value) = value {
-                        let name = id.name.clone();
+                        let name = format!("{ns}@{}", id.name);
                         match value {
                             Literal::String(s) => self.data.insert(name, s.clone().into_bytes()),
                             Literal::Byte(b) => self.data.insert(name, [*b as u8].to_vec()),
@@ -123,6 +124,7 @@ impl Binder {
                         pos: id.position.clone(),
                         typ: self.bind_type(var_type, &ns)?,
                         extrn: true,
+                        uninit: false,
                     };
                     self.globals.set_var(&id.name, ns, symbol)?;
                 }
@@ -335,7 +337,7 @@ impl<'a> FuncBinder<'a> {
                 }
                 let pos = func.pos();
                 match self.bind_expr(*func, emit)? {
-                    Type::Func(func_typ) => {
+                    Type::Func(func_typ) | Type::FuncPtr(func_typ) => {
                         TypeCheck::check_callargs(&func_typ, &args_types, pos)?;
                         let args = args_types.into_iter().map(|a| a.typ).collect();
                         let ret = *func_typ.ret;

@@ -11,6 +11,7 @@ pub enum Type {
     Bool,
     Void,
     Func(FuncType),
+    FuncPtr(FuncType),
     Pointer(Box<Type>),
     Array(Box<Type>, u32),
     Struct(StructType),
@@ -29,14 +30,14 @@ impl Type {
     }
 
     pub fn is_func_ptr(&self) -> bool {
-        let Type::Pointer(ty) = self else {
-            return false;
-        };
-        matches!(**ty, Type::Func(..))
+        matches!(self, Type::FuncPtr(..))
     }
 
     pub fn is_ptr(&self) -> bool {
-        matches!(self, Type::Pointer(..) | Type::Array(..))
+        matches!(
+            self,
+            Type::Pointer(..) | Type::Array(..) | Type::FuncPtr(..)
+        )
     }
 
     pub fn is_array(&self) -> bool {
@@ -71,6 +72,13 @@ impl Type {
         matches!(self, Type::Func(..))
     }
 
+    pub fn get_func(self) -> Option<FuncType> {
+        match self {
+            Type::Func(func_type) => Some(func_type),
+            _ => None,
+        }
+    }
+
     pub fn is_struct(&self) -> bool {
         matches!(self, Type::Struct(..))
     }
@@ -81,6 +89,7 @@ impl Type {
             (Self::Array(first, ..), Self::Pointer(second)) if *first == *second => true,
             (Self::Array(..), second) if second.is_void_ptr() => true,
             (Self::Pointer(..), second) if second.is_void_ptr() => true,
+            (Self::Func(..), Self::FuncPtr(..)) => true,
             (Self::Func(..), second) if second.is_void_ptr() => true,
             _ => false,
         }
@@ -104,7 +113,8 @@ impl std::fmt::Display for Type {
             Self::Char => write!(f, "char"),
             Self::Bool => write!(f, "bool"),
             Self::Void => write!(f, "void"),
-            Self::Func(func) => write!(f, "{func}"),
+            Self::Func(func) => write!(f, "const {func}"),
+            Self::FuncPtr(func) => write!(f, "{func}"),
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
             Self::Struct(fields) => write!(f, "struct({fields})"),
@@ -225,7 +235,9 @@ impl TypeCheck {
 
             BinOpe::And | BinOpe::Or if lhs == rhs && lhs.is_bool() => Ok(Type::Bool),
 
+            BinOpe::Assign if lhs.is_func() => Error::type_err(format!("cannot assign {lhs}"), pos),
             BinOpe::Assign if lhs == rhs => Ok(lhs),
+            BinOpe::Assign if lhs.is_func_ptr() && rhs.is_func() => Ok(lhs),
             BinOpe::Assign if lhs.is_ptr() && rhs.is_void_ptr() => Ok(lhs),
 
             BinOpe::Add
@@ -269,6 +281,7 @@ impl TypeCheck {
 
     pub fn check_unaexpr(op: UnaOpe, ope: Type, pos: Position) -> Result<Type> {
         match op {
+            UnaOpe::AddressOf if ope.is_func() => Ok(Type::FuncPtr(ope.get_func().unwrap())),
             UnaOpe::AddressOf => Ok(Type::ptr_to(ope)),
 
             UnaOpe::Minus if ope.is_number() => Ok(ope),
@@ -299,6 +312,7 @@ impl TypeCheck {
             || from.is_void_ptr() && to.is_ptr()
             || from.is_ptr() && to.is_void_ptr()
             || from.is_func() && to.is_void_ptr()
+            || from.is_func_ptr() && to.is_void_ptr()
             || from.is_int() && to.is_byte()
             || from.is_byte() && to.is_int();
 
