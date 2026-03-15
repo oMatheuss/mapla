@@ -1,6 +1,6 @@
 # Mapla Lang
 
-This repository contains the source code for the Mapla compiler.
+This repository contains the source code for the Mapla compiler. Mapla is a recursive acronym for "MApla Programming LAnguage"
 
 ## Overview
 
@@ -43,6 +43,12 @@ end
 
 To build the compiler, first you need to have [Rust](https://www.rust-lang.org) installed, then you can use the following command:
 
+```
+rustc --edition=2024 src/main.rs
+```
+
+Or, if you want to use cargo:
+
 ```shell
 cargo build --bin mapla
 ```
@@ -63,7 +69,7 @@ For this steps you will need the following tools:
 After downloading and installing (make sure that you have `nasm` and `cc` binaries in your environment), you can compile any program with the following commands:
 
 ```shell
-target/debug/mapla examples/helloworld.txt
+./mapla examples/helloworld.txt
 ```
 
 If you want to immediately run the program after compilation, you can use the flag `--run`. To emit object/assembly files instead, you can use `--obj`/`--asm` flags respectively.
