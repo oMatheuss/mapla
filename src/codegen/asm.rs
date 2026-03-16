@@ -335,10 +335,20 @@ impl Reg {
     #[inline]
     pub fn r10(mem_size: MemSize) -> Self {
         match mem_size {
-            MemSize::Byte => Reg::R9B,
+            MemSize::Byte => Reg::R10B,
             MemSize::Word => Reg::R10W,
             MemSize::DWord => Reg::R10D,
             MemSize::QWord => Reg::R10,
+        }
+    }
+
+    #[inline]
+    pub fn r11(mem_size: MemSize) -> Self {
+        match mem_size {
+            MemSize::Byte => Reg::R11B,
+            MemSize::Word => Reg::R11W,
+            MemSize::DWord => Reg::R11D,
+            MemSize::QWord => Reg::R11,
         }
     }
 

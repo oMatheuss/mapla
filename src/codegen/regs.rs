@@ -1,3 +1,5 @@
+use crate::target::CompilerTarget;
+
 use super::asm::{MemBase, MemSize, Operand, Reg, Xmm, XmmReg};
 use std::fmt::Display;
 
@@ -13,7 +15,7 @@ pub trait OperandManager<T>
 where
     T: Copy + Display,
 {
-    const NAMES: &[&str];
+    fn volatiles(target: CompilerTarget) -> &'static [&'static str];
     fn name(ope: T) -> &'static str;
     fn get_reg(name: &str, mem_size: MemSize) -> T;
     fn try_push(&mut self, operand: Operand);
@@ -24,11 +26,12 @@ where
     RegManager<T>: OperandManager<T>,
     T: Copy + Display,
 {
-    pub fn new() -> Self {
-        let mut registers = std::collections::HashMap::with_capacity(Self::NAMES.len());
-        Self::NAMES
-            .iter()
-            .for_each(|name| _ = registers.insert(*name, false));
+    pub fn new(target: CompilerTarget) -> Self {
+        let volatiles = Self::volatiles(target);
+        let mut registers = std::collections::HashMap::with_capacity(volatiles.len());
+        for reg in volatiles {
+            registers.insert(*reg, false);
+        }
         Self {
             registers,
             panthon: std::marker::PhantomData,
@@ -74,37 +77,32 @@ where
     }
 }
 
-impl<T> Default for RegManager<T>
-where
-    RegManager<T>: OperandManager<T>,
-    T: Copy + Display,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl OperandManager<Reg> for RegManager<Reg> {
-    const NAMES: &[&str] = &["acc", "cnt", "dta", "bse", "src", "dst", "r8", "r9", "r10"];
+    fn volatiles(target: CompilerTarget) -> &'static [&'static str] {
+        match target {
+            CompilerTarget::Linux => &["acc", "cnt", "dta", "src", "dst", "r8", "r9", "r10", "r11"],
+            CompilerTarget::Windows => &["acc", "cnt", "dta", "r8", "r9", "r10", "r11"],
+        }
+    }
 
     fn name(reg: Reg) -> &'static str {
         match reg {
-            Reg::Rax | Reg::Eax | Reg::Ax | Reg::Ah | Reg::Al => Self::NAMES[0],
-            Reg::Rcx | Reg::Ecx | Reg::Cx | Reg::Ch | Reg::Cl => Self::NAMES[1],
-            Reg::Rdx | Reg::Edx | Reg::Dx | Reg::Dh | Reg::Dl => Self::NAMES[2],
-            Reg::Rbx | Reg::Ebx | Reg::Bx | Reg::Bh | Reg::Bl => Self::NAMES[3],
+            Reg::Rax | Reg::Eax | Reg::Ax | Reg::Ah | Reg::Al => "acc",
+            Reg::Rcx | Reg::Ecx | Reg::Cx | Reg::Ch | Reg::Cl => "cnt",
+            Reg::Rdx | Reg::Edx | Reg::Dx | Reg::Dh | Reg::Dl => "dta",
+            Reg::Rbx | Reg::Ebx | Reg::Bx | Reg::Bh | Reg::Bl => "bse",
             Reg::Rsp | Reg::Esp | Reg::Sp | Reg::Spl => todo!(),
             Reg::Rbp | Reg::Ebp | Reg::Bp | Reg::Bpl => todo!(),
-            Reg::Rsi | Reg::Esi | Reg::Si | Reg::Sil => Self::NAMES[4],
-            Reg::Rdi | Reg::Edi | Reg::Di | Reg::Dil => Self::NAMES[5],
-            Reg::R8 | Reg::R8D | Reg::R8W | Reg::R8B => Self::NAMES[6],
-            Reg::R9 | Reg::R9D | Reg::R9W | Reg::R9B => Self::NAMES[7],
-            Reg::R10 | Reg::R10D | Reg::R10W | Reg::R10B => Self::NAMES[8],
-            Reg::R11 | Reg::R11D | Reg::R11W | Reg::R11B => todo!(),
-            Reg::R12 | Reg::R12D | Reg::R12W | Reg::R12B => todo!(),
-            Reg::R13 | Reg::R13D | Reg::R13W | Reg::R13B => todo!(),
-            Reg::R14 | Reg::R14D | Reg::R14W | Reg::R14B => todo!(),
-            Reg::R15 | Reg::R15D | Reg::R15W | Reg::R15B => todo!(),
+            Reg::Rsi | Reg::Esi | Reg::Si | Reg::Sil => "src",
+            Reg::Rdi | Reg::Edi | Reg::Di | Reg::Dil => "dst",
+            Reg::R8 | Reg::R8D | Reg::R8W | Reg::R8B => "r8",
+            Reg::R9 | Reg::R9D | Reg::R9W | Reg::R9B => "r9",
+            Reg::R10 | Reg::R10D | Reg::R10W | Reg::R10B => "r10",
+            Reg::R11 | Reg::R11D | Reg::R11W | Reg::R11B => "r11",
+            Reg::R12 | Reg::R12D | Reg::R12W | Reg::R12B => "r12",
+            Reg::R13 | Reg::R13D | Reg::R13W | Reg::R13B => "r13",
+            Reg::R14 | Reg::R14D | Reg::R14W | Reg::R14B => "r14",
+            Reg::R15 | Reg::R15D | Reg::R15W | Reg::R15B => "r15",
         }
     }
 
@@ -119,6 +117,7 @@ impl OperandManager<Reg> for RegManager<Reg> {
             "r8" => Reg::r8(mem_size),
             "r9" => Reg::r9(mem_size),
             "r10" => Reg::r10(mem_size),
+            "r11" => Reg::r11(mem_size),
             _ => panic!("register does not exists"),
         }
     }
@@ -139,20 +138,25 @@ impl OperandManager<Reg> for RegManager<Reg> {
 }
 
 impl OperandManager<Xmm> for RegManager<Xmm> {
-    const NAMES: &[&str] = &[
-        "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
-    ];
+    fn volatiles(target: CompilerTarget) -> &'static [&'static str] {
+        match target {
+            CompilerTarget::Linux => &[
+                "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
+            ],
+            CompilerTarget::Windows => &["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5"],
+        }
+    }
 
     fn name(ope: Xmm) -> &'static str {
         match ope.reg {
-            XmmReg::Xmm0 => Self::NAMES[0],
-            XmmReg::Xmm1 => Self::NAMES[1],
-            XmmReg::Xmm2 => Self::NAMES[2],
-            XmmReg::Xmm3 => Self::NAMES[3],
-            XmmReg::Xmm4 => Self::NAMES[4],
-            XmmReg::Xmm5 => Self::NAMES[5],
-            XmmReg::Xmm6 => Self::NAMES[6],
-            XmmReg::Xmm7 => Self::NAMES[7],
+            XmmReg::Xmm0 => "xmm0",
+            XmmReg::Xmm1 => "xmm1",
+            XmmReg::Xmm2 => "xmm2",
+            XmmReg::Xmm3 => "xmm3",
+            XmmReg::Xmm4 => "xmm4",
+            XmmReg::Xmm5 => "xmm5",
+            XmmReg::Xmm6 => "xmm6",
+            XmmReg::Xmm7 => "xmm7",
         }
     }
 
@@ -166,7 +170,7 @@ impl OperandManager<Xmm> for RegManager<Xmm> {
             "xmm5" => Xmm::xmm(5, mem_size),
             "xmm6" => Xmm::xmm(6, mem_size),
             "xmm7" => Xmm::xmm(7, mem_size),
-            _ => panic!("register does not exists"),
+            _ => panic!("unknown register"),
         }
     }
 

@@ -96,10 +96,6 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     fn err_if_exists(&self, name: &str, ns: Rc<String>) -> Result<SymbolKey> {
         let key = SymbolKey {
             name: name.into(),

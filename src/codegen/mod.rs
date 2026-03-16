@@ -14,7 +14,6 @@ use asm::{AsmBuilder, Imm, Lbl, Mem, MemSize, MemSized, Operand, Reg, Xmm};
 use regs::{OperandManager, RegManager};
 use scope::Scope;
 
-#[derive(Default)]
 pub struct CodeGen {
     target: CompilerTarget,
     code: AsmBuilder,
@@ -28,8 +27,11 @@ impl CodeGen {
     pub fn new(target: CompilerTarget, symbols: SymbolTable) -> Self {
         Self {
             target,
+            code: AsmBuilder::default(),
+            scope: Scope::default(),
+            regs: RegManager::<Reg>::new(target),
+            xmms: RegManager::<Xmm>::new(target),
             symbols,
-            ..Default::default()
         }
     }
 
@@ -139,10 +141,10 @@ impl CodeGen {
 
     pub(self) fn type_size(&self, typ: &Type) -> usize {
         match typ {
-            Type::Void | Type::Func(..) => 0,
+            Type::Void => 0,
             Type::Byte | Type::Char | Type::Bool => 1,
             Type::Int | Type::Real => 4,
-            Type::FuncPtr(..) | Type::Pointer(..) => 8,
+            Type::Func(..) | Type::FuncPtr(..) | Type::Pointer(..) => 8,
             Type::Array(inner, size) => self.type_size(inner) * (*size as usize),
             Type::Struct(fields) => fields.iter().map(|f| self.type_size(&f.typ)).sum(),
         }
