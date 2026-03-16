@@ -76,6 +76,20 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
+pub struct AstLambda {
+    pub typ: AstType,
+    pub pos: Position,
+    pub args: Vec<AstSymbol>,
+    pub body: Vec<AstNode>,
+}
+
+impl AstLambda {
+    pub fn pos(&self) -> Position {
+        self.pos.clone()
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Identifier {
         id: Identifier,
@@ -118,6 +132,9 @@ pub enum Expression {
         val: Box<Expression>,
         pos: Position,
     },
+    Lambda {
+        lambda: AstLambda,
+    },
 }
 
 impl Expression {
@@ -133,6 +150,7 @@ impl Expression {
             Self::Field { expr, field: _ } => expr.pos(),
             Self::Member { ns, member: _ } => ns.position.clone(),
             Self::SizeOf { val: _, pos } => pos.clone(),
+            Self::Lambda { lambda } => lambda.pos(),
         }
     }
 
@@ -225,6 +243,16 @@ impl Expression {
             val: Box::new(expr),
             pos,
         }
+    }
+
+    pub fn lambda(typ: AstType, pos: Position, args: Vec<AstSymbol>, body: Vec<AstNode>) -> Self {
+        let lambda = AstLambda {
+            typ,
+            pos,
+            args,
+            body,
+        };
+        Self::Lambda { lambda }
     }
 }
 

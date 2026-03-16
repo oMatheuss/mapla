@@ -1,26 +1,28 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Ast, AstNode, AstRoot, AstSymbol, AstType, Expression, Identifier, Literal};
+use crate::ast::{
+    Ast, AstLambda, AstNode, AstRoot, AstSymbol, AstType, Expression, Identifier, Literal,
+};
 use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
 use crate::symbols::{FuncDef, GlobalVar, Symbol, SymbolTable, SymbolValue, TypeDef};
 use crate::types::{FuncType, Type, TypeCheck, TypeWithPos};
 
+#[derive(Debug, Default)]
 pub struct Binder {
     pub globals: SymbolTable,
     pub functions: Vec<IrFunc>,
     pub data: HashMap<String, Vec<u8>>,
+
+    lambdas: HashMap<String, AstLambda>,
+    lambda_count: usize,
 }
 
 impl Binder {
     pub fn new() -> Self {
-        Self {
-            globals: SymbolTable::new(),
-            functions: Vec::new(),
-            data: HashMap::new(),
-        }
+        Self::default()
     }
 
     fn bind_type(&self, ast_type: &AstType, ns: &str) -> Result<Type> {
@@ -139,8 +141,8 @@ impl Binder {
                 AstRoot::Func(typ, id, args, _, ast_nodes) => {
                     // TODO: handle variadics
                     let args = self.bind_args(args, &ast.namespace)?;
-                    let body =
-                        FuncBinder::new(self, ast.namespace.clone()).bind_func(&args, ast_nodes)?;
+                    let ns = ast.namespace.clone();
+                    let body = FuncBinder::new(self, ns).bind(&args, ast_nodes)?;
                     self.functions.push(IrFunc {
                         name: id.name,
                         namespace: ast.namespace.clone(),
@@ -151,6 +153,20 @@ impl Binder {
                 }
                 _ => {}
             }
+        }
+
+        // drain and generate all lambdas
+        for (name, lambda) in self.lambdas.drain().collect::<Vec<_>>() {
+            let args = self.bind_args(lambda.args, &ast.namespace)?;
+            let ns = ast.namespace.clone();
+            let body = FuncBinder::new(self, ns).bind(&args, lambda.body)?;
+            self.functions.push(IrFunc {
+                name,
+                namespace: ast.namespace.clone(),
+                args,
+                typ: self.bind_type(&lambda.typ, &ast.namespace)?,
+                body,
+            });
         }
 
         Ok(())
@@ -411,6 +427,27 @@ impl<'a> FuncBinder<'a> {
                 self.emit(IrNode::SizeOf { typ }, emit);
                 return Ok(Type::Int);
             }
+            Expression::Lambda { lambda } => {
+                let ret = Type::Func(FuncType {
+                    args: lambda
+                        .args
+                        .iter()
+                        .map(|ast_sym| self.binder.bind_type(&ast_sym.typ, &self.namespace))
+                        .collect::<Result<Vec<_>>>()?,
+                    variadic: false,
+                    ret: self.binder.bind_type(&lambda.typ, &self.namespace)?.into(),
+                });
+                let name = format!("lambda.{}", self.binder.lambda_count);
+                self.binder.lambdas.insert(name.clone(), lambda);
+                self.binder.lambda_count += 1;
+                let value = IrArg::Global {
+                    ns: self.namespace.clone(),
+                    name,
+                    typ: ret.clone(),
+                };
+                self.emit(IrNode::Load { value }, emit);
+                return Ok(ret);
+            }
         }
     }
 
@@ -529,7 +566,7 @@ impl<'a> FuncBinder<'a> {
         Ok(())
     }
 
-    fn bind_func(mut self, args: &Vec<Symbol>, nodes: Vec<AstNode>) -> Result<Vec<IrNode>> {
+    fn bind(mut self, args: &Vec<Symbol>, nodes: Vec<AstNode>) -> Result<Vec<IrNode>> {
         self.scope.enter();
         for Symbol { name, typ, .. } in args.iter() {
             self.scope.set(name.clone(), typ.clone());

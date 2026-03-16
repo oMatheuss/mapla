@@ -117,6 +117,8 @@ impl Parser {
             let pos = ts.pos();
             let expr = self.parse_expr(ts, 12)?;
             Expression::sizeof(expr, pos)
+        } else if let Some(Token::Lambda) = ts.peek() {
+            self.consume_lambda(ts)?
         } else {
             self.parse_atom(ts)?
         };
@@ -165,14 +167,14 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn consume_expr(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
+    fn consume_expr(&self, ts: &mut TokenStream) -> Result<AstNode> {
         let expr = self.parse_expr(ts, 1)?;
         self.consume_semi(ts)?;
         let expr = AstNode::Expr(expr);
         Ok(expr)
     }
 
-    fn consume_for(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
+    fn consume_for(&self, ts: &mut TokenStream) -> Result<AstNode> {
         ts.next(); // discard 'for' token
         let Token::Identifier(ident) = self.next_or_err(ts)? else {
             Error::syntatic("expected identifier", ts.pos())?
@@ -195,7 +197,7 @@ impl Parser {
         AstNode::For(ident.into(), init, limit, inner).ok()
     }
 
-    fn consume_while(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
+    fn consume_while(&self, ts: &mut TokenStream) -> Result<AstNode> {
         ts.next(); // discard 'while' token
         let expr = self.parse_expr(ts, 1)?;
         let Token::Do = self.next_or_err(ts)? else {
@@ -205,7 +207,7 @@ impl Parser {
         AstNode::While(expr, inner).ok()
     }
 
-    fn consume_if(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
+    fn consume_if(&self, ts: &mut TokenStream) -> Result<AstNode> {
         ts.next(); // discard 'if' token
         let expr = self.parse_expr(ts, 1)?;
         let Token::Then = self.next_or_err(ts)? else {
@@ -324,7 +326,7 @@ impl Parser {
         Ok(ty)
     }
 
-    fn consume_var(&mut self, ts: &mut TokenStream) -> Result<AstNode> {
+    fn consume_var(&self, ts: &mut TokenStream) -> Result<AstNode> {
         ts.next(); // consume var keyword
         let Token::Identifier(name) = self.next_or_err(ts)? else {
             Error::syntatic("expected identifier", ts.pos())?
@@ -372,7 +374,7 @@ impl Parser {
         AstRoot::Global(typ, id, expr).ok()
     }
 
-    fn parse_args(&mut self, ts: &mut TokenStream) -> Result<(Vec<AstSymbol>, bool)> {
+    fn parse_args(&self, ts: &mut TokenStream) -> Result<(Vec<AstSymbol>, bool)> {
         let mut state = 1;
         let mut items = Vec::new();
         let mut variadic = false;
@@ -486,6 +488,28 @@ impl Parser {
         AstRoot::Func(annot, id, args, variadic, inner).ok()
     }
 
+    fn consume_lambda(&self, ts: &mut TokenStream) -> Result<Expression> {
+        ts.next(); // consume lambda keyword
+        let pos = ts.pos();
+        let (args, variadic) = self.parse_args(ts)?;
+        if variadic {
+            return Error::syntatic("lambdas cannot be variadic", pos);
+        }
+        let typ = match self.next_or_err(ts)? {
+            Token::Colon => {
+                let ret_type = self.parse_annot(ts)?;
+                let Token::Do = self.next_or_err(ts)? else {
+                    Error::syntatic("expected `do`", ts.pos())?
+                };
+                ret_type
+            }
+            Token::Do => AstType::Void,
+            _ => Error::syntatic("expected type annotation or `do`", ts.pos())?,
+        };
+        let body = self.consume_inner(ts)?;
+        Ok(Expression::lambda(typ, pos, args, body))
+    }
+
     fn consume_ret(&self, ts: &mut TokenStream) -> Result<AstNode> {
         ts.next(); // discard return token
         let expr = match ts.peek() {
@@ -567,7 +591,7 @@ impl Parser {
         AstRoot::Struct(id, fields).ok()
     }
 
-    fn consume_inner(&mut self, ts: &mut TokenStream) -> Result<Vec<AstNode>> {
+    fn consume_inner(&self, ts: &mut TokenStream) -> Result<Vec<AstNode>> {
         let mut nodes = Vec::new();
         while let Some(token) = ts.peek() {
             if let Token::End = token {
