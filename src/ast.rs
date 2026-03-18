@@ -67,12 +67,14 @@ impl AstSymbol {
 }
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub enum Literal {
     String(String),
     Byte(u8),
     Int(i32),
     Float(f32),
     Bool(bool),
+    Array(Vec<Literal>),
 }
 
 #[derive(Debug)]
@@ -181,6 +183,14 @@ impl Expression {
     pub fn boolean(bool: bool, pos: Position) -> Self {
         Self::Literal {
             lit: Literal::Bool(bool),
+            pos,
+        }
+    }
+
+    #[inline]
+    pub fn array(arr: Vec<Literal>, pos: Position) -> Self {
+        Self::Literal {
+            lit: Literal::Array(arr),
             pos,
         }
     }

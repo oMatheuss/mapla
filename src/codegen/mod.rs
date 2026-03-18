@@ -4,7 +4,10 @@ mod regs;
 mod scope;
 mod windows;
 
+use std::collections::HashMap;
+
 use crate::ast::{BinOpe, UnaOpe};
+use crate::binder::BindData;
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::symbols::SymbolTable;
 use crate::target::CompilerTarget;
@@ -213,10 +216,17 @@ impl CodeGen {
         asm::code!(self.code, Ret);
     }
 
-    pub fn gen_data(&mut self, data: std::collections::HashMap<String, Vec<u8>>) {
+    pub fn gen_data(&mut self, data: HashMap<String, BindData>) {
         asm::code!(self.code, "section .data");
-        for (label, bytes) in data.iter() {
-            asm::code!(self.code, "  {label}: db {:x}", HexSlice::new(bytes));
+        for (label, data) in data.into_iter() {
+            match data {
+                BindData::Bytes(bytes) => {
+                    asm::code!(self.code, "  {label}: db {:x}", HexSlice::new(&bytes))
+                }
+                BindData::Labels(arr) => {
+                    asm::code!(self.code, "  {label}: dq {}", arr.join(","))
+                }
+            }
         }
     }
 
@@ -340,7 +350,7 @@ impl CodeGen {
                 }
                 IrArg::Var { index, .. } => self.scope.push_var(index).unwrap(),
                 IrArg::Literal { value } => match value {
-                    IrLiteral::String { label, size: _ } => {
+                    IrLiteral::Array { label, .. } => {
                         let reg = self.regs.take_any(MemSize::QWord);
                         asm::code!(self.code, Lea, reg, format!("[rel {label}]"));
                         self.scope.push(reg.into());

@@ -14,10 +14,16 @@ use crate::types::{FuncType, Type, TypeCheck, TypeWithPos};
 pub struct Binder {
     pub globals: SymbolTable,
     pub functions: Vec<IrFunc>,
-    pub data: HashMap<String, Vec<u8>>,
+    pub data: HashMap<String, BindData>,
 
     lambdas: HashMap<String, AstLambda>,
     lambda_count: usize,
+}
+
+#[derive(Debug)]
+pub enum BindData {
+    Bytes(Vec<u8>),
+    Labels(Vec<String>),
 }
 
 impl Binder {
@@ -70,6 +76,61 @@ impl Binder {
         Ok(args)
     }
 
+    fn bind_array(&mut self, name: String, arr: &Vec<Literal>) -> Result<Type> {
+        assert!(!arr.is_empty(), "literal array is empty");
+        let size = arr.len() as u32;
+        let first = core::mem::discriminant(&arr[0]);
+        let typ = match &arr[0] {
+            Literal::String(_) => Type::ptr_to(Type::Char),
+            Literal::Byte(_) => Type::Byte,
+            Literal::Int(_) => Type::Int,
+            Literal::Float(_) => Type::Real,
+            Literal::Bool(_) => Type::Bool,
+            Literal::Array(..) => {
+                let pos = Position::default();
+                Error::type_err("array of arrays is not supported", pos)?
+            }
+        };
+
+        if !arr.iter().all(|lit| core::mem::discriminant(lit) == first) {
+            let pos = Position::default();
+            return Error::type_err("mixed type array is not supported", pos);
+        };
+
+        if let Literal::String(_) = &arr[0] {
+            let mut labels = Vec::new();
+            for lit in arr {
+                match lit {
+                    Literal::String(s) => {
+                        let label = format!("L.str.{}", self.data.len());
+                        let data = BindData::Bytes(s.clone().into_bytes());
+                        self.data.insert(label.clone(), data);
+                        labels.push(label);
+                    }
+                    _ => unreachable!(),
+                };
+            }
+            self.data.insert(name, BindData::Labels(labels));
+        } else {
+            let mut bytes = Vec::new();
+            for lit in arr {
+                let mut data = match lit {
+                    Literal::String(_) => unreachable!(),
+                    Literal::Byte(b) => [*b as u8].to_vec(),
+                    Literal::Int(i) => i.to_le_bytes().to_vec(),
+                    Literal::Float(f) => f.to_le_bytes().to_vec(),
+                    Literal::Bool(b) => [*b as u8].to_vec(),
+                    Literal::Array(..) => unimplemented!(),
+                };
+
+                bytes.append(&mut data);
+            }
+            self.data.insert(name, BindData::Bytes(bytes));
+        }
+
+        return Ok(Type::Array(typ.into(), size));
+    }
+
     pub fn bind_globals(&mut self, ast: &Ast) -> Result<()> {
         for node in ast.nodes.iter() {
             let ns = ast.namespace.clone();
@@ -86,11 +147,27 @@ impl Binder {
                     if let Some(value) = value {
                         let name = format!("{ns}@{}", id.name);
                         match value {
-                            Literal::String(s) => self.data.insert(name, s.clone().into_bytes()),
-                            Literal::Byte(b) => self.data.insert(name, [*b as u8].to_vec()),
-                            Literal::Int(i) => self.data.insert(name, i.to_le_bytes().to_vec()),
-                            Literal::Float(f) => self.data.insert(name, f.to_le_bytes().to_vec()),
-                            Literal::Bool(b) => self.data.insert(name, [*b as u8].to_vec()),
+                            Literal::String(s) => {
+                                let data = BindData::Bytes(s.clone().into_bytes());
+                                self.data.insert(name, data);
+                            }
+                            Literal::Byte(b) => {
+                                self.data.insert(name, BindData::Bytes([*b as u8].to_vec()));
+                            }
+                            Literal::Int(i) => {
+                                self.data
+                                    .insert(name, BindData::Bytes(i.to_le_bytes().to_vec()));
+                            }
+                            Literal::Float(f) => {
+                                self.data
+                                    .insert(name, BindData::Bytes(f.to_le_bytes().to_vec()));
+                            }
+                            Literal::Bool(b) => {
+                                self.data.insert(name, BindData::Bytes([*b as u8].to_vec()));
+                            }
+                            Literal::Array(arr) => {
+                                self.bind_array(name, arr)?;
+                            }
                         };
                     }
                 }
@@ -277,8 +354,15 @@ impl<'a> FuncBinder<'a> {
             Literal::String(s) => {
                 let label = format!("L.str.{}", self.binder.data.len());
                 let size = s.len() as u32 - 1;
-                self.binder.data.insert(label.clone(), s.into_bytes());
-                IrLiteral::String { label, size }.into()
+                let typ = Type::Array(Box::new(Type::Char), size);
+                let data = BindData::Bytes(s.into_bytes());
+                self.binder.data.insert(label.clone(), data);
+                IrLiteral::Array { label, typ }.into()
+            }
+            Literal::Array(arr) => {
+                let label = format!("L.arr.{}", self.binder.data.len());
+                let typ = self.binder.bind_array(label.clone(), &arr)?;
+                IrLiteral::Array { label, typ }.into()
             }
             Literal::Byte(b) => IrLiteral::Byte(b).into(),
             Literal::Int(i) => IrLiteral::Int(i).into(),

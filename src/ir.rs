@@ -39,7 +39,7 @@ pub enum IrNode {
 
 #[derive(Debug, Clone)]
 pub enum IrLiteral {
-    String { label: String, size: u32 },
+    Array { label: String, typ: Type },
     Byte(u8),
     Int(i32),
     Float(f32),
@@ -64,7 +64,7 @@ impl IrArg {
         match self {
             IrArg::Var { index: _, typ } => typ.clone(),
             IrArg::Literal { value } => match value {
-                IrLiteral::String { label: _, size } => Type::Array(Box::new(Type::Char), *size),
+                IrLiteral::Array { label: _, typ, .. } => typ.clone(),
                 IrLiteral::Byte(_) => Type::Byte,
                 IrLiteral::Int(_) => Type::Int,
                 IrLiteral::Float(_) => Type::Real,
@@ -136,7 +136,7 @@ impl Display for IrArg {
 impl Display for IrLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IrLiteral::String { label, size: _ } => write!(f, "[{label}]"),
+            IrLiteral::Array { label, .. } => write!(f, "[{label}]"),
             IrLiteral::Byte(b) => write!(f, "{b}"),
             IrLiteral::Int(i) => write!(f, "{i}"),
             IrLiteral::Float(v) => write!(f, "{v}"),

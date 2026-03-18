@@ -55,6 +55,23 @@ impl Parser {
         }
     }
 
+    fn parse_array(&self, ts: &mut TokenStream) -> Result<Vec<Literal>> {
+        // open bracket should already be consumed
+        let mut arr = Vec::new();
+        loop {
+            arr.push(self.parse_value(ts)?);
+            if ts.next_if_eq(Token::Comma).is_some() {
+                if ts.next_if_eq(Token::CloseBracket).is_some() {
+                    break Ok(arr);
+                }
+            } else if ts.next_if_eq(Token::CloseBracket).is_some() {
+                break Ok(arr);
+            } else {
+                break Error::syntatic("expected comma or close bracket", ts.pos());
+            }
+        }
+    }
+
     fn parse_value(&self, ts: &mut TokenStream) -> Result<Literal> {
         let expr = match self.next_or_err(ts)? {
             Token::StrLiteral(string) => self.parse_str(ts, string)?,
@@ -67,6 +84,10 @@ impl Parser {
             },
             Token::True => Literal::Bool(true),
             Token::False => Literal::Bool(false),
+            Token::OpenBracket => {
+                let arr = self.parse_array(ts)?;
+                Literal::Array(arr)
+            }
             _ => Error::syntatic("unexpected token", ts.pos())?,
         };
 
@@ -93,6 +114,11 @@ impl Parser {
                 Expression::member(ns, member)
             }
             Token::Identifier(name) => Expression::id(name, ts.pos()),
+            Token::OpenBracket => {
+                let pos = ts.pos();
+                let arr = self.parse_array(ts)?;
+                Expression::array(arr, pos)
+            }
             Token::OpenParen => {
                 let inner_expr = self.parse_expr(ts, 1)?;
                 let Token::CloseParen = self.next_or_err(ts)? else {

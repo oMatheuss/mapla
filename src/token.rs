@@ -165,6 +165,15 @@ impl<'a> TokenStream<'a> {
         }
     }
 
+    pub fn next_if_eq(&mut self, token: Token) -> Option<Token<'a>> {
+        if let Some(peek_tok) = self.peek()
+            && core::mem::discriminant(peek_tok) == core::mem::discriminant(&token)
+        {
+            return self.next();
+        }
+        return None;
+    }
+
     pub fn pos(&self) -> Position {
         self.position.clone()
     }
