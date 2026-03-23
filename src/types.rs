@@ -1,4 +1,4 @@
-use crate::ast::{BinOpe, UnaOpe};
+use crate::ast::{BinOpe, Identifier, UnaOpe};
 use crate::error::{Error, Result};
 use crate::position::Position;
 
@@ -102,6 +102,17 @@ impl Type {
             _ => None,
         }
     }
+
+    pub fn fields(&self) -> core::slice::Iter<'_, Field> {
+        match self {
+            Type::Pointer(inner) => match &**inner {
+                Type::Struct(strct) => strct.fields.iter(),
+                _ => [].iter(),
+            },
+            Type::Struct(strct) => strct.fields.iter(),
+            _ => [].iter(),
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -117,7 +128,7 @@ impl std::fmt::Display for Type {
             Self::FuncPtr(func) => write!(f, "{func}"),
             Self::Pointer(inner) => write!(f, "{inner}*"),
             Self::Array(inner, size) => write!(f, "{inner}[{size}]"),
-            Self::Struct(fields) => write!(f, "struct({fields})"),
+            Self::Struct(strct) => write!(f, "{strct}"),
         }
     }
 }
@@ -176,35 +187,16 @@ impl From<Vec<Field>> for StructType {
     }
 }
 
-impl StructType {
-    pub fn as_type_vec(self) -> Vec<Type> {
-        self.fields.into_iter().map(|f| f.typ).collect()
-    }
-}
-
-impl std::ops::DerefMut for StructType {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.fields
-    }
-}
-
-impl std::ops::Deref for StructType {
-    type Target = Vec<Field>;
-    fn deref(&self) -> &Self::Target {
-        &self.fields
-    }
-}
-
 impl std::fmt::Display for StructType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Some(field) = self.fields.first() else {
             return Ok(());
         };
-        write!(f, "{}", field)?;
+        write!(f, "struct {{ {field}")?;
         for field in self.fields.iter().skip(1) {
-            write!(f, ", {}", field)?;
+            write!(f, ", {field}")?;
         }
-        Ok(())
+        write!(f, " }}")
     }
 }
 
@@ -359,16 +351,27 @@ impl TypeCheck {
         Ok(())
     }
 
-    pub fn check_struct(fields: &StructType, vals: &Vec<TypeWithPos>) -> Result<()> {
-        for (field, val) in fields.iter().zip(vals) {
-            if !val.typ.is_compatible(&field.typ) {
-                let Field { name, typ } = field;
-                let TypeWithPos { typ: arg, pos } = val;
-                let msg = format!("field {name} expects {typ}, but found {arg}");
-                return Error::type_err(msg, pos.clone());
+    pub fn check_field(typ: &Type, field: Identifier, pos: Position) -> Result<Type> {
+        let strct = match typ {
+            Type::Pointer(inner) => match &**inner {
+                Type::Struct(strct) => Some(strct),
+                _ => None,
+            },
+            Type::Struct(strct) => Some(strct),
+            _ => None,
+        };
+        let Some(StructType { mut fields }) = strct.cloned() else {
+            let msg = format!("cannot do a member access into the type {typ}");
+            Error::type_err(msg, pos)?
+        };
+        loop {
+            let Some(item) = fields.pop() else {
+                let msg = format!("field '{}' does not exists in type {typ}", field.name);
+                Error::type_err(msg, field.position)?
+            };
+            if item.name == field.name {
+                break Ok(item.typ);
             }
         }
-
-        Ok(())
     }
 }

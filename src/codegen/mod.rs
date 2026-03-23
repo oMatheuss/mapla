@@ -149,7 +149,7 @@ impl CodeGen {
             Type::Int | Type::Real => 4,
             Type::Func(..) | Type::FuncPtr(..) | Type::Pointer(..) => 8,
             Type::Array(inner, size) => self.type_size(inner) * (*size as usize),
-            Type::Struct(fields) => fields.iter().map(|f| self.type_size(&f.typ)).sum(),
+            Type::Struct(strct) => strct.fields.iter().map(|f| self.type_size(&f.typ)).sum(),
         }
     }
 
@@ -252,9 +252,9 @@ impl CodeGen {
             IrNode::Store { index, typ } => {
                 let size = self.type_size(&typ);
                 let val = self.scope.pop().unwrap();
-                match size {
-                    1 | 2 | 4 | 8 => {
-                        let mem_size = size.try_into().unwrap();
+                let mem_size = MemSize::from(size);
+                match mem_size {
+                    MemSize::Byte | MemSize::Word | MemSize::DWord | MemSize::QWord => {
                         let local = self.scope.set_var(index, mem_size);
                         match val {
                             Operand::Reg(reg) => {
@@ -283,8 +283,7 @@ impl CodeGen {
                             }
                         }
                     }
-                    _ => {
-                        let mem_size = size.try_into().unwrap_or(MemSize::QWord);
+                    MemSize::Custom => {
                         let local = self.scope.set_sized_var(index, size, mem_size);
                         match val {
                             Operand::Reg(src) => {
@@ -326,7 +325,7 @@ impl CodeGen {
                 Type::Array(typ, size) => {
                     let size = *size as usize;
                     let type_size = self.type_size(&typ);
-                    let mem_size = type_size.try_into().unwrap();
+                    let mem_size = MemSize::from(type_size);
                     self.scope.set_sized_var(index, size * type_size, mem_size);
                 }
                 Type::Int | Type::Real => {
@@ -338,7 +337,7 @@ impl CodeGen {
                 Type::Void => {}
                 _ => {
                     let size = self.type_size(&typ);
-                    self.scope.set_sized_var(index, size, MemSize::QWord);
+                    self.scope.set_sized_var(index, size, size.into());
                 }
             },
             IrNode::Load { value } => match value {
@@ -370,7 +369,7 @@ impl CodeGen {
                     if typ.is_func() || typ.is_array() {
                         self.scope.push(Operand::Lbl(lbl));
                     } else {
-                        let size = self.type_size(&typ).try_into().unwrap_or(MemSize::QWord);
+                        let size = MemSize::from(self.type_size(&typ));
                         self.scope.push(Operand::Mem(Mem::lbl(lbl, size)));
                     }
                 }
@@ -403,7 +402,7 @@ impl CodeGen {
                     UnaOpe::Dereference => {
                         assert!(typ.is_ptr(), "expected value to be a pointer type");
                         let inner = typ.inner().unwrap();
-                        let size = self.type_size(&inner).try_into().unwrap();
+                        let size = MemSize::from(self.type_size(&inner));
                         match value {
                             Operand::Reg(reg) => Operand::Mem(Mem::reg(reg, size)),
                             Operand::Mem(mem) => {
@@ -910,42 +909,66 @@ impl CodeGen {
                     todo!("conversion between {from} to {to} not implemented yet");
                 }
             }
-            IrNode::Field { mut offset, by_ref } => {
-                let item = self.scope.pop().unwrap();
-                let field_type = offset.pop().unwrap();
-                let type_size = self.type_size(&field_type);
-                let mem_size = type_size.try_into().unwrap_or(MemSize::QWord);
-                let offset: usize = offset.iter().map(|f| self.type_size(f)).sum();
-                let base = if by_ref {
-                    self.move_operand_to_reg(&field_type, item).expect_reg()
+            IrNode::Field { typ, name } => {
+                let field = typ
+                    .fields()
+                    .find(|f| f.name == name)
+                    .expect("field to be in type");
+                let offset: usize = typ
+                    .fields()
+                    .take_while(|f| f.name != name)
+                    .map(|f| self.type_size(&f.typ))
+                    .sum();
+                let operand = self.scope.pop().unwrap();
+                let base = if typ.is_ptr() {
+                    self.move_operand_to_reg(&typ, operand).expect_reg()
                 } else {
                     let reg = self.regs.take_any(MemSize::QWord);
-                    self.regs.try_push(item);
-                    asm::code!(self.code, Lea, reg, item);
+                    self.regs.try_push(operand);
+                    asm::code!(self.code, Lea, reg, operand);
                     reg
                 };
+                let mem_size = self.type_size(&field.typ).into();
                 let field_mem = Mem::offset(base, offset as isize, mem_size).into();
                 self.scope.push(field_mem);
             }
-            IrNode::Struct { fields } => {
-                let type_size: usize = fields.iter().map(|f| self.type_size(&f)).sum();
+            IrNode::Struct { typ } => {
+                let type_size = self.type_size(&typ);
                 let mut values = Vec::new();
-                for field_type in fields.into_iter().rev() {
+                for field_type in typ.fields().rev() {
                     let value = self.scope.pop().unwrap();
                     values.push((value, field_type));
                 }
-                let base_mem_size = type_size.try_into().unwrap_or(MemSize::QWord);
+                let base_mem_size = MemSize::from(type_size);
                 let base_reg = self.regs.take_any(MemSize::QWord);
                 let base_mem = self.scope.new_sized_temp(type_size, base_mem_size);
                 asm::code!(self.code, Lea, base_reg, base_mem);
                 let mut offset = 0;
-                for (operand, field_type) in values.into_iter().rev() {
-                    let operand_reg = self.move_operand_to_reg(&field_type, operand);
-                    let mem_size = self.type_size(&field_type).try_into().unwrap();
+                for (value, field_type) in values.into_iter().rev() {
+                    let type_size = self.type_size(&field_type.typ);
+                    let mem_size = type_size.into();
                     let offset_mem = Mem::offset(base_reg, offset, mem_size);
-                    asm::code!(self.code, Mov, offset_mem, operand_reg);
-                    self.regs.try_push(operand_reg);
-                    offset += self.type_size(&field_type) as isize;
+                    match value {
+                        Operand::Lbl(lbl) => {
+                            let aux = self.regs.take_any(mem_size);
+                            asm::code!(self.code, Lea, aux, lbl);
+                            asm::code!(self.code, Mov, offset_mem, aux);
+                            self.regs.push(aux);
+                        }
+                        Operand::Mem(mem) => {
+                            let aux = self.regs.take_any(mem_size);
+                            asm::code!(self.code, Mov, aux, mem);
+                            asm::code!(self.code, Mov, offset_mem, aux);
+                            self.regs.push(aux);
+                        }
+                        Operand::Reg(..) | Operand::Imm(..) => {
+                            asm::code!(self.code, Mov, offset_mem, value);
+                        }
+                        Operand::Xmm(xmm) => {
+                            asm::code!(self.code, Movss, offset_mem, xmm);
+                        }
+                    }
+                    offset += type_size as isize;
                 }
                 self.regs.push(base_reg);
                 self.scope.push(base_mem);

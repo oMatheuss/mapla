@@ -148,6 +148,8 @@ impl<'a> Lexer<'a> {
             (')', _) => Token::CloseParen,
             ('[', _) => Token::OpenBracket,
             (']', _) => Token::CloseBracket,
+            ('{', _) => Token::OpenCurly,
+            ('}', _) => Token::CloseCurly,
             ('=', Some('=')) => {
                 self.next();
                 Token::Equal

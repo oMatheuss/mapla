@@ -1,4 +1,4 @@
-struct Color(r: byte, g: byte, b: byte, a: byte);
+struct Color r: byte, g: byte, b: byte, a: byte end
 
 extern func InitWindow(width: int, height: int, title: char*);
 extern func SetTargetFPS(fps: int);
@@ -9,8 +9,8 @@ extern func DrawText(text: char*, posX: int, posY: int, fontSize: int, color: Co
 extern func EndDrawing();
 
 func main(): int do
-    var BLACK = Color(0, 0, 0, 0xFF);
-    var RED   = Color(0xFF, 0, 0, 0xFF);
+    var BLACK = { r: 0 as byte, g: 0 as byte, b: 0 as byte, a: 0xFF as byte };
+    var RED   = { r: 0xFF as byte, g: 0 as byte, b: 0 as byte, a: 0xFF as byte };
 
     InitWindow(800, 450, "RayLib Example");
     SetTargetFPS(60);

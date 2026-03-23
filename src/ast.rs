@@ -92,6 +92,18 @@ impl AstLambda {
 }
 
 #[derive(Debug)]
+pub struct AstField {
+    pub id: Identifier,
+    pub value: Box<Expression>,
+}
+
+impl AstField {
+    pub fn new(id: Identifier, value: Box<Expression>) -> Self {
+        Self { id, value }
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Identifier {
         id: Identifier,
@@ -137,6 +149,10 @@ pub enum Expression {
     Lambda {
         lambda: AstLambda,
     },
+    Contructor {
+        fields: Vec<AstField>,
+        pos: Position,
+    },
 }
 
 impl Expression {
@@ -153,6 +169,7 @@ impl Expression {
             Self::Member { ns, member: _ } => ns.position.clone(),
             Self::SizeOf { val: _, pos } => pos.clone(),
             Self::Lambda { lambda } => lambda.pos(),
+            Self::Contructor { fields: _, pos } => pos.clone(),
         }
     }
 
@@ -263,6 +280,10 @@ impl Expression {
             body,
         };
         Self::Lambda { lambda }
+    }
+
+    pub fn contructor(fields: Vec<AstField>, pos: Position) -> Self {
+        Self::Contructor { fields, pos }
     }
 }
 

@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::ir::{IrArg, IrFunc, IrLiteral, IrNode};
 use crate::position::Position;
 use crate::symbols::{FuncDef, GlobalVar, Symbol, SymbolTable, SymbolValue, TypeDef};
-use crate::types::{FuncType, Type, TypeCheck, TypeWithPos};
+use crate::types::{Field, FuncType, StructType, Type, TypeCheck, TypeWithPos};
 
 #[derive(Debug, Default)]
 pub struct Binder {
@@ -436,26 +436,16 @@ impl<'a> FuncBinder<'a> {
                     args_types.push(TypeWithPos::new(arg_type, pos));
                 }
                 let pos = func.pos();
-                match self.bind_expr(*func, emit)? {
-                    Type::Func(func_typ) | Type::FuncPtr(func_typ) => {
-                        TypeCheck::check_callargs(&func_typ, &args_types, pos)?;
-                        let args = args_types.into_iter().map(|a| a.typ).collect();
-                        let ret = *func_typ.ret;
-                        let func_ret = ret.clone();
-                        self.emit(IrNode::Call { args, ret }, emit);
-                        Ok(func_ret)
-                    }
-                    Type::Struct(fields) => {
-                        TypeCheck::check_struct(&fields, &args_types)?;
-                        let typ = Type::Struct(fields.clone());
-                        let fields = fields.as_type_vec();
-                        self.emit(IrNode::Struct { fields }, emit);
-                        Ok(typ)
-                    }
-                    typ => {
-                        let msg = format!("symbol has type {typ} which is not a func or struct");
-                        Error::syntatic(msg, pos)?
-                    }
+                let typ = self.bind_expr(*func, emit)?;
+                if let Type::Func(func) | Type::FuncPtr(func) = typ {
+                    TypeCheck::check_callargs(&func, &args_types, pos)?;
+                    let args = args_types.into_iter().map(|a| a.typ).collect();
+                    let ret = *func.ret.clone();
+                    self.emit(IrNode::Call { args, ret }, emit);
+                    Ok(*func.ret)
+                } else {
+                    let msg = format!("symbol has type {typ} which is not a func");
+                    Error::syntatic(msg, pos)?
                 }
             }
             Expression::Index { array, index } => {
@@ -474,31 +464,12 @@ impl<'a> FuncBinder<'a> {
                 Ok(res)
             }
             Expression::Field { expr, field } => {
+                let pos = expr.pos();
                 let typ = self.bind_expr(*expr, emit)?;
-                let (mut fields, by_ref) = if let Type::Pointer(inner) = &typ
-                    && let Type::Struct(ref fields) = **inner
-                {
-                    (fields.clone(), true)
-                } else if let Type::Struct(fields) = &typ {
-                    (fields.clone(), false)
-                } else {
-                    let msg = format!("cannot do a member access into the type {typ}");
-                    Error::syntatic(msg, pos)?
-                };
-                fields.reverse();
-                let mut offset = Vec::new();
-                let typ = loop {
-                    let Some(item) = fields.pop() else {
-                        let msg = format!("field {} does not exists in type {typ}", field.name);
-                        Error::syntatic(msg, field.position)?
-                    };
-                    offset.push(item.typ.clone());
-                    if item.name == field.name {
-                        break item.typ;
-                    }
-                };
-                self.emit(IrNode::Field { offset, by_ref }, emit);
-                Ok(typ)
+                let name = field.name.clone();
+                let res = TypeCheck::check_field(&typ, field, pos)?;
+                self.emit(IrNode::Field { typ, name }, emit);
+                Ok(res)
             }
             Expression::Member { ns, member } => {
                 let value = self.bind_global(member, ns.name.into())?;
@@ -531,6 +502,20 @@ impl<'a> FuncBinder<'a> {
                 };
                 self.emit(IrNode::Load { value }, emit);
                 return Ok(ret);
+            }
+            Expression::Contructor { fields, pos: _ } => {
+                let mut struct_fields = Vec::new();
+                for field in fields {
+                    let name = field.id.name;
+                    let typ = self.bind_expr(*field.value, emit)?;
+                    self.emit(IrNode::Arg, emit);
+                    struct_fields.push(Field { name, typ });
+                }
+                let fields = struct_fields;
+                let typ = Type::Struct(StructType { fields });
+                let res = typ.clone();
+                self.emit(IrNode::Struct { typ }, emit);
+                Ok(res)
             }
         }
     }

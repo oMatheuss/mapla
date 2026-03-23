@@ -258,7 +258,7 @@ impl Reg {
             MemSize::Byte => Reg::Al,
             MemSize::Word => Reg::Ax,
             MemSize::DWord => Reg::Eax,
-            MemSize::QWord => Reg::Rax,
+            MemSize::Custom | MemSize::QWord => Reg::Rax,
         }
     }
 
@@ -268,7 +268,7 @@ impl Reg {
             MemSize::Byte => Reg::Cl,
             MemSize::Word => Reg::Cx,
             MemSize::DWord => Reg::Ecx,
-            MemSize::QWord => Reg::Rcx,
+            MemSize::Custom | MemSize::QWord => Reg::Rcx,
         }
     }
 
@@ -278,7 +278,7 @@ impl Reg {
             MemSize::Byte => Reg::Dl,
             MemSize::Word => Reg::Dx,
             MemSize::DWord => Reg::Edx,
-            MemSize::QWord => Reg::Rdx,
+            MemSize::Custom | MemSize::QWord => Reg::Rdx,
         }
     }
 
@@ -288,7 +288,7 @@ impl Reg {
             MemSize::Byte => Reg::Bl,
             MemSize::Word => Reg::Bx,
             MemSize::DWord => Reg::Ebx,
-            MemSize::QWord => Reg::Rbx,
+            MemSize::Custom | MemSize::QWord => Reg::Rbx,
         }
     }
 
@@ -298,7 +298,7 @@ impl Reg {
             MemSize::Byte => Reg::Sil,
             MemSize::Word => Reg::Si,
             MemSize::DWord => Reg::Esi,
-            MemSize::QWord => Reg::Rsi,
+            MemSize::Custom | MemSize::QWord => Reg::Rsi,
         }
     }
 
@@ -308,7 +308,7 @@ impl Reg {
             MemSize::Byte => Reg::Dil,
             MemSize::Word => Reg::Di,
             MemSize::DWord => Reg::Edi,
-            MemSize::QWord => Reg::Rdi,
+            MemSize::Custom | MemSize::QWord => Reg::Rdi,
         }
     }
 
@@ -318,7 +318,7 @@ impl Reg {
             MemSize::Byte => Reg::R8B,
             MemSize::Word => Reg::R8W,
             MemSize::DWord => Reg::R8D,
-            MemSize::QWord => Reg::R8,
+            MemSize::Custom | MemSize::QWord => Reg::R8,
         }
     }
 
@@ -328,7 +328,7 @@ impl Reg {
             MemSize::Byte => Reg::R9B,
             MemSize::Word => Reg::R9W,
             MemSize::DWord => Reg::R9D,
-            MemSize::QWord => Reg::R9,
+            MemSize::Custom | MemSize::QWord => Reg::R9,
         }
     }
 
@@ -338,7 +338,7 @@ impl Reg {
             MemSize::Byte => Reg::R10B,
             MemSize::Word => Reg::R10W,
             MemSize::DWord => Reg::R10D,
-            MemSize::QWord => Reg::R10,
+            MemSize::Custom | MemSize::QWord => Reg::R10,
         }
     }
 
@@ -348,7 +348,7 @@ impl Reg {
             MemSize::Byte => Reg::R11B,
             MemSize::Word => Reg::R11W,
             MemSize::DWord => Reg::R11D,
-            MemSize::QWord => Reg::R11,
+            MemSize::Custom | MemSize::QWord => Reg::R11,
         }
     }
 
@@ -449,6 +449,7 @@ impl MemSized for Reg {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MemSize {
+    Custom = 0,
     Byte = 1,
     Word = 2,
     DWord = 4,
@@ -459,16 +460,14 @@ pub trait MemSized {
     fn mem_size(&self) -> MemSize;
 }
 
-impl TryFrom<usize> for MemSize {
-    type Error = usize;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
+impl From<usize> for MemSize {
+    fn from(value: usize) -> Self {
         match value {
-            1 => Ok(Self::Byte),
-            2 => Ok(Self::DWord),
-            4 => Ok(Self::DWord),
-            8 => Ok(Self::QWord),
-            _ => Err(value),
+            1 => Self::Byte,
+            2 => Self::DWord,
+            4 => Self::DWord,
+            8 => Self::QWord,
+            _ => Self::Custom,
         }
     }
 }
@@ -476,6 +475,7 @@ impl TryFrom<usize> for MemSize {
 impl Display for MemSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Custom => Ok(()),
             Self::Byte => write!(f, "byte"),
             Self::Word => write!(f, "word"),
             Self::DWord => write!(f, "dword"),

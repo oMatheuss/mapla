@@ -60,6 +60,8 @@ pub enum Token<'a> {
     CloseParen,
     OpenBracket,
     CloseBracket,
+    OpenCurly,
+    CloseCurly,
     Comma,
     Colon,
     DuoColon,
