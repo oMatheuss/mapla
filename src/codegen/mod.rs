@@ -45,7 +45,7 @@ impl CodeGen {
             let copy_size = match remaining {
                 8.. => MemSize::QWord,
                 4.. => MemSize::DWord,
-                2.. => MemSize::DWord,
+                2.. => MemSize::Word,
                 1.. => MemSize::Byte,
                 _ => break,
             };
@@ -354,7 +354,7 @@ impl CodeGen {
                         asm::code!(self.code, Lea, reg, format!("[rel {label}]"));
                         self.scope.push(reg.into());
                     }
-                    IrLiteral::Byte(b) => self.scope.push(Operand::Imm(Imm::Byte(b))),
+                    IrLiteral::Char(b) => self.scope.push(Operand::Imm(Imm::Byte(b))),
                     IrLiteral::Int(i) => self.scope.push(Operand::Imm(Imm::from_i32(i))),
                     IrLiteral::Float(f) => self.scope.push(Operand::Imm(Imm::from_f32(f))),
                     IrLiteral::Bool(b) => self.scope.push(Operand::Imm(Imm::Byte(b as u8))),

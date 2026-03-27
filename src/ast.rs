@@ -70,7 +70,7 @@ impl AstSymbol {
 #[allow(unused)]
 pub enum Literal {
     String(String),
-    Byte(u8),
+    Char(u8),
     Int(i32),
     Float(f32),
     Bool(bool),

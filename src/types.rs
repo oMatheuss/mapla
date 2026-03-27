@@ -91,6 +91,8 @@ impl Type {
             (Self::Pointer(..), second) if second.is_void_ptr() => true,
             (Self::Func(..), Self::FuncPtr(..)) => true,
             (Self::Func(..), second) if second.is_void_ptr() => true,
+            (Self::Byte, Self::Char) => true,
+            (Self::Char, Self::Byte) => true,
             _ => false,
         }
     }

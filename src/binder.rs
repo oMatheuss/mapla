@@ -82,7 +82,7 @@ impl Binder {
         let first = core::mem::discriminant(&arr[0]);
         let typ = match &arr[0] {
             Literal::String(_) => Type::ptr_to(Type::Char),
-            Literal::Byte(_) => Type::Byte,
+            Literal::Char(_) => Type::Char,
             Literal::Int(_) => Type::Int,
             Literal::Float(_) => Type::Real,
             Literal::Bool(_) => Type::Bool,
@@ -116,7 +116,7 @@ impl Binder {
             for lit in arr {
                 let mut data = match lit {
                     Literal::String(_) => unreachable!(),
-                    Literal::Byte(b) => [*b as u8].to_vec(),
+                    Literal::Char(b) => [*b as u8].to_vec(),
                     Literal::Int(i) => i.to_le_bytes().to_vec(),
                     Literal::Float(f) => f.to_le_bytes().to_vec(),
                     Literal::Bool(b) => [*b as u8].to_vec(),
@@ -151,7 +151,7 @@ impl Binder {
                                 let data = BindData::Bytes(s.clone().into_bytes());
                                 self.data.insert(name, data);
                             }
-                            Literal::Byte(b) => {
+                            Literal::Char(b) => {
                                 self.data.insert(name, BindData::Bytes([*b as u8].to_vec()));
                             }
                             Literal::Int(i) => {
@@ -364,7 +364,7 @@ impl<'a> FuncBinder<'a> {
                 let typ = self.binder.bind_array(label.clone(), &arr)?;
                 IrLiteral::Array { label, typ }.into()
             }
-            Literal::Byte(b) => IrLiteral::Byte(b).into(),
+            Literal::Char(b) => IrLiteral::Char(b).into(),
             Literal::Int(i) => IrLiteral::Int(i).into(),
             Literal::Float(f) => IrLiteral::Float(f).into(),
             Literal::Bool(b) => IrLiteral::Bool(b).into(),

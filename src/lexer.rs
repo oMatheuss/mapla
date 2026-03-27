@@ -139,6 +139,64 @@ impl<'a> Lexer<'a> {
         Error::lexical("expected trailing `\"`", str_pos)
     }
 
+    fn next_char(&mut self) -> Result<Token<'a>> {
+        self.next(); // discard single quote
+        let pos = self.pos.clone();
+        let token = if let Some(ch) = self.next() {
+            if ch.len_utf8() > 1 {
+                return Error::lexical("char too large to fit into one byte", pos);
+            }
+            if ch == '\\' {
+                let Some(ch) = self.next() else {
+                    return Error::lexical("expected escape sequence", self.pos.clone());
+                };
+                let pos = self.pos.clone();
+                let ch = match ch {
+                    '0' => 0x00, // null
+                    'a' => 0x07, // bell
+                    'b' => 0x08, // backspace
+                    'e' => 0x1B, // escape character
+                    'f' => 0x0C, // formfeed
+                    'n' => 0x0A, // newline
+                    'r' => 0x0D, // carriage return
+                    't' => 0x09, // horizontal tab
+                    'v' => 0x0B, // vertival tab
+                    'x' => match (self.next(), self.next()) {
+                        (Some(ch1), Some(ch2)) => {
+                            let high_part = match ch1 {
+                                '0'..='9' => ch1 as u8 - 48,
+                                'A'..='F' => ch1 as u8 - 55,
+                                'a'..='f' => ch1 as u8 - 87,
+                                _ => return Error::lexical("invalid hex digit", pos),
+                            };
+                            let low_part = match ch2 {
+                                '0'..='9' => ch2 as u8 - 48,
+                                'A'..='F' => ch2 as u8 - 55,
+                                'a'..='f' => ch2 as u8 - 87,
+                                _ => return Error::lexical("invalid hex digit", pos),
+                            };
+                            high_part * 16 + low_part
+                        }
+                        _ => return Error::lexical("expected two digit hex number", pos),
+                    },
+                    '\\' => 0x5C, // backslash
+                    '\'' => 0x27, // apostrophe
+                    _ => return Error::lexical("invalid escape sequence", pos),
+                };
+                Token::CharLiteral(ch)
+            } else {
+                Token::CharLiteral(ch as u8)
+            }
+        } else {
+            return Error::lexical("expected character", pos);
+        };
+        let pos = self.pos.clone();
+        if !matches!(self.next(), Some('\'')) {
+            Error::lexical("expected trailing `\'`", pos)?
+        }
+        Ok(token)
+    }
+
     fn next_symbol(&mut self) -> Result<Token<'a>> {
         let first = self.next().unwrap();
         let second = self.peek();
@@ -243,6 +301,7 @@ impl<'a> Lexer<'a> {
                 'a'..='z' | 'A'..='Z' | '_' => self.next_ident(),
                 '0'..='9' => self.next_number(),
                 '"' => self.next_string(),
+                '\'' => self.next_char(),
                 _ => self.next_symbol(),
             }?;
 

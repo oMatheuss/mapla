@@ -30,6 +30,7 @@ pub enum Token<'a> {
     Struct,
     SizeOf,
     StrLiteral(&'a str),
+    CharLiteral(u8),
     IntLiteral(u32),
     FloatLiteral(f32),
     True,

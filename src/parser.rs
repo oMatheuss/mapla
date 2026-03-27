@@ -76,6 +76,7 @@ impl Parser {
     fn parse_value(&self, ts: &mut TokenStream) -> Result<Literal> {
         let expr = match self.next_or_err(ts)? {
             Token::StrLiteral(string) => self.parse_str(ts, string)?,
+            Token::CharLiteral(c) => Literal::Char(c),
             Token::IntLiteral(int) => Literal::Int(int as i32),
             Token::FloatLiteral(float) => Literal::Float(float),
             Token::Sub => match self.next_or_err(ts)? {
