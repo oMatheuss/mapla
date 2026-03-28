@@ -283,7 +283,7 @@ impl CodeGen {
                             }
                         }
                     }
-                    MemSize::Custom => {
+                    MemSize::None => {
                         let local = self.scope.set_sized_var(index, size, mem_size);
                         match val {
                             Operand::Reg(src) => {
@@ -934,24 +934,21 @@ impl CodeGen {
             }
             IrNode::Struct { typ } => {
                 let type_size = self.type_size(&typ);
-                let mut values = Vec::new();
+                let mem_size = MemSize::from(type_size);
+                let base_reg = self.regs.take_any(MemSize::QWord);
+                let base_mem = self.scope.new_sized_temp(type_size, mem_size);
+                asm::code!(self.code, Lea, base_reg, base_mem);
+                let mut offset = type_size as isize;
                 for field_type in typ.fields().rev() {
                     let value = self.scope.pop().unwrap();
-                    values.push((value, field_type));
-                }
-                let base_mem_size = MemSize::from(type_size);
-                let base_reg = self.regs.take_any(MemSize::QWord);
-                let base_mem = self.scope.new_sized_temp(type_size, base_mem_size);
-                asm::code!(self.code, Lea, base_reg, base_mem);
-                let mut offset = 0;
-                for (value, field_type) in values.into_iter().rev() {
-                    let type_size = self.type_size(&field_type.typ);
-                    let mem_size = type_size.into();
+                    let field_size = self.type_size(&field_type.typ);
+                    let mem_size = MemSize::from(field_size);
+                    offset -= field_size as isize;
                     let offset_mem = Mem::offset(base_reg, offset, mem_size);
                     match value {
                         Operand::Lbl(lbl) => {
                             let aux = self.regs.take_any(mem_size);
-                            asm::code!(self.code, Lea, aux, lbl);
+                            asm::code!(self.code, Lea, aux, Mem::lbl(lbl, lbl.mem_size()));
                             asm::code!(self.code, Mov, offset_mem, aux);
                             self.regs.push(aux);
                         }
@@ -968,7 +965,6 @@ impl CodeGen {
                             asm::code!(self.code, Movss, offset_mem, xmm);
                         }
                     }
-                    offset += type_size as isize;
                 }
                 self.regs.push(base_reg);
                 self.scope.push(base_mem);
