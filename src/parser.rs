@@ -150,7 +150,7 @@ impl Parser {
             let pos = ts.pos();
             let expr = self.parse_expr(ts, 12)?;
             Expression::sizeof(expr, pos)
-        } else if let Some(Token::Lambda) = ts.peek() {
+        } else if let Some(Token::Function) = ts.peek() {
             self.consume_lambda(ts)?
         } else {
             self.parse_atom(ts)?
@@ -542,7 +542,7 @@ impl Parser {
     }
 
     fn consume_lambda(&self, ts: &mut TokenStream) -> Result<Expression> {
-        ts.next(); // consume lambda keyword
+        ts.next(); // consume func keyword
         let pos = ts.pos();
         let (args, variadic) = self.parse_args(ts)?;
         if variadic {
